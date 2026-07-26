@@ -21,6 +21,7 @@ export default function RootLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="backup" />
             <Stack.Screen name="slots" />
+            <Stack.Screen name="goals" />
           </Stack>
         </View>
       </ThemeProvider>

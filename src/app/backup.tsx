@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 
@@ -34,7 +34,7 @@ export default function BackupScreen() {
       const fileUri = FileSystem.cacheDirectory + 'rube_remember_backup.json';
       
       await FileSystem.writeAsStringAsync(fileUri, backupStr, {
-        encoding: FileSystem.EncodingType.UTF8,
+        encoding: 'utf8',
       });
 
       if (await Sharing.isAvailableAsync()) {
@@ -57,7 +57,7 @@ export default function BackupScreen() {
   const handleImportBackup = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
+        type: '*/*',
         copyToCacheDirectory: true,
       });
 
@@ -67,8 +67,16 @@ export default function BackupScreen() {
 
       setLoading(true);
       const fileUri = result.assets[0].uri;
+      
+      // Basic extension check to guide the user if they select the wrong file
+      if (result.assets[0].name && !result.assets[0].name.toLowerCase().endsWith('.json')) {
+        setLoading(false);
+        Alert.alert('Error', 'Por favor selecciona un archivo con extensión .json');
+        return;
+      }
+
       const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.UTF8,
+        encoding: 'utf8',
       });
 
       setLoading(false);
@@ -82,14 +90,23 @@ export default function BackupScreen() {
             style: 'destructive',
             onPress: async () => {
               setLoading(true);
-              const success = await store.importBackupData(fileContent);
+              const result = await store.importBackupData(fileContent);
               setLoading(false);
-              if (success) {
-                Alert.alert('Éxito', 'La copia de seguridad se ha restaurado con éxito.', [
-                  { text: 'OK', onPress: () => router.back() }
-                ]);
+              if (result.success) {
+                if (result.errors.length > 0) {
+                  Alert.alert(
+                    'Restauración Parcial',
+                    `Se importaron con éxito: ${result.importedKeys.join(', ')}.\n\nSin embargo, ocurrieron algunos errores:\n- ${result.errors.join('\n- ')}`,
+                    [{ text: 'OK', onPress: () => router.back() }]
+                  );
+                } else {
+                  Alert.alert('Éxito', 'La copia de seguridad se ha restaurado con éxito.', [
+                    { text: 'OK', onPress: () => router.back() }
+                  ]);
+                }
               } else {
-                Alert.alert('Error', 'El archivo JSON seleccionado no es válido o está corrupto.');
+                const errorStr = result.errors.length > 0 ? `\n\nDetalles:\n- ${result.errors.join('\n- ')}` : '';
+                Alert.alert('Error', 'El archivo JSON seleccionado no es válido o no contiene datos que se puedan restaurar.' + errorStr);
               }
             },
           },
@@ -98,7 +115,8 @@ export default function BackupScreen() {
     } catch (e) {
       setLoading(false);
       console.error(e);
-      Alert.alert('Error', 'No se pudo importar la copia de seguridad.');
+      const errMsg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Error', `No se pudo importar la copia de seguridad. Detalle: ${errMsg}`);
     }
   };
 
