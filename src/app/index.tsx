@@ -1057,7 +1057,6 @@ export default function RememberDashboard() {
                   <Pressable
                     onPress={() => {
                       store.scheduleAllAlarms();
-                      Alert.alert('Éxito', 'Todas las alarmas han sido programadas en el sistema.');
                     }}
                     style={styles.globalAlarmBtn}
                   >

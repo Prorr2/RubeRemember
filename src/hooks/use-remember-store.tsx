@@ -259,6 +259,11 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   const scheduleSystemAlarm = useCallback(async (reminder: Reminder) => {
     try {
+      if (Platform.OS === 'web') {
+        Alert.alert('No Soportado', 'La programación de alarmas del sistema no está soportada en la web. Utiliza la app en un dispositivo Android o iOS.');
+        return;
+      }
+
       // Request notification permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -296,7 +301,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
             default: {},
           }),
         },
-        trigger: alarmDate,
+        trigger: { date: alarmDate },
       });
 
       // 2. Set native Android alarm (if on Android)
@@ -343,6 +348,11 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   const scheduleAllAlarms = useCallback(async () => {
     try {
+      if (Platform.OS === 'web') {
+        Alert.alert('No Soportado', 'La programación de alarmas del sistema no está soportada en la web. Utiliza la app en un dispositivo Android o iOS.');
+        return;
+      }
+
       if (reminders.length === 0) {
         Alert.alert('Sin Recordatorios', 'No tienes recordatorios en la lista para programar.');
         return;
@@ -391,7 +401,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
               default: {},
             }),
           },
-          trigger: alarmDate,
+          trigger: { date: alarmDate },
         });
 
         // 2. Set native Android alarm in the system clock app
