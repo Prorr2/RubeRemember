@@ -13,6 +13,9 @@ export interface Reminder {
   id: string;
   text: string;
   date: string; // "YYYY-MM-DD"
+  startDate?: string; // "YYYY-MM-DD"
+  endDate?: string; // "YYYY-MM-DD"
+  dates?: string[]; // array of YYYY-MM-DD strings representing highlighted days
   time: string; // "HH:MM"
   completed: boolean;
   alarmScheduled: boolean;
@@ -22,6 +25,7 @@ export interface Reminder {
   timeSlotId?: string;
   goalId?: string;
   phaseId?: string;
+  estimatedHours?: number;
 }
 
 export interface TimeSlot {
@@ -49,11 +53,24 @@ export interface Goal {
   completed?: boolean;
 }
 
+export interface ListItem {
+  id: string;
+  text: string;
+}
+
+export interface ReminderList {
+  id: string;
+  name: string;
+  items: ListItem[];
+  collapsed?: boolean;
+  createdAt: string;
+}
+
 interface RememberStore {
   reminders: Reminder[];
   loading: boolean;
-  addReminder: (text: string, dateStr: string, timeStr: string, timeSlotId?: string, goalId?: string, phaseId?: string) => Promise<void>;
-  updateReminder: (id: string, text: string, dateStr: string, timeStr: string, timeSlotId?: string, goalId?: string, phaseId?: string) => Promise<void>;
+  addReminder: (text: string, dateStr: string, timeStr: string, timeSlotId?: string, goalId?: string, phaseId?: string, dates?: string[], estimatedHours?: number) => Promise<void>;
+  updateReminder: (id: string, text: string, dateStr: string, timeStr: string, timeSlotId?: string, goalId?: string, phaseId?: string, dates?: string[], estimatedHours?: number) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   deleteCompleted: () => Promise<void>;
   toggleReminderCompleted: (id: string) => Promise<void>;
@@ -88,14 +105,42 @@ interface RememberStore {
   updatePhase: (goalId: string, phaseId: string, name: string, description: string) => Promise<void>;
   deletePhase: (goalId: string, phaseId: string) => Promise<void>;
   reorderPhases: (goalId: string, phases: Phase[]) => Promise<void>;
+  // Lists logic
+  lists: ReminderList[];
+  addList: (name: string) => Promise<void>;
+  updateList: (id: string, name: string) => Promise<void>;
+  deleteList: (id: string) => Promise<void>;
+  toggleListCollapse: (id: string) => Promise<void>;
+  addListItem: (listId: string, text: string) => Promise<void>;
+  updateListItem: (listId: string, itemId: string, text: string) => Promise<void>;
+  deleteListItem: (listId: string, itemId: string) => Promise<void>;
 }
 
 const STORAGE_KEY = 'rube_remember_reminders_v1';
 const PROXIMITY_DAYS_KEY = 'rube_remember_proximity_days_v1';
+const STORAGE_KEY_LISTS = 'rube_remember_lists_v1';
 const STORAGE_KEY_SLOTS = 'rube_remember_time_slots_v1';
 const STORAGE_KEY_SEPARATION = 'rube_remember_slot_separation_v1';
 const STORAGE_KEY_GOALS = 'rube_remember_goals_v1';
 const ALARM_CHANNEL_ID = 'rube-remember-alarms';
+
+export const getLocalDateStr = (date: Date = new Date()): string => {
+  const y = date.getFullYear();
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const d = date.getDate().toString().padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+export const getReminderActiveDate = (r: Reminder): string => {
+  if (r.endDate) {
+    return r.endDate;
+  }
+  if (r.dates && r.dates.length > 0) {
+    const sortedDates = [...r.dates].sort();
+    return sortedDates[sortedDates.length - 1];
+  }
+  return r.date || '';
+};
 
 function generateICSString(reminders: Reminder[]): string {
   const ics = [
@@ -120,18 +165,98 @@ function generateICSString(reminders: Reminder[]): string {
   };
 
   reminders.forEach((r) => {
-    const startStr = toICSTimestamp(r.date, r.time);
-    const [y, m, d] = r.date.split('-').map(Number);
-    const [h, min] = r.time.split(':').map(Number);
+    const datesToSchedule = (r.dates && r.dates.length > 0) ? r.dates : (r.date ? [r.date] : []);
+    datesToSchedule.forEach((dStr, idx) => {
+      if (!dStr) return;
+      const startStr = toICSTimestamp(dStr, r.time);
+      const [y, m, d] = dStr.split('-').map(Number);
+      const [h, min] = r.time.split(':').map(Number);
+      const endDate = new Date(y, m - 1, d, h, min + 30);
+      const endStr = `${endDate.getFullYear()}${pad(endDate.getMonth() + 1)}${pad(endDate.getDate())}T${pad(endDate.getHours())}${pad(endDate.getMinutes())}00`;
+
+      ics.push('BEGIN:VEVENT');
+      ics.push(`UID:reminder-${r.id}-${idx}@ruberemember.app`);
+      ics.push(`DTSTAMP:${nowStr()}`);
+      ics.push(`DTSTART:${startStr}`);
+      ics.push(`DTEND:${endStr}`);
+      ics.push(`SUMMARY:${r.text}`);
+      ics.push('DESCRIPTION:Recordatorio programado desde la app Rube Remember');
+      ics.push('END:VEVENT');
+    });
+  });
+
+  ics.push('END:VCALENDAR');
+  return ics.join('\r\n');
+}
+
+function generateICSCancelString(reminder: Reminder): string {
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Rube Remember//Calendar Event//ES',
+    'CALSCALE:GREGORIAN',
+    'METHOD:CANCEL'
+  ];
+
+  const pad = (n: number) => n.toString().padStart(2, '0');
+
+  const nowStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  };
+
+  const datesToSchedule = (reminder.dates && reminder.dates.length > 0) ? reminder.dates : (reminder.date ? [reminder.date] : []);
+  datesToSchedule.forEach((dStr, idx) => {
+    if (!dStr) return;
+    ics.push('BEGIN:VEVENT');
+    ics.push(`UID:reminder-${reminder.id}-${idx}@ruberemember.app`);
+    ics.push(`DTSTAMP:${nowStr()}`);
+    ics.push(`STATUS:CANCELLED`);
+    ics.push(`SUMMARY:${reminder.text}`);
+    ics.push('END:VEVENT');
+  });
+
+  ics.push('END:VCALENDAR');
+  return ics.join('\r\n');
+}
+
+function generateICSStringForReminder(reminder: Reminder): string {
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Rube Remember//Calendar Event//ES',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH'
+  ];
+
+  const pad = (n: number) => n.toString().padStart(2, '0');
+
+  const toICSTimestamp = (dateStr: string, timeStr: string): string => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const [h, min] = timeStr.split(':').map(Number);
+    return `${y}${pad(m)}${pad(d)}T${pad(h)}${pad(min)}00`;
+  };
+
+  const nowStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  };
+
+  const datesToSchedule = (reminder.dates && reminder.dates.length > 0) ? reminder.dates : (reminder.date ? [reminder.date] : []);
+  datesToSchedule.forEach((dStr, idx) => {
+    if (!dStr) return;
+    const startStr = toICSTimestamp(dStr, reminder.time);
+    const [y, m, d] = dStr.split('-').map(Number);
+    const [h, min] = reminder.time.split(':').map(Number);
     const endDate = new Date(y, m - 1, d, h, min + 30);
     const endStr = `${endDate.getFullYear()}${pad(endDate.getMonth() + 1)}${pad(endDate.getDate())}T${pad(endDate.getHours())}${pad(endDate.getMinutes())}00`;
 
     ics.push('BEGIN:VEVENT');
-    ics.push(`UID:reminder-${r.id}@ruberemember.app`);
+    ics.push(`UID:reminder-${reminder.id}-${idx}@ruberemember.app`);
     ics.push(`DTSTAMP:${nowStr()}`);
     ics.push(`DTSTART:${startStr}`);
     ics.push(`DTEND:${endStr}`);
-    ics.push(`SUMMARY:${r.text}`);
+    ics.push(`SUMMARY:${reminder.text}`);
     ics.push('DESCRIPTION:Recordatorio programado desde la app Rube Remember');
     ics.push('END:VEVENT');
   });
@@ -147,10 +272,11 @@ function recalculateSlotTimes(
 ): Reminder[] {
   const groupedByDate: Record<string, Reminder[]> = {};
   items.forEach((item) => {
-    if (!groupedByDate[item.date]) {
-      groupedByDate[item.date] = [];
+    const activeDate = getReminderActiveDate(item);
+    if (!groupedByDate[activeDate]) {
+      groupedByDate[activeDate] = [];
     }
-    groupedByDate[item.date].push(item);
+    groupedByDate[activeDate].push(item);
   });
 
   return items.map((item) => {
@@ -161,7 +287,8 @@ function recalculateSlotTimes(
       return { ...item, timeSlotId: undefined };
     }
 
-    const dayReminders = (groupedByDate[item.date] || [])
+    const activeDate = getReminderActiveDate(item);
+    const dayReminders = (groupedByDate[activeDate] || [])
       .filter((r) => r.timeSlotId === item.timeSlotId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
@@ -191,6 +318,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   ]);
   const [slotSeparationMinutes, setSlotSeparationMinutesState] = useState<number>(30);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [lists, setLists] = useState<ReminderList[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Initialize notifications handler
@@ -242,6 +370,10 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         if (storedGoals) {
           setGoals(JSON.parse(storedGoals));
         }
+        const storedLists = await AsyncStorage.getItem(STORAGE_KEY_LISTS);
+        if (storedLists) {
+          setLists(JSON.parse(storedLists));
+        }
       } catch (e) {
         console.error('Error loading reminders/settings:', e);
       } finally {
@@ -265,28 +397,126 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     }
   }, [timeSlots, slotSeparationMinutes]);
 
+  const syncCalendarAndAlarms = useCallback(async (reminder: Reminder, isDelete: boolean = false) => {
+    try {
+      // 1. Cancel notifications
+      await Notifications.cancelScheduledNotificationAsync(reminder.id).catch(() => {});
+      if (reminder.dates) {
+        for (const d of reminder.dates) {
+          await Notifications.cancelScheduledNotificationAsync(`${reminder.id}_${d}`).catch(() => {});
+        }
+      }
+
+      if (isDelete || reminder.completed) {
+        return;
+      }
+
+      // 2. Schedule new notifications
+      const datesToSchedule = (reminder.dates && reminder.dates.length > 0)
+        ? reminder.dates
+        : (reminder.date ? [reminder.date] : []);
+
+      let hasScheduledAtLeastOne = false;
+      for (const dStr of datesToSchedule) {
+        const [year, month, day] = dStr.split('-').map(Number);
+        const [hour, minute] = reminder.time.split(':').map(Number);
+        const alarmDate = new Date(year, month - 1, day, hour, minute, 0);
+
+        if (alarmDate.getTime() <= Date.now()) {
+          continue;
+        }
+
+        const notifId = datesToSchedule.length === 1 ? reminder.id : `${reminder.id}_${dStr}`;
+        try {
+          await Notifications.scheduleNotificationAsync({
+            identifier: notifId,
+            content: {
+              title: '🔔 Rube Remember: Recordatorio',
+              body: reminder.text,
+              sound: Platform.OS === 'android' ? 'alarm' : 'alarm.mp3',
+              vibrate: [0, 500, 250, 500],
+              ...Platform.select({
+                android: { channelId: ALARM_CHANNEL_ID },
+                default: {},
+              }),
+            },
+            trigger: { date: alarmDate, type: 'date' as any },
+          });
+          hasScheduledAtLeastOne = true;
+        } catch (notificationError) {
+          console.warn('Local Notification Error:', notificationError);
+        }
+      }
+
+      // 3. Open system calendar editor screen
+      if (datesToSchedule.length > 0 && (Platform.OS === 'android' || Platform.OS === 'ios')) {
+        const icsString = generateICSStringForReminder(reminder);
+        const FileSystem = require('expo-file-system/legacy');
+        const fileUri = FileSystem.cacheDirectory + 'rube_remember_reminder_events.ics';
+        await FileSystem.writeAsStringAsync(fileUri, icsString, { encoding: 'utf8' });
+
+        if (Platform.OS === 'android') {
+          try {
+            const IntentLauncher = require('expo-intent-launcher');
+            const contentUri = await FileSystem.getContentUriAsync(fileUri);
+            await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+              data: contentUri,
+              type: 'text/calendar',
+              flags: 1,
+            });
+          } catch (intentErr) {
+            console.warn('IntentLauncher add/edit VIEW error, falling back to Share:', intentErr);
+            const Sharing = require('expo-sharing');
+            if (await Sharing.isAvailableAsync()) {
+              await Sharing.shareAsync(fileUri);
+            }
+          }
+        } else if (Platform.OS === 'ios') {
+          const Sharing = require('expo-sharing');
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(fileUri);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error in syncCalendarAndAlarms:', e);
+    }
+  }, []);
+
   const addReminder = useCallback(async (
     text: string,
     dateStr: string,
     timeStr: string,
     timeSlotId?: string,
     goalId?: string,
-    phaseId?: string
+    phaseId?: string,
+    dates?: string[],
+    estimatedHours?: number
   ) => {
+    let finalDates = dates || (dateStr ? [dateStr] : []);
+    finalDates = [...new Set(finalDates)].sort();
+    const startDate = finalDates[0] || '';
+    const endDate = finalDates[finalDates.length - 1] || '';
+
     const newReminder: Reminder = {
       id: Math.random().toString(36).substring(7),
       text: text.trim(),
       date: dateStr,
+      startDate,
+      endDate,
+      dates: finalDates,
       time: timeStr,
       completed: false,
-      alarmScheduled: false,
+      alarmScheduled: true,
       createdAt: new Date().toISOString(),
       timeSlotId,
       goalId,
       phaseId,
+      estimatedHours,
     };
     await saveReminders([...reminders, newReminder]);
-  }, [reminders, saveReminders]);
+    await syncCalendarAndAlarms(newReminder);
+  }, [reminders, saveReminders, syncCalendarAndAlarms]);
 
   const updateReminder = useCallback(async (
     id: string,
@@ -295,46 +525,65 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     timeStr: string,
     timeSlotId?: string,
     goalId?: string,
-    phaseId?: string
+    phaseId?: string,
+    dates?: string[],
+    estimatedHours?: number
   ) => {
+    let finalDates = dates || (dateStr ? [dateStr] : []);
+    finalDates = [...new Set(finalDates)].sort();
+    const startDate = finalDates[0] || '';
+    const endDate = finalDates[finalDates.length - 1] || '';
+
+    let updatedReminder: Reminder | null = null;
     const updated = reminders.map((r) => {
       if (r.id === id) {
-        return {
+        updatedReminder = {
           ...r,
           text: text.trim(),
           date: dateStr,
+          startDate,
+          endDate,
+          dates: finalDates,
           time: timeStr,
           timeSlotId,
           goalId,
           phaseId,
-          alarmScheduled: false
+          alarmScheduled: true,
+          estimatedHours,
         };
+        return updatedReminder;
       }
       return r;
     });
     await saveReminders(updated);
-  }, [reminders, saveReminders]);
+    if (updatedReminder) {
+      await syncCalendarAndAlarms(updatedReminder);
+    }
+  }, [reminders, saveReminders, syncCalendarAndAlarms]);
 
   const deleteReminder = useCallback(async (id: string) => {
-    // Cancel associated notification if scheduled
-    try {
-      await Notifications.cancelScheduledNotificationAsync(id);
-    } catch (e) {
-      // Ignored
+    const reminder = reminders.find(r => r.id === id);
+    if (reminder) {
+      await syncCalendarAndAlarms(reminder, true);
     }
     const updated = reminders.filter((r) => r.id !== id);
     await saveReminders(updated);
-  }, [reminders]);
+  }, [reminders, saveReminders, syncCalendarAndAlarms]);
 
   const toggleReminderCompleted = useCallback(async (id: string) => {
+    let updatedReminder: Reminder | null = null;
     const updated = reminders.map((r) => {
       if (r.id === id) {
-        return { ...r, completed: !r.completed };
+        updatedReminder = { ...r, completed: !r.completed };
+        return updatedReminder;
       }
       return r;
     });
     await saveReminders(updated);
-  }, [reminders]);
+    if (updatedReminder) {
+      await syncCalendarAndAlarms(updatedReminder, (updatedReminder as Reminder).completed);
+    }
+  }, [reminders, saveReminders, syncCalendarAndAlarms]);
 
   const toggleReminderPinned = useCallback(async (id: string) => {
     const updated = reminders.map((r) => {
@@ -375,48 +624,84 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         return;
       }
 
-      // Parse date and time
-      const [year, month, day] = reminder.date.split('-').map(Number);
-      const [hour, minute] = reminder.time.split(':').map(Number);
-      const alarmDate = new Date(year, month - 1, day, hour, minute, 0);
+      const datesToSchedule = (reminder.dates && reminder.dates.length > 0)
+        ? reminder.dates
+        : (reminder.date ? [reminder.date] : []);
 
-      if (alarmDate.getTime() <= Date.now()) {
+      if (datesToSchedule.length === 0) {
+        Alert.alert('Sin fecha', 'Este recordatorio no tiene fechas programadas.');
+        return;
+      }
+
+      // Cancel existing ones first
+      await Notifications.cancelScheduledNotificationAsync(reminder.id).catch(() => {});
+      if (reminder.dates) {
+        for (const d of reminder.dates) {
+          await Notifications.cancelScheduledNotificationAsync(`${reminder.id}_${d}`).catch(() => {});
+        }
+      }
+
+      let hasScheduledAtLeastOne = false;
+
+      for (const dStr of datesToSchedule) {
+        const [year, month, day] = dStr.split('-').map(Number);
+        const [hour, minute] = reminder.time.split(':').map(Number);
+        const alarmDate = new Date(year, month - 1, day, hour, minute, 0);
+
+        if (alarmDate.getTime() <= Date.now()) {
+          continue;
+        }
+
+        const notifId = datesToSchedule.length === 1 ? reminder.id : `${reminder.id}_${dStr}`;
+        try {
+          await Notifications.scheduleNotificationAsync({
+            identifier: notifId,
+            content: {
+              title: '🔔 Rube Remember: Recordatorio',
+              body: reminder.text,
+              sound: Platform.OS === 'android' ? 'alarm' : 'alarm.mp3',
+              vibrate: [0, 500, 250, 500],
+              ...Platform.select({
+                android: { channelId: ALARM_CHANNEL_ID },
+                default: {},
+              }),
+            },
+            trigger: { date: alarmDate, type: 'date' as any },
+          });
+          hasScheduledAtLeastOne = true;
+        } catch (notificationError) {
+          console.warn('Local Notification Error:', notificationError);
+        }
+      }
+
+      if (!hasScheduledAtLeastOne) {
         Alert.alert('Fecha Invalida', 'No se puede programar una alarma para una hora o fecha en el pasado.');
         return;
       }
 
-      // 1. Set local app notification (Cross-platform)
-      try {
-        await Notifications.cancelScheduledNotificationAsync(reminder.id).catch(() => {});
-        await Notifications.scheduleNotificationAsync({
-          identifier: reminder.id,
-          content: {
-            title: '🔔 Rube Remember: Recordatorio',
-            body: reminder.text,
-            sound: Platform.OS === 'android' ? 'alarm' : 'alarm.mp3',
-            vibrate: [0, 500, 250, 500],
-            ...Platform.select({
-              android: { channelId: ALARM_CHANNEL_ID },
-              default: {},
-            }),
-          },
-          trigger: { date: alarmDate },
-        });
-      } catch (notificationError) {
-        console.warn('Local Notification Error:', notificationError);
-      }
-
-      // 2. Open Calendar Event Creation Screen
+      // 2. Open Calendar Event Creation Screen (for the first upcoming date)
       if (Platform.OS === 'android' || Platform.OS === 'ios') {
-        const toUTCBasicString = (date: Date) => {
-          const pad = (num: number) => num.toString().padStart(2, '0');
-          return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}00Z`;
-        };
-        const endDate = new Date(alarmDate.getTime() + 30 * 60 * 1000);
-        const datesParam = `${toUTCBasicString(alarmDate)}/${toUTCBasicString(endDate)}`;
-        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(reminder.text)}&dates=${datesParam}&details=${encodeURIComponent('Recordatorio de Rube Remember')}`;
-        
-        await Linking.openURL(gcalUrl);
+        const upcomingDates = datesToSchedule
+          .map(dStr => {
+            const [year, month, day] = dStr.split('-').map(Number);
+            const [hour, minute] = reminder.time.split(':').map(Number);
+            return new Date(year, month - 1, day, hour, minute, 0);
+          })
+          .filter(date => date.getTime() > Date.now())
+          .sort((a, b) => a.getTime() - b.getTime());
+
+        if (upcomingDates.length > 0) {
+          const firstUpcoming = upcomingDates[0];
+          const toUTCBasicString = (date: Date) => {
+            const pad = (num: number) => num.toString().padStart(2, '0');
+            return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}00Z`;
+          };
+          const endDate = new Date(firstUpcoming.getTime() + 30 * 60 * 1000);
+          const datesParam = `${toUTCBasicString(firstUpcoming)}/${toUTCBasicString(endDate)}`;
+          const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(reminder.text)}&dates=${datesParam}&details=${encodeURIComponent('Recordatorio de Rube Remember')}`;
+          
+          await Linking.openURL(gcalUrl);
+        }
       }
 
       // Update state
@@ -429,9 +714,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       await saveReminders(updated);
     } catch (e) {
       console.error('Error scheduling alarm:', e);
-      Alert.alert('Error', 'No se pudo abrir el calendario del sistema.');
+      Alert.alert('Error', `No se pudo abrir el calendario del sistema. Detalle: ${e instanceof Error ? e.message : String(e)}`);
     }
-  }, [reminders]);
+  }, [reminders, saveReminders]);
 
   const scheduleAllAlarms = useCallback(async () => {
     try {
@@ -459,45 +744,66 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       }
 
       let scheduledCount = 0;
-      let pastCount = 0;
       const updated: Reminder[] = [];
       const validForCalendar: Reminder[] = [];
 
       for (const reminder of reminders) {
-        const [year, month, day] = reminder.date.split('-').map(Number);
-        const [hour, minute] = reminder.time.split(':').map(Number);
-        const alarmDate = new Date(year, month - 1, day, hour, minute, 0);
+        const datesToSchedule = (reminder.dates && reminder.dates.length > 0)
+          ? reminder.dates
+          : (reminder.date ? [reminder.date] : []);
 
-        if (alarmDate.getTime() <= Date.now()) {
-          pastCount++;
+        if (datesToSchedule.length === 0) {
           updated.push(reminder);
           continue;
         }
 
-        // Set local app notification
-        try {
-          await Notifications.cancelScheduledNotificationAsync(reminder.id).catch(() => {});
-          await Notifications.scheduleNotificationAsync({
-            identifier: reminder.id,
-            content: {
-              title: '🔔 Rube Remember: Recordatorio',
-              body: reminder.text,
-              sound: Platform.OS === 'android' ? 'alarm' : 'alarm.mp3',
-              vibrate: [0, 500, 250, 500],
-              ...Platform.select({
-                android: { channelId: ALARM_CHANNEL_ID },
-                default: {},
-              }),
-            },
-            trigger: { date: alarmDate },
-          });
-        } catch (notificationError) {
-          console.warn('Local Notification Error:', notificationError);
+        // Cancel existing ones
+        await Notifications.cancelScheduledNotificationAsync(reminder.id).catch(() => {});
+        if (reminder.dates) {
+          for (const d of reminder.dates) {
+            await Notifications.cancelScheduledNotificationAsync(`${reminder.id}_${d}`).catch(() => {});
+          }
         }
 
-        scheduledCount++;
-        validForCalendar.push(reminder);
-        updated.push({ ...reminder, alarmScheduled: true });
+        let hasScheduledForReminder = false;
+        for (const dStr of datesToSchedule) {
+          const [year, month, day] = dStr.split('-').map(Number);
+          const [hour, minute] = reminder.time.split(':').map(Number);
+          const alarmDate = new Date(year, month - 1, day, hour, minute, 0);
+
+          if (alarmDate.getTime() <= Date.now()) {
+            continue;
+          }
+
+          const notifId = datesToSchedule.length === 1 ? reminder.id : `${reminder.id}_${dStr}`;
+          try {
+            await Notifications.scheduleNotificationAsync({
+              identifier: notifId,
+              content: {
+                title: '🔔 Rube Remember: Recordatorio',
+                body: reminder.text,
+                sound: Platform.OS === 'android' ? 'alarm' : 'alarm.mp3',
+                vibrate: [0, 500, 250, 500],
+                ...Platform.select({
+                  android: { channelId: ALARM_CHANNEL_ID },
+                  default: {},
+                }),
+              },
+              trigger: { date: alarmDate, type: 'date' as any },
+            });
+            hasScheduledForReminder = true;
+          } catch (notificationError) {
+            console.warn('Local Notification Error:', notificationError);
+          }
+        }
+
+        if (hasScheduledForReminder) {
+          scheduledCount++;
+          validForCalendar.push(reminder);
+          updated.push({ ...reminder, alarmScheduled: true });
+        } else {
+          updated.push(reminder);
+        }
       }
 
       // Generate and share .ics file
@@ -543,13 +849,11 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       }
 
       await saveReminders(updated);
-
-
     } catch (e) {
       console.error('Error scheduling all alarms:', e);
-      Alert.alert('Error', 'No se pudieron programar todos los eventos en el calendario.');
+      Alert.alert('Error', `No se pudieron programar todos los eventos en el calendario. Detalle: ${e instanceof Error ? e.message : String(e)}`);
     }
-  }, [reminders]);
+  }, [reminders, saveReminders]);
 
   const addComment = useCallback(async (reminderId: string, text: string) => {
     if (!text.trim()) return;
@@ -600,12 +904,14 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     const storedSlots = await AsyncStorage.getItem(STORAGE_KEY_SLOTS);
     const storedSep = await AsyncStorage.getItem(STORAGE_KEY_SEPARATION);
     const storedGoals = await AsyncStorage.getItem(STORAGE_KEY_GOALS);
+    const storedLists = await AsyncStorage.getItem(STORAGE_KEY_LISTS);
     const data = {
       [STORAGE_KEY]: val ? JSON.parse(val) : [],
       [PROXIMITY_DAYS_KEY]: storedDays ? parseInt(storedDays, 10) : 20,
       [STORAGE_KEY_SLOTS]: storedSlots ? JSON.parse(storedSlots) : [],
       [STORAGE_KEY_SEPARATION]: storedSep ? parseInt(storedSep, 10) : 30,
       [STORAGE_KEY_GOALS]: storedGoals ? JSON.parse(storedGoals) : [],
+      [STORAGE_KEY_LISTS]: storedLists ? JSON.parse(storedLists) : [],
     };
     return JSON.stringify(data, null, 2);
   }, []);
@@ -727,6 +1033,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
                 timeSlotId: r.timeSlotId ? String(r.timeSlotId) : undefined,
                 goalId: r.goalId ? String(r.goalId) : undefined,
                 phaseId: r.phaseId ? String(r.phaseId) : undefined,
+                startDate: r.startDate ? String(r.startDate) : undefined,
+                endDate: r.endDate ? String(r.endDate) : undefined,
+                dates: Array.isArray(r.dates) ? r.dates.map(String) : [],
               });
             } else {
               errors.push(`Recordatorio en posición ${idx + 1} no es válido.`);
@@ -781,6 +1090,48 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       }
     }
 
+    // 6. Lists
+    if (STORAGE_KEY_LISTS in parsed) {
+      try {
+        const listsData = parsed[STORAGE_KEY_LISTS];
+        if (Array.isArray(listsData)) {
+          const validLists: ReminderList[] = [];
+          listsData.forEach((l, idx) => {
+            if (l && typeof l === 'object' && l.id && l.name && Array.isArray(l.items)) {
+              const validItems: ListItem[] = [];
+              l.items.forEach((item: any, itemIdx: number) => {
+                if (item && typeof item === 'object' && item.id && item.text) {
+                  validItems.push({
+                    id: String(item.id),
+                    text: String(item.text),
+                  });
+                } else {
+                  errors.push(`Elemento en la posición ${itemIdx + 1} de la lista "${l.name}" no es válido.`);
+                }
+              });
+
+              validLists.push({
+                id: String(l.id),
+                name: String(l.name),
+                items: validItems,
+                collapsed: !!l.collapsed,
+                createdAt: l.createdAt ? String(l.createdAt) : new Date().toISOString(),
+              });
+            } else {
+              errors.push(`Lista en posición ${idx + 1} no es válida.`);
+            }
+          });
+          if (validLists.length > 0) {
+            setLists(validLists);
+            await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(validLists));
+            importedKeys.push('Listas');
+          }
+        }
+      } catch (e: any) {
+        errors.push(`Error al importar listas: ${e.message}`);
+      }
+    }
+
     return {
       success: importedKeys.length > 0,
       errors,
@@ -793,6 +1144,11 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     for (const item of completedList) {
       try {
         await Notifications.cancelScheduledNotificationAsync(item.id);
+        if (item.dates) {
+          for (const d of item.dates) {
+            await Notifications.cancelScheduledNotificationAsync(`${item.id}_${d}`).catch(() => {});
+          }
+        }
       } catch (e) {
         // Ignored
       }
@@ -803,6 +1159,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   const clearAll = useCallback(async () => {
     await saveReminders([]);
+    setLists([]);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, '[]');
     await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
   }, []);
 
@@ -975,6 +1333,93 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await AsyncStorage.setItem(STORAGE_KEY_GOALS, JSON.stringify(updated));
   }, [goals]);
 
+  // ── Lists CRUD ─────────────────────────────────────────────────────────────
+
+  const addList = useCallback(async (name: string) => {
+    const newList: ReminderList = {
+      id: `list-${Math.random().toString(36).substring(7)}`,
+      name: name.trim(),
+      items: [],
+      collapsed: false,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...lists, newList];
+    setLists(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(updated));
+  }, [lists]);
+
+  const updateList = useCallback(async (id: string, name: string) => {
+    const updated = lists.map((l) => {
+      if (l.id === id) {
+        return { ...l, name: name.trim() };
+      }
+      return l;
+    });
+    setLists(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(updated));
+  }, [lists]);
+
+  const deleteList = useCallback(async (id: string) => {
+    const updated = lists.filter((l) => l.id !== id);
+    setLists(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(updated));
+  }, [lists]);
+
+  const toggleListCollapse = useCallback(async (id: string) => {
+    const updated = lists.map((l) => {
+      if (l.id === id) {
+        return { ...l, collapsed: !l.collapsed };
+      }
+      return l;
+    });
+    setLists(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(updated));
+  }, [lists]);
+
+  const addListItem = useCallback(async (listId: string, text: string) => {
+    const updated = lists.map((l) => {
+      if (l.id === listId) {
+        const newItem: ListItem = {
+          id: `item-${Math.random().toString(36).substring(7)}`,
+          text: text.trim(),
+        };
+        return { ...l, items: [...l.items, newItem] };
+      }
+      return l;
+    });
+    setLists(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(updated));
+  }, [lists]);
+
+  const updateListItem = useCallback(async (listId: string, itemId: string, text: string) => {
+    const updated = lists.map((l) => {
+      if (l.id === listId) {
+        const updatedItems = l.items.map((it) => {
+          if (it.id === itemId) {
+            return { ...it, text: text.trim() };
+          }
+          return it;
+        });
+        return { ...l, items: updatedItems };
+      }
+      return l;
+    });
+    setLists(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(updated));
+  }, [lists]);
+
+  const deleteListItem = useCallback(async (listId: string, itemId: string) => {
+    const updated = lists.map((l) => {
+      if (l.id === listId) {
+        const filteredItems = l.items.filter((it) => it.id !== itemId);
+        return { ...l, items: filteredItems };
+      }
+      return l;
+    });
+    setLists(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_LISTS, JSON.stringify(updated));
+  }, [lists]);
+
   return (
     <RememberStoreContext.Provider
       value={{
@@ -1011,6 +1456,14 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         updatePhase,
         deletePhase,
         reorderPhases,
+        lists,
+        addList,
+        updateList,
+        deleteList,
+        toggleListCollapse,
+        addListItem,
+        updateListItem,
+        deleteListItem,
       }}
     >
       {children}

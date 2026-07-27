@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -19,12 +19,31 @@ import {
   Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import { useRememberStore, Reminder, Comment } from '@/hooks/use-remember-store';
+import { useRememberStore, Reminder, Comment, getReminderActiveDate, getLocalDateStr } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 
-const ReminderBubbleText = ({ item, onEditPress }: { item: Reminder; onEditPress: (item: Reminder) => void }) => {
+const formatDisplayDate = (dateStr: string): string => {
+  if (!dateStr) return 'Sin fecha';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+const getDatesDisplayString = (r: Reminder): string => {
+  if (r.dates && r.dates.length > 0) {
+    if (r.dates.length === 1) {
+      return formatDisplayDate(r.dates[0]);
+    }
+    const sorted = [...r.dates].sort();
+    const start = formatDisplayDate(sorted[0]);
+    const end = formatDisplayDate(sorted[sorted.length - 1]);
+    return `${start} a ${end} (${r.dates.length} días)`;
+  }
+  return r.date ? formatDisplayDate(r.date) : '';
+};
+
+const ReminderBubbleText = ({ item, onEditPress, zoomScale = 0.9 }: { item: Reminder; onEditPress: (item: Reminder) => void; zoomScale?: number }) => {
   const store = useRememberStore();
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
@@ -38,35 +57,78 @@ const ReminderBubbleText = ({ item, onEditPress }: { item: Reminder; onEditPress
       <Text
         style={[
           styles.reminderText,
-          { color: colors.text },
+          { color: colors.text, fontSize: 15 * zoomScale, lineHeight: 22 * zoomScale },
           item.completed && { textDecorationLine: 'line-through', opacity: 0.6 },
         ]}
       >
         {item.text}
       </Text>
       {goal && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 * zoomScale, marginTop: 8 * zoomScale }}>
           <View
             style={{
               flexDirection: 'row',
               alignItems: 'center',
               backgroundColor: 'rgba(255, 45, 85, 0.12)',
-              paddingVertical: 3,
-              paddingHorizontal: 8,
-              borderRadius: 12,
+              paddingVertical: 3 * zoomScale,
+              paddingHorizontal: 8 * zoomScale,
+              borderRadius: 12 * zoomScale,
               borderWidth: 0.5,
               borderColor: 'rgba(255, 45, 85, 0.3)',
-              gap: 4,
+              gap: 4 * zoomScale,
             }}
           >
-            <Text style={{ color: '#FF2D55', fontSize: 10, fontWeight: '700' }}>🎯 {goal.title}</Text>
+            <Text style={{ color: '#FF2D55', fontSize: 10 * zoomScale, fontWeight: '700' }}>🎯 {goal.title}</Text>
             {phase && (
               <>
-                <Text style={{ color: 'rgba(255, 45, 85, 0.5)', fontSize: 10 }}>·</Text>
-                <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '600' }}>⚡ {phase.name}</Text>
+                <Text style={{ color: 'rgba(255, 45, 85, 0.5)', fontSize: 10 * zoomScale }}>·</Text>
+                <Text style={{ color: '#FF9500', fontSize: 10 * zoomScale, fontWeight: '600' }}>⚡ {phase.name}</Text>
               </>
             )}
           </View>
+        </View>
+      )}
+      {((item.dates && item.dates.length > 0) || item.date) && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 * zoomScale, marginTop: goal ? 4 * zoomScale : 8 * zoomScale }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: 'rgba(255, 149, 0, 0.12)',
+              paddingVertical: 3 * zoomScale,
+              paddingHorizontal: 8 * zoomScale,
+              borderRadius: 12 * zoomScale,
+              borderWidth: 0.5,
+              borderColor: 'rgba(255, 149, 0, 0.3)',
+              gap: 4 * zoomScale,
+            }}
+          >
+            <Ionicons name="calendar-outline" size={10 * zoomScale} color="#FF9500" />
+            <Text style={{ color: '#FF9500', fontSize: 10 * zoomScale, fontWeight: '700' }}>
+              {getDatesDisplayString(item)}
+            </Text>
+          </View>
+
+          {item.estimatedHours !== undefined && item.estimatedHours > 0 && (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: 'rgba(255, 59, 48, 0.12)',
+                paddingVertical: 3 * zoomScale,
+                paddingHorizontal: 8 * zoomScale,
+                borderRadius: 12 * zoomScale,
+                borderWidth: 0.5,
+                borderColor: 'rgba(255, 59, 48, 0.3)',
+                gap: 4 * zoomScale,
+              }}
+            >
+              <Ionicons name="time-outline" size={10 * zoomScale} color="#FF3B30" />
+              <Text style={{ color: '#FF3B30', fontSize: 10 * zoomScale, fontWeight: '700' }}>
+                {item.estimatedHours} {item.estimatedHours === 1 ? 'hora' : 'horas'}
+              </Text>
+            </View>
+          )}
         </View>
       )}
     </Pressable>
@@ -76,14 +138,26 @@ const ReminderBubbleText = ({ item, onEditPress }: { item: Reminder; onEditPress
 export default function RememberDashboard() {
   const store = useRememberStore();
   const router = useRouter();
+  const params = useLocalSearchParams<{ highlightReminderId?: string }>();
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
   const colors = Colors[scheme];
 
   // Component States
   const [inputText, setInputText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [timelineProximityDays, setTimelineProximityDays] = useState(30);
   const [highlightedReminderId, setHighlightedReminderId] = useState<string | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | undefined>(undefined);
+
+  // Lists Screen States
+  const [activeTab, setActiveTab] = useState<'reminders' | 'lists'>('reminders');
+  const [newListName, setNewListName] = useState('');
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [editingListName, setEditingListName] = useState('');
+  const [editingItemId, setEditingItemId] = useState<{ listId: string; itemId: string } | null>(null);
+  const [editingItemText, setEditingItemText] = useState('');
+  const [newItemTexts, setNewItemTexts] = useState<Record<string, string>>({});
 
   // Comments States
   const [expandedReminders, setExpandedReminders] = useState<Record<string, boolean>>({});
@@ -104,7 +178,29 @@ export default function RememberDashboard() {
 
   // States for Date/Time picker selection
   const [chosenDate, setChosenDate] = useState(''); // "YYYY-MM-DD"
+  const [chosenDates, setChosenDates] = useState<string[]>([]);
   const [chosenHour, setChosenHour] = useState(12);
+  const [chosenHoursToComplete, setChosenHoursToComplete] = useState('');
+
+  const handleToggleDate = (dateStr: string) => {
+    setChosenDates((prev) => {
+      let nextDates: string[];
+      if (prev.includes(dateStr)) {
+        if (prev.length > 1) {
+          nextDates = prev.filter((d) => d !== dateStr);
+        } else {
+          nextDates = prev;
+        }
+      } else {
+        nextDates = [...prev, dateStr];
+      }
+      nextDates.sort();
+      if (nextDates.length > 0) {
+        setChosenDate(nextDates[0]);
+      }
+      return nextDates;
+    });
+  };
   const [chosenMinute, setChosenMinute] = useState(0);
   const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>(undefined);
   const [selectedPhaseId, setSelectedPhaseId] = useState<string | undefined>(undefined);
@@ -114,9 +210,9 @@ export default function RememberDashboard() {
 
   const flatListRef = useRef<any>(null);
   // Split Pane Slider Height
-  const headerHeightAnim = useRef(new Animated.Value(320)).current;
-  const currentHeight = useRef(320);
-  const startHeight = useRef(320);
+  const headerHeightAnim = useRef(new Animated.Value(450)).current;
+  const currentHeight = useRef(450);
+  const startHeight = useRef(450);
   const [isMinimized, setIsMinimized] = useState(false);
 
   useEffect(() => {
@@ -129,7 +225,7 @@ export default function RememberDashboard() {
   }, []);
 
   const handleToggleHeader = () => {
-    const targetVal = isMinimized ? 320 : 50;
+    const targetVal = isMinimized ? 450 : 50;
     Animated.spring(headerHeightAnim, {
       toValue: targetVal,
       useNativeDriver: false,
@@ -147,16 +243,64 @@ export default function RememberDashboard() {
       },
       onPanResponderMove: (evt, gestureState) => {
         const newHeight = startHeight.current + gestureState.dy;
-        headerHeightAnim.setValue(Math.max(50, Math.min(320, newHeight)));
+        headerHeightAnim.setValue(Math.max(50, Math.min(450, newHeight)));
       },
       onPanResponderRelease: (evt, gestureState) => {
-        const targetVal = (startHeight.current + gestureState.dy) < 185 ? 50 : 320;
+        const targetVal = (startHeight.current + gestureState.dy) < 250 ? 50 : 450;
         Animated.spring(headerHeightAnim, {
           toValue: targetVal,
           useNativeDriver: false,
         }).start(() => {
           setIsMinimized(targetVal === 50);
         });
+      },
+    })
+  ).current;
+
+  const [zoomScale, setZoomScale] = useState(0.9);
+  const pinchRef = useRef({
+    initialDistance: 0,
+    initialScale: 0.9,
+  });
+
+  const pinchPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt) => {
+        return evt.nativeEvent.touches && evt.nativeEvent.touches.length === 2;
+      },
+      onPanResponderGrant: (evt) => {
+        const touches = evt.nativeEvent.touches;
+        if (touches && touches.length === 2) {
+          const dx = touches[0].pageX - touches[1].pageX;
+          const dy = touches[0].pageY - touches[1].pageY;
+          pinchRef.current.initialDistance = Math.sqrt(dx * dx + dy * dy);
+          pinchRef.current.initialScale = zoomScale;
+        }
+      },
+      onPanResponderMove: (evt) => {
+        const touches = evt.nativeEvent.touches;
+        if (touches && touches.length === 2) {
+          const dx = touches[0].pageX - touches[1].pageX;
+          const dy = touches[0].pageY - touches[1].pageY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const initialDist = pinchRef.current.initialDistance;
+          if (initialDist > 0) {
+            const ratio = dist / initialDist;
+            let nextScale = pinchRef.current.initialScale * ratio;
+            // Maximum zoom in is 0.9 (slightly smaller default)
+            if (nextScale > 0.9) nextScale = 0.9;
+            // Minimum zoom out is 0.55
+            if (nextScale < 0.55) nextScale = 0.55;
+            setZoomScale(nextScale);
+          }
+        }
+      },
+      onPanResponderRelease: () => {
+        pinchRef.current.initialDistance = 0;
+      },
+      onPanResponderTerminate: () => {
+        pinchRef.current.initialDistance = 0;
       },
     })
   ).current;
@@ -179,13 +323,25 @@ export default function RememberDashboard() {
     resetPickerToDefault();
   }, []);
 
+  // Highlight reminder from params
+  useEffect(() => {
+    if (params.highlightReminderId) {
+      setTimeout(() => {
+        handleReminderTap(params.highlightReminderId!);
+        router.setParams({ highlightReminderId: undefined });
+      }, 500);
+    }
+  }, [params.highlightReminderId]);
+
   const resetPickerToDefault = () => {
     const now = new Date();
     // Default to today
     const y = now.getFullYear();
     const m = (now.getMonth() + 1).toString().padStart(2, '0');
     const d = now.getDate().toString().padStart(2, '0');
-    setChosenDate(`${y}-${m}-${d}`);
+    const dateStr = `${y}-${m}-${d}`;
+    setChosenDate(dateStr);
+    setChosenDates([dateStr]);
 
     // Default to current time + 10 mins
     let defaultHour = now.getHours();
@@ -197,6 +353,7 @@ export default function RememberDashboard() {
     setChosenHour(defaultHour);
     setChosenMinute(defaultMin);
     setPickerMonth(new Date());
+    setChosenHoursToComplete('');
   };
 
   const handleCommentTextChange = (reminderId: string, val: string) => {
@@ -224,13 +381,6 @@ export default function RememberDashboard() {
     }));
   };
 
-  const getLocalDateStr = (date: Date = new Date()): string => {
-    const y = date.getFullYear();
-    const m = (date.getMonth() + 1).toString().padStart(2, '0');
-    const d = date.getDate().toString().padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
-
   // Quick Preset Handlers
   const handleQuickPreset = (preset: 'today' | 'tomorrow' | '1hour' | '4hours') => {
     const date = new Date();
@@ -245,7 +395,9 @@ export default function RememberDashboard() {
     const y = date.getFullYear();
     const m = (date.getMonth() + 1).toString().padStart(2, '0');
     const d = date.getDate().toString().padStart(2, '0');
-    setChosenDate(`${y}-${m}-${d}`);
+    const dateStr = `${y}-${m}-${d}`;
+    setChosenDate(dateStr);
+    setChosenDates([dateStr]);
     setChosenHour(date.getHours());
     setChosenMinute(Math.floor(date.getMinutes() / 5) * 5);
     setPickerMonth(date);
@@ -274,21 +426,27 @@ export default function RememberDashboard() {
           const maxItems = store.slotSeparationMinutes > 0
             ? Math.floor(durationMin / store.slotSeparationMinutes)
             : 999;
-          const existingInSlot = store.reminders.filter(
-            (r) => r.timeSlotId === selectedSlotId && r.date === chosenDate
-              && (pickerMode === 'edit' ? r.id !== activeEditId : true)
-          ).length;
-          if (existingInSlot >= maxItems) {
-            Alert.alert(
-              'Franja horaria llena',
-              `La franja "${slot.name}" ya tiene ${existingInSlot} recordatorio${existingInSlot !== 1 ? 's' : ''} el ${chosenDate} y no caben más con una separación de ${store.slotSeparationMinutes} min.\n\nAumenta la separación o elige otra franja.`
-            );
-            return;
+
+          for (const dStr of chosenDates) {
+            const existingInSlot = store.reminders.filter(
+              (r) => r.timeSlotId === selectedSlotId && 
+                (r.dates && r.dates.length > 0 ? r.dates.includes(dStr) : r.date === dStr)
+                && (pickerMode === 'edit' ? r.id !== activeEditId : true)
+            ).length;
+            if (existingInSlot >= maxItems) {
+              Alert.alert(
+                'Franja horaria llena',
+                `La franja "${slot.name}" ya tiene ${existingInSlot} recordatorio${existingInSlot !== 1 ? 's' : ''} el ${dStr} y no caben más con una separación de ${store.slotSeparationMinutes} min.\n\nAumenta la separación o elige otra franja/día.`
+              );
+              return;
+            }
           }
           timeStr = slot.startTime;
         }
       }
     }
+
+    const hoursNum = chosenHoursToComplete.trim() ? parseFloat(chosenHoursToComplete.replace(',', '.')) : undefined;
 
     if (pickerMode === 'create') {
       if (!inputText.trim()) {
@@ -301,7 +459,9 @@ export default function RememberDashboard() {
         timeStr,
         isNoDate ? undefined : selectedSlotId,
         selectedGoalId,
-        selectedPhaseId
+        selectedPhaseId,
+        isNoDate ? [] : chosenDates,
+        hoursNum
       );
       setInputText('');
       setIsPickerVisible(false);
@@ -325,7 +485,9 @@ export default function RememberDashboard() {
         timeStr,
         isNoDate ? undefined : selectedSlotId,
         selectedGoalId,
-        selectedPhaseId
+        selectedPhaseId,
+        isNoDate ? [] : chosenDates,
+        hoursNum
       );
       setInputText('');
       setIsPickerVisible(false);
@@ -355,12 +517,17 @@ export default function RememberDashboard() {
       setInputText(currentText);
       setSelectedGoalId(editingReminder.goalId);
       setSelectedPhaseId(editingReminder.phaseId);
+      setChosenHoursToComplete(editingReminder.estimatedHours ? String(editingReminder.estimatedHours) : '');
       
       if (!editingReminder.date) {
         setIsNoDate(true);
         resetPickerToDefault();
       } else {
         setIsNoDate(false);
+        const rDates = editingReminder.dates && editingReminder.dates.length > 0
+          ? editingReminder.dates
+          : [editingReminder.date];
+        setChosenDates(rDates);
         setChosenDate(editingReminder.date);
         
         const [h, min] = editingReminder.time.split(':').map(Number);
@@ -382,6 +549,7 @@ export default function RememberDashboard() {
   };
 
   const handleReminderTap = (id: string) => {
+    setSearchQuery('');
     // 1. Collapse header
     Animated.spring(headerHeightAnim, {
       toValue: 50,
@@ -435,11 +603,79 @@ export default function RememberDashboard() {
     );
   };
 
+  // Lists event handlers
+  const handleCreateList = async () => {
+    if (!newListName.trim()) {
+      Alert.alert('Nombre vacío', 'Por favor escribe un nombre para la lista.');
+      return;
+    }
+    await store.addList(newListName);
+    setNewListName('');
+  };
+
+  const handleSaveListName = async () => {
+    if (!editingListId) return;
+    if (!editingListName.trim()) {
+      Alert.alert('Nombre vacío', 'El nombre de la lista no puede estar vacío.');
+      return;
+    }
+    await store.updateList(editingListId, editingListName);
+    setEditingListId(null);
+  };
+
+  const handleDeleteListPress = (list: any) => {
+    Alert.alert(
+      'Eliminar lista',
+      `¿Estás seguro de que quieres eliminar la lista "${list.name}" y todos sus elementos?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            await store.deleteList(list.id);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleNewItemTextChange = (listId: string, text: string) => {
+    setNewItemTexts((prev) => ({
+      ...prev,
+      [listId]: text,
+    }));
+  };
+
+  const handleAddListItem = async (listId: string) => {
+    const text = newItemTexts[listId] || '';
+    if (!text.trim()) {
+      Alert.alert('Texto vacío', 'Por favor escribe el texto del elemento.');
+      return;
+    }
+    await store.addListItem(listId, text);
+    setNewItemTexts((prev) => ({
+      ...prev,
+      [listId]: '',
+    }));
+  };
+
+  const handleSaveListItemText = async () => {
+    if (!editingItemId) return;
+    if (!editingItemText.trim()) {
+      Alert.alert('Texto vacío', 'El texto del elemento no puede estar vacío.');
+      return;
+    }
+    await store.updateListItem(editingItemId.listId, editingItemId.itemId, editingItemText);
+    setEditingItemId(null);
+  };
+
   const handleCreatePress = () => {
     if (!inputText.trim()) {
       Alert.alert('Escribe un mensaje', 'Escribe primero el mensaje del recordatorio en la barra de chat.');
       return;
     }
+    resetPickerToDefault();
     setSelectedGoalId(undefined);
     setSelectedPhaseId(undefined);
     setPickerMode('create');
@@ -528,6 +764,8 @@ export default function RememberDashboard() {
     return days;
   };
 
+  const daysInMonth = useMemo(() => getDaysInMonth(pickerMonth), [pickerMonth]);
+
   const changeMonth = (offset: number) => {
     const newMonth = new Date(pickerMonth.getFullYear(), pickerMonth.getMonth() + offset, 1);
     setPickerMonth(newMonth);
@@ -541,18 +779,6 @@ export default function RememberDashboard() {
     return `${months[date.getMonth()]} ${date.getFullYear()}`;
   };
 
-  // Sort reminders chronologically
-  const sortedReminders = [...store.reminders].sort((a, b) => {
-    if (!a.date && !b.date) {
-      return b.createdAt.localeCompare(a.createdAt); // Newest dateless first
-    }
-    if (!a.date) return 1; // Put dateless at the end
-    if (!b.date) return -1;
-    const dateTimeA = `${a.date}T${a.time}`;
-    const dateTimeB = `${b.date}T${b.time}`;
-    return dateTimeA.localeCompare(dateTimeB);
-  });
-
   const getDaysDifference = (dateStr: string): number => {
     if (!dateStr) return 0;
     const today = new Date();
@@ -564,35 +790,279 @@ export default function RememberDashboard() {
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
-  const upcomingReminders = store.reminders
-    .filter((item) => {
-      if (item.completed) return false;
-      if (!item.date) return false;
-      const diff = getDaysDifference(item.date);
-      return diff >= 0 && diff <= store.proximityDays;
-    })
-    .sort((a, b) => {
-      const dateTimeA = `${a.date}T${a.time}`;
-      const dateTimeB = `${b.date}T${b.time}`;
+  // Sort reminders chronologically
+  const sortedReminders = useMemo(() => {
+    return [...store.reminders].sort((a, b) => {
+      const dateA = getReminderActiveDate(a);
+      const dateB = getReminderActiveDate(b);
+      if (!dateA && !dateB) {
+        return b.createdAt.localeCompare(a.createdAt); // Newest dateless first
+      }
+      if (!dateA) return 1; // Put dateless at the end
+      if (!dateB) return -1;
+      const dateTimeA = `${dateA}T${a.time}`;
+      const dateTimeB = `${dateB}T${b.time}`;
       return dateTimeA.localeCompare(dateTimeB);
     });
+  }, [store.reminders]);
 
-  const pinnedReminders = store.reminders
-    .filter((item) => item.pinned && !!item.date)
-    .sort((a, b) => {
-      const dateTimeA = `${a.date}T${a.time}`;
-      const dateTimeB = `${b.date}T${b.time}`;
-      return dateTimeA.localeCompare(dateTimeB);
-    });
+  // Filter sorted reminders by search query
+  const filteredSortedReminders = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return sortedReminders;
+    }
+    const query = searchQuery.toLowerCase().trim();
+    return sortedReminders.filter((r) => r.text.toLowerCase().includes(query));
+  }, [sortedReminders, searchQuery]);
 
-  const datelessReminders = store.reminders
-    .filter((item) => !item.date && !item.completed)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const upcomingReminders = useMemo(() => {
+    const todayStr = getLocalDateStr();
+    return store.reminders
+      .filter((item) => {
+        if (item.completed) return false;
+        const isMarkedToday = item.dates && item.dates.includes(todayStr);
+        const activeDate = isMarkedToday ? todayStr : (getReminderActiveDate(item) || '');
+        if (!activeDate) return false;
+        const diff = getDaysDifference(activeDate);
+        return diff >= 0 && diff <= store.proximityDays;
+      })
+      .sort((a, b) => {
+        const isMarkedTodayA = a.dates && a.dates.includes(todayStr);
+        const isMarkedTodayB = b.dates && b.dates.includes(todayStr);
+        const activeA = isMarkedTodayA ? todayStr : (getReminderActiveDate(a) || '');
+        const activeB = isMarkedTodayB ? todayStr : (getReminderActiveDate(b) || '');
+        const dateTimeA = `${activeA}T${a.time}`;
+        const dateTimeB = `${activeB}T${b.time}`;
+        return dateTimeA.localeCompare(dateTimeB);
+      });
+  }, [store.reminders, store.proximityDays]);
 
-  const formatDisplayDate = (dateStr: string): string => {
-    if (!dateStr) return 'Sin fecha';
-    const [y, m, d] = dateStr.split('-');
-    return `${d}/${m}/${y}`;
+  const pinnedReminders = useMemo(() => {
+    return store.reminders
+      .filter((item) => item.pinned && (item.date || (item.dates && item.dates.length > 0)))
+      .sort((a, b) => {
+        const activeA = getReminderActiveDate(a) || '';
+        const activeB = getReminderActiveDate(b) || '';
+        const dateTimeA = `${activeA}T${a.time}`;
+        const dateTimeB = `${activeB}T${b.time}`;
+        return dateTimeA.localeCompare(dateTimeB);
+      });
+  }, [store.reminders]);
+
+  const datelessReminders = useMemo(() => {
+    return store.reminders
+      .filter((item) => !item.date && (!item.dates || item.dates.length === 0) && !item.completed)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [store.reminders]);
+
+  // Timelines list (filtered and sorted)
+  const timelineTasks = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return store.reminders
+      .filter((item) => {
+        if (item.completed) return false;
+        const startDateStr = item.startDate || item.date;
+        const activeEndDate = item.endDate || item.date;
+        if (!startDateStr || !activeEndDate) return false;
+
+        // Exclude 1-day tasks (start date is equal to end date)
+        if (startDateStr === activeEndDate) return false;
+
+        const diff = getDaysDifference(activeEndDate);
+        // Show if it's within the proximity days range (or overdue)
+        return diff <= timelineProximityDays;
+      })
+      .sort((a, b) => {
+        const endA = a.endDate || a.date || '';
+        const endB = b.endDate || b.date || '';
+
+        const [ay, am, ad] = endA.split('-').map(Number);
+        const [by, bm, bd] = endB.split('-').map(Number);
+        const dateObjA = new Date(ay, am - 1, ad);
+        const dateObjB = new Date(by, bm - 1, bd);
+        dateObjA.setHours(0, 0, 0, 0);
+        dateObjB.setHours(0, 0, 0, 0);
+
+        const remainingA = Math.max(1, Math.ceil((dateObjA.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+        const remainingB = Math.max(1, Math.ceil((dateObjB.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+
+        const hoursA = a.estimatedHours || 0;
+        const hoursB = b.estimatedHours || 0;
+
+        const priorityA = hoursA > 0 ? (hoursA / remainingA) : 0;
+        const priorityB = hoursB > 0 ? (hoursB / remainingB) : 0;
+
+        if (priorityA !== priorityB) {
+          return priorityB - priorityA; // Higher priority ratio first
+        }
+
+        const diffA = getDaysDifference(endA);
+        const diffB = getDaysDifference(endB);
+        return diffA - diffB; // Soonest end date first
+      });
+  }, [store.reminders, timelineProximityDays]);
+
+  const renderTimelineItem = (item: Reminder) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const startDateStr = item.startDate || item.date;
+    const endDateStr = item.endDate || item.date;
+
+    if (!startDateStr || !endDateStr) return null;
+
+    const [sy, sm, sd] = startDateStr.split('-').map(Number);
+    const [ey, em, ed] = endDateStr.split('-').map(Number);
+
+    const start = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
+
+    const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const elapsedDays = Math.ceil((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Percentage of progress
+    let pct = 0;
+    if (totalDays > 1) {
+      pct = Math.max(0, Math.min(1, elapsedDays / (totalDays - 1)));
+    } else {
+      pct = today >= start ? 1 : 0;
+    }
+
+    const availableDays = item.dates ? item.dates.length : 1;
+
+    // Format short dates (e.g. "27 Jul")
+    const formatShortDate = (dateStr: string) => {
+      if (!dateStr) return '';
+      const [, m, d] = dateStr.split('-');
+      const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1]}`;
+    };
+
+    const goal = store.goals?.find((g) => g.id === item.goalId);
+
+    const hours = item.estimatedHours || 0;
+    const daysLeft = Math.max(1, remainingDays);
+    const priorityIndex = hours / daysLeft;
+    let priorityColor = '#8E8E93';
+
+    let priorityText = '';
+    if (hours > 0) {
+      if (priorityIndex >= 4) {
+        priorityColor = '#FF3B30';
+      } else if (priorityIndex >= 2.5) {
+        priorityColor = '#FF9500';
+      } else if (priorityIndex >= 1) {
+        priorityColor = '#FFCC00';
+      } else {
+        priorityColor = '#34C759';
+      }
+
+      const totalMinutes = Math.round(priorityIndex * 60);
+      const h = Math.floor(totalMinutes / 60);
+      const m = totalMinutes % 60;
+      if (h > 0 && m > 0) {
+        priorityText = `${h}h y ${m}m`;
+      } else if (h > 0) {
+        priorityText = `${h}h`;
+      } else {
+        priorityText = `${m}m`;
+      }
+    }
+
+    return (
+      <Pressable 
+        key={`timeline-${item.id}`} 
+        onPress={() => handleReminderTap(item.id)}
+        style={styles.timelineItemContainer}
+      >
+        {/* Top details: Task name and available days */}
+        <View style={styles.timelineItemHeader}>
+          <Text style={[styles.timelineTaskText, { color: colors.text, flex: 1, marginRight: 8 }]} numberOfLines={1}>
+            {item.text}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {hours > 0 && (
+              <View style={{ 
+                backgroundColor: priorityColor, 
+                paddingHorizontal: 6, 
+                paddingVertical: 2, 
+                borderRadius: 6 
+              }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: 'bold' }}>
+                  {priorityText} por día
+                </Text>
+              </View>
+            )}
+            <View style={styles.availableDaysBadge}>
+              <Text style={styles.availableDaysText}>
+                {availableDays} {availableDays === 1 ? 'día disp.' : 'días disp.'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Timeline bar */}
+        <View style={styles.timelineBarWrapper}>
+          <Text style={[styles.timelineDateText, { color: colors.textSecondary }]}>
+            {formatShortDate(startDateStr)}
+          </Text>
+          
+          <View style={styles.timelineTrackContainer}>
+            <View style={[styles.timelineTrack, { backgroundColor: colors.backgroundSelected }]} />
+            {/* Progress line */}
+            <View 
+              style={[
+                styles.timelineProgress, 
+                { 
+                  width: `${pct * 100}%`, 
+                  backgroundColor: remainingDays < 0 ? '#FF3B30' : '#FF9500' 
+                }
+              ]} 
+            />
+            {/* Today marker indicator */}
+            <View 
+              style={[
+                styles.timelineMarker, 
+                { 
+                  left: `${pct * 100}%`,
+                  backgroundColor: remainingDays < 0 ? '#FF3B30' : '#FF9500',
+                }
+              ]} 
+            />
+          </View>
+
+          <Text style={[styles.timelineDateText, { color: colors.textSecondary }]}>
+            {formatShortDate(endDateStr)}
+          </Text>
+        </View>
+
+        {/* Bottom details: remaining days and goal badge if exists */}
+        <View style={styles.timelineItemFooter}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[styles.timelineRemainingText, { color: remainingDays < 0 ? '#FF3B30' : colors.textSecondary }]}>
+              {remainingDays === 0 
+                ? 'Finaliza hoy' 
+                : remainingDays < 0 
+                  ? `Vencido hace ${Math.abs(remainingDays)}d` 
+                  : `Quedan ${remainingDays}d`}
+            </Text>
+            {hours > 0 && (
+              <Text style={{ fontSize: 10, color: colors.textSecondary }}>
+                • {hours} {hours === 1 ? 'hora' : 'horas'}
+              </Text>
+            )}
+          </View>
+          {goal && (
+            <Text style={{ fontSize: 9, fontWeight: 'bold', color: '#FF2D55' }}>
+              🎯 {goal.title}
+            </Text>
+          )}
+        </View>
+      </Pressable>
+    );
   };
 
   // Get WhatsApp-style date header text
@@ -621,7 +1091,9 @@ export default function RememberDashboard() {
 
   const renderChatItem = ({ item, index }: { item: Reminder; index: number }) => {
     // Determine whether to display a date separator header
-    const showDateHeader = index === 0 || sortedReminders[index - 1].date !== item.date;
+    const activeDate = getReminderActiveDate(item);
+    const prevActiveDate = index > 0 ? getReminderActiveDate(filteredSortedReminders[index - 1]) : null;
+    const showDateHeader = index === 0 || prevActiveDate !== activeDate;
 
     const commentsList = item.comments || [];
     const isExpanded = expandedReminders[item.id] || false;
@@ -634,9 +1106,9 @@ export default function RememberDashboard() {
         {showDateHeader && (
           <View style={styles.dateSeparatorRow}>
             <View style={[styles.dateSeparatorLine, { backgroundColor: colors.backgroundSelected }]} />
-            <View style={[styles.dateSeparatorPill, { backgroundColor: colors.backgroundSelected }]}>
-              <Text style={[styles.dateSeparatorText, { color: colors.textSecondary }]}>
-                {getDateSeparatorText(item.date)}
+            <View style={[styles.dateSeparatorPill, { backgroundColor: colors.backgroundSelected, paddingVertical: 4 * zoomScale, paddingHorizontal: 12 * zoomScale, borderRadius: 12 * zoomScale }]}>
+              <Text style={[styles.dateSeparatorText, { color: colors.textSecondary, fontSize: 12 * zoomScale }]}>
+                {getDateSeparatorText(activeDate)}
               </Text>
             </View>
             <View style={[styles.dateSeparatorLine, { backgroundColor: colors.backgroundSelected }]} />
@@ -647,7 +1119,7 @@ export default function RememberDashboard() {
           <View
             style={[
               styles.reminderBubble,
-              { backgroundColor: colors.backgroundElement },
+              { backgroundColor: colors.backgroundElement, padding: 14 * zoomScale, borderRadius: 16 * zoomScale },
               item.id === highlightedReminderId && {
                 borderColor: '#FF9500',
                 borderWidth: 2,
@@ -669,13 +1141,13 @@ export default function RememberDashboard() {
                 >
                   <Ionicons
                     name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={20}
+                    size={20 * zoomScale}
                     color={item.completed ? '#34C759' : colors.textSecondary}
                   />
                   <Text
                     style={[
                       styles.actionBtnText,
-                      { color: item.completed ? '#34C759' : colors.textSecondary },
+                      { color: item.completed ? '#34C759' : colors.textSecondary, fontSize: 12 * zoomScale },
                     ]}
                   >
                     {item.completed ? 'Completado' : 'Marcar'}
@@ -689,13 +1161,13 @@ export default function RememberDashboard() {
                 >
                   <Ionicons
                     name={item.pinned ? 'pin' : 'pin-outline'}
-                    size={18}
+                    size={18 * zoomScale}
                     color={item.pinned ? '#AF52DE' : colors.textSecondary}
                   />
                   <Text
                     style={[
                       styles.actionBtnText,
-                      { color: item.pinned ? '#AF52DE' : colors.textSecondary },
+                      { color: item.pinned ? '#AF52DE' : colors.textSecondary, fontSize: 12 * zoomScale },
                     ]}
                   >
                     {item.pinned ? 'Fijado' : 'Fijar'}
@@ -706,25 +1178,25 @@ export default function RememberDashboard() {
               <View style={styles.rightActionGroup}>
                 {/* Edit */}
                 <Pressable onPress={() => handleEditPress(item)} style={styles.actionBtn}>
-                  <Ionicons name="create-outline" size={18} color="#007AFF" />
+                  <Ionicons name="create-outline" size={18 * zoomScale} color="#007AFF" />
                 </Pressable>
 
                 {/* Delete */}
                 <Pressable onPress={() => handleDeletePress(item.id)} style={styles.actionBtn}>
-                  <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                  <Ionicons name="trash-outline" size={18 * zoomScale} color="#FF3B30" />
                 </Pressable>
               </View>
             </View>
 
             {/* Reminder Content */}
-            <ReminderBubbleText item={item} onEditPress={handleEditPress} />
+            <ReminderBubbleText item={item} onEditPress={handleEditPress} zoomScale={zoomScale} />
 
             {/* Comments Section (YouTube-style comments list & adding option) */}
             {isCommentsVisible && (
               <View style={[styles.commentsContainer, { borderTopColor: colors.backgroundSelected }]}>
                 <View style={styles.commentsHeader}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.textSecondary} />
-                  <Text style={[styles.commentsCountText, { color: colors.textSecondary }]}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={14 * zoomScale} color={colors.textSecondary} />
+                  <Text style={[styles.commentsCountText, { color: colors.textSecondary, fontSize: 11 * zoomScale }]}>
                     {commentsList.length} {commentsList.length === 1 ? 'comentario' : 'comentarios'}
                   </Text>
                 </View>
@@ -742,17 +1214,17 @@ export default function RememberDashboard() {
                             onChangeText={setEditingCommentText}
                             style={[
                               styles.editCommentInput,
-                              { color: colors.text, backgroundColor: colors.backgroundSelected },
+                              { color: colors.text, backgroundColor: colors.backgroundSelected, fontSize: 13 * zoomScale },
                             ]}
                             autoFocus
                             multiline
                         />
                         ) : (
-                          <Text style={[styles.commentText, { color: colors.text }]}>
+                          <Text style={[styles.commentText, { color: colors.text, fontSize: 13 * zoomScale }]}>
                             {comment.text}
                           </Text>
                         )}
-                        <Text style={[styles.commentTime, { color: colors.textSecondary }]}>
+                        <Text style={[styles.commentTime, { color: colors.textSecondary, fontSize: 10 * zoomScale }]}>
                           {comment.createdAt}
                         </Text>
                       </View>
@@ -769,7 +1241,7 @@ export default function RememberDashboard() {
                               }}
                               style={styles.commentIconBtn}
                             >
-                              <Ionicons name="checkmark-circle-outline" size={16} color="#34C759" />
+                              <Ionicons name="checkmark-circle-outline" size={16 * zoomScale} color="#34C759" />
                             </Pressable>
                             <Pressable
                               onPress={() => {
@@ -778,7 +1250,7 @@ export default function RememberDashboard() {
                               }}
                               style={styles.commentIconBtn}
                             >
-                              <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
+                              <Ionicons name="close-circle-outline" size={16 * zoomScale} color="#FF3B30" />
                             </Pressable>
                           </>
                         ) : (
@@ -790,7 +1262,7 @@ export default function RememberDashboard() {
                               }}
                               style={styles.commentIconBtn}
                             >
-                              <Ionicons name="create-outline" size={14} color="#007AFF" />
+                              <Ionicons name="create-outline" size={14 * zoomScale} color="#007AFF" />
                             </Pressable>
                             <Pressable
                               onPress={() => {
@@ -801,7 +1273,7 @@ export default function RememberDashboard() {
                               }}
                               style={styles.commentIconBtn}
                             >
-                              <Ionicons name="trash-outline" size={14} color="#FF3B30" />
+                              <Ionicons name="trash-outline" size={14 * zoomScale} color="#FF3B30" />
                             </Pressable>
                           </>
                         )}
@@ -816,7 +1288,7 @@ export default function RememberDashboard() {
                     onPress={() => toggleExpandComments(item.id)}
                     style={styles.verMasBtn}
                   >
-                    <Text style={styles.verMasText}>
+                    <Text style={[styles.verMasText, { fontSize: 11 * zoomScale }]}>
                       {isExpanded ? 'Ver menos' : `Ver más (${commentsList.length - 2} más)`}
                     </Text>
                   </Pressable>
@@ -829,14 +1301,14 @@ export default function RememberDashboard() {
                     placeholderTextColor={colors.textSecondary}
                     value={newCommentTexts[item.id] || ''}
                     onChangeText={(val) => handleCommentTextChange(item.id, val)}
-                    style={[styles.addCommentInput, { color: colors.text, backgroundColor: colors.backgroundSelected }]}
+                    style={[styles.addCommentInput, { color: colors.text, backgroundColor: colors.backgroundSelected, fontSize: 13 * zoomScale }]}
                     multiline
                   />
                   <Pressable
                     onPress={() => handleAddCommentSubmit(item.id)}
                     style={styles.addCommentBtn}
                   >
-                    <Ionicons name="add" size={18} color="#FFFFFF" />
+                    <Ionicons name="add" size={18 * zoomScale} color="#FFFFFF" />
                   </Pressable>
                 </View>
               </View>
@@ -860,10 +1332,10 @@ export default function RememberDashboard() {
                   >
                     <Ionicons
                       name={item.alarmScheduled ? 'notifications' : 'notifications-outline'}
-                      size={14}
+                      size={14 * zoomScale}
                       color="#FF9500"
                     />
-                    <Text style={[styles.bubbleAlarmBadgeText, { color: '#FF9500' }]}>
+                    <Text style={[styles.bubbleAlarmBadgeText, { color: '#FF9500', fontSize: 10 * zoomScale }]}>
                       {item.alarmScheduled ? 'Alarma Activa' : 'Poner Alarma'}
                     </Text>
                   </Pressable>
@@ -883,10 +1355,10 @@ export default function RememberDashboard() {
                 >
                   <Ionicons
                     name={commentsList.length > 0 ? 'chatbubble-ellipses' : 'chatbubble-outline'}
-                    size={14}
+                    size={14 * zoomScale}
                     color={isCommentsVisible ? '#007AFF' : colors.textSecondary}
                   />
-                  <Text style={[styles.bubbleAlarmBadgeText, { color: isCommentsVisible ? '#007AFF' : colors.textSecondary }]}>
+                  <Text style={[styles.bubbleAlarmBadgeText, { color: isCommentsVisible ? '#007AFF' : colors.textSecondary, fontSize: 10 * zoomScale }]}>
                     {commentsList.length > 0 ? `${commentsList.length}` : 'Comentar'}
                   </Text>
                 </Pressable>
@@ -894,8 +1366,8 @@ export default function RememberDashboard() {
 
               {item.date ? (
                 <View style={styles.timeWrapper}>
-                  <Ionicons name="time-outline" size={12} color={colors.textSecondary} />
-                  <Text style={[styles.timeText, { color: colors.textSecondary }]}>
+                  <Ionicons name="time-outline" size={12 * zoomScale} color={colors.textSecondary} />
+                  <Text style={[styles.timeText, { color: colors.textSecondary, fontSize: 11 * zoomScale }]}>
                     {item.time}
                   </Text>
                 </View>
@@ -915,7 +1387,7 @@ export default function RememberDashboard() {
   };
 
   const getCalendarList = () => {
-    const days = getDaysInMonth(pickerMonth);
+    const days = daysInMonth;
     const dayHeaders = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
     return (
@@ -945,18 +1417,22 @@ export default function RememberDashboard() {
         {/* Days grid */}
         <View style={styles.daysGrid}>
           {days.map((item, idx) => {
-            const isSelected = chosenDate === item.dateStr;
+            const isSelected = chosenDates.includes(item.dateStr);
             const isToday = item.dateStr === getLocalDateStr();
+            const isStart = chosenDates.length > 1 && chosenDates[0] === item.dateStr;
+            const isEnd = chosenDates.length > 1 && chosenDates[chosenDates.length - 1] === item.dateStr;
 
             return (
               <Pressable
                 key={idx}
-                onPress={() => setChosenDate(item.dateStr)}
+                onPress={() => handleToggleDate(item.dateStr)}
                 style={[
                   styles.dayCell,
                   !item.isCurrentMonth && styles.fadedDayCell,
                   isToday && styles.todayDayCell,
                   isSelected && styles.selectedDayCell,
+                  isStart && { backgroundColor: '#007AFF', borderTopLeftRadius: 18, borderBottomLeftRadius: 18 },
+                  isEnd && { backgroundColor: '#FF3B30', borderTopRightRadius: 18, borderBottomRightRadius: 18 },
                 ]}
               >
                 <Text
@@ -965,6 +1441,7 @@ export default function RememberDashboard() {
                     { color: item.isCurrentMonth ? colors.text : colors.textSecondary },
                     isSelected && { color: '#000000', fontWeight: 'bold' },
                     isToday && !isSelected && { color: '#FF9500', fontWeight: 'bold' },
+                    (isStart || isEnd) && { color: '#FFFFFF', fontWeight: 'bold' },
                   ]}
                 >
                   {item.dayNum}
@@ -991,7 +1468,7 @@ export default function RememberDashboard() {
             <View>
               <Text style={[styles.headerTitle, { color: colors.text }]}>RubeRemember</Text>
               <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-                Chat de Recordatorios
+                {activeTab === 'reminders' ? 'Chat de Recordatorios' : 'Gestión de Listas'}
               </Text>
             </View>
           </View>
@@ -1023,6 +1500,87 @@ export default function RememberDashboard() {
             {/* Expanded Content */}
             <Animated.View style={{ opacity: expandedOpacity, flex: 1, pointerEvents: isMinimized ? 'none' : 'auto' }}>
               <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 16 }}>
+                {/* Global Alarm Scheduler Button (Only visible if there are reminders) */}
+                {store.reminders.length > 0 && (
+                  <Pressable
+                    onPress={() => {
+                      store.scheduleAllAlarms();
+                    }}
+                    style={[styles.globalAlarmBtn, { marginHorizontal: 16, marginTop: 12, marginBottom: 4 }]}
+                  >
+                    <Ionicons name="notifications" size={18} color="#FFFFFF" />
+                    <Text style={styles.globalAlarmBtnText}>
+                      Programar todos los eventos en el calendario
+                    </Text>
+                  </Pressable>
+                )}
+
+                {/* Timeline Representation of Reminders with Margins / Ranges */}
+                {store.reminders.length > 0 && (
+                  <View style={styles.timelineSection}>
+                    <View style={styles.timelineHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="git-commit-outline" size={16} color="#FF9500" />
+                        <Text style={[styles.timelineTitle, { color: colors.text }]}>Líneas de Tiempo (Plazos)</Text>
+                      </View>
+                      
+                      {/* Timeline Proximity Adjuster */}
+                      <View style={styles.daysAdjusterContainer}>
+                        <Pressable
+                          onPress={() => setTimelineProximityDays(prev => Math.max(1, prev - 1))}
+                          style={[styles.adjusterBtn, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}
+                        >
+                          <Text style={[styles.adjusterBtnText, { color: '#FF9500' }]}>-</Text>
+                        </Pressable>
+                        
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <TextInput
+                            keyboardType="numeric"
+                            value={String(timelineProximityDays)}
+                            onChangeText={(txt) => {
+                              const val = parseInt(txt.replace(/[^0-9]/g, '')) || 0;
+                              setTimelineProximityDays(val);
+                            }}
+                            onBlur={() => {
+                              if (timelineProximityDays < 1) setTimelineProximityDays(1);
+                              if (timelineProximityDays > 365) setTimelineProximityDays(365);
+                            }}
+                            style={{
+                              color: '#FF9500',
+                              minWidth: 24,
+                              textAlign: 'center',
+                              fontWeight: 'bold',
+                              fontSize: 12,
+                              padding: 0,
+                              margin: 0,
+                            }}
+                          />
+                          <Text style={{ color: '#FF9500', fontSize: 12, fontWeight: 'bold' }}> días</Text>
+                        </View>
+                        
+                        <Pressable
+                          onPress={() => setTimelineProximityDays(prev => Math.min(365, prev + 1))}
+                          style={[styles.adjusterBtn, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}
+                        >
+                          <Text style={[styles.adjusterBtnText, { color: '#FF9500' }]}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    {timelineTasks.length === 0 ? (
+                      <View style={[styles.emptyUpcomingCard, { borderColor: 'rgba(255, 149, 0, 0.2)', marginHorizontal: 16, marginBottom: 8 }]}>
+                        <Text style={[styles.emptyUpcomingText, { color: colors.textSecondary }]}>
+                          No hay plazos o líneas de tiempo en los siguientes {timelineProximityDays} días.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{ paddingHorizontal: 16, gap: 10, paddingBottom: 8 }}>
+                        {timelineTasks.map((t) => renderTimelineItem(t))}
+                      </View>
+                    )}
+                  </View>
+                )}
+
                 {/* Upcoming Reminders Section (Blue Theme) */}
                 <View style={styles.upcomingSection}>
                   <View style={styles.upcomingHeader}>
@@ -1040,9 +1598,30 @@ export default function RememberDashboard() {
                         <Text style={styles.adjusterBtnText}>-</Text>
                       </Pressable>
                       
-                      <Text style={[styles.daysText, { color: '#007AFF' }]}>
-                        {store.proximityDays} días
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TextInput
+                          keyboardType="numeric"
+                          value={String(store.proximityDays)}
+                          onChangeText={(txt) => {
+                            const val = parseInt(txt.replace(/[^0-9]/g, '')) || 0;
+                            store.setProximityDays(val);
+                          }}
+                          onBlur={() => {
+                            if (store.proximityDays < 1) store.setProximityDays(1);
+                            if (store.proximityDays > 365) store.setProximityDays(365);
+                          }}
+                          style={{
+                            color: '#007AFF',
+                            minWidth: 24,
+                            textAlign: 'center',
+                            fontWeight: 'bold',
+                            fontSize: 12,
+                            padding: 0,
+                            margin: 0,
+                          }}
+                        />
+                        <Text style={{ color: '#007AFF', fontSize: 12, fontWeight: 'bold' }}> días</Text>
+                      </View>
                       
                       <Pressable
                         onPress={() => store.setProximityDays(Math.min(365, store.proximityDays + 1))}
@@ -1062,12 +1641,37 @@ export default function RememberDashboard() {
                   ) : (
                     <View style={styles.gridContainer}>
                       {upcomingReminders.map((item) => {
-                        const diff = getDaysDifference(item.date);
+                        const todayStr = getLocalDateStr();
+                        const isMarkedToday = item.dates && item.dates.includes(todayStr);
+                        const activeDate = isMarkedToday ? todayStr : (getReminderActiveDate(item) || item.date || '');
+                        const diff = getDaysDifference(activeDate);
+                        const isToday = diff === 0;
+
+                        const useYellow = isToday && isMarkedToday;
+
                         let diffLabel = '';
-                        if (diff === 0) diffLabel = 'Hoy';
+                        if (isToday) diffLabel = 'Hoy';
                         else if (diff === 1) diffLabel = 'Mañana';
                         else diffLabel = `En ${diff} d`;
                         const goal = store.goals?.find((g) => g.id === item.goalId);
+
+                        const cardBg = useYellow 
+                          ? 'rgba(255, 204, 0, 0.12)' 
+                          : isToday 
+                            ? 'rgba(255, 59, 48, 0.12)' 
+                            : 'rgba(0, 122, 255, 0.08)';
+
+                        const cardBorder = useYellow 
+                          ? '#FFCC00' 
+                          : isToday 
+                            ? '#FF3B30' 
+                            : 'rgba(0, 122, 255, 0.3)';
+
+                        const cardTextOrIconColor = useYellow 
+                          ? '#FFCC00' 
+                          : isToday 
+                            ? '#FF3B30' 
+                            : '#007AFF';
 
                         return (
                           <Pressable
@@ -1076,16 +1680,32 @@ export default function RememberDashboard() {
                             style={[
                               styles.gridCard,
                               {
-                                backgroundColor: 'rgba(0, 122, 255, 0.08)',
-                                borderColor: 'rgba(0, 122, 255, 0.3)',
+                                backgroundColor: cardBg,
+                                borderColor: cardBorder,
+                                borderWidth: isToday ? 2 : 1,
                               },
                             ]}
                           >
                             <View style={styles.gridCardHeader}>
-                              <Text style={[styles.gridCardDiff, { color: '#007AFF' }]}>{diffLabel}</Text>
+                              {isToday ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                  <View style={{ backgroundColor: useYellow ? '#FFCC00' : '#FF3B30', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                    <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' }}>HOY</Text>
+                                  </View>
+                                  {useYellow && item.dates && (
+                                    <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                      <Text style={{ color: colors.text, fontSize: 9, fontWeight: '600' }}>
+                                        {item.dates.filter(d => d >= todayStr).length} disp.
+                                      </Text>
+                                    </View>
+                                  )}
+                                </View>
+                              ) : (
+                                <Text style={[styles.gridCardDiff, { color: '#007AFF' }]}>{diffLabel}</Text>
+                              )}
                               <View style={styles.gridCardTimeGroup}>
-                                <Ionicons name="time-outline" size={10} color="#007AFF" />
-                                <Text style={[styles.gridCardTime, { color: '#007AFF' }]}>{item.time}</Text>
+                                <Ionicons name="time-outline" size={10} color={cardTextOrIconColor} />
+                                <Text style={[styles.gridCardTime, { color: cardTextOrIconColor }]}>{item.time}</Text>
                               </View>
                             </View>
                             <Text
@@ -1249,20 +1869,6 @@ export default function RememberDashboard() {
                   )}
                 </View>
 
-                {/* Global Alarm Scheduler Button (Only visible if there are reminders) */}
-                {store.reminders.length > 0 && (
-                  <Pressable
-                    onPress={() => {
-                      store.scheduleAllAlarms();
-                    }}
-                    style={styles.globalAlarmBtn}
-                  >
-                    <Ionicons name="notifications" size={18} color="#FFFFFF" />
-                    <Text style={styles.globalAlarmBtnText}>
-                      Programar todos los eventos en el calendario
-                    </Text>
-                  </Pressable>
-                )}
               </ScrollView>
             </Animated.View>
 
@@ -1304,38 +1910,60 @@ export default function RememberDashboard() {
             <View style={[styles.dragHandle, { backgroundColor: colors.textSecondary }]} />
           </View>
 
-          {/* Chat Message List */}
-          <FlatList
-            ref={flatListRef}
-            data={sortedReminders}
-            renderItem={renderChatItem}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.chatListContent}
-            onScrollToIndexFailed={(info) => {
-              flatListRef.current?.scrollToOffset({
-                offset: info.averageItemLength * info.index,
-                animated: true,
-              });
-              setTimeout(() => {
-                flatListRef.current?.scrollToIndex({
-                  index: info.index,
+          {/* Search Bar */}
+          <View style={[styles.searchBarContainer, { backgroundColor: colors.backgroundSelected }]}>
+            <Ionicons name="search-outline" size={18} color={colors.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholder="Buscar recordatorios..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              clearButtonMode="while-editing"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <Pressable onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
+                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+              </Pressable>
+            )}
+          </View>
+
+          {/* Chat Message List with Pinch-to-Zoom */}
+          <View style={{ flex: 1 }} {...pinchPanResponder.panHandlers}>
+            <FlatList
+              ref={flatListRef}
+              data={filteredSortedReminders}
+              renderItem={renderChatItem}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.chatListContent}
+              onScrollToIndexFailed={(info) => {
+                flatListRef.current?.scrollToOffset({
+                  offset: info.averageItemLength * info.index,
                   animated: true,
-                  viewPosition: 0.5,
                 });
-              }, 100);
-            }}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Ionicons name="chatbubbles-outline" size={64} color={colors.textSecondary} style={{ opacity: 0.3 }} />
-                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                  No hay recordatorios registrados.
-                </Text>
-                <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-                  Escribe un recordatorio abajo y haz clic en programar.
-                </Text>
-              </View>
-            }
-          />
+                setTimeout(() => {
+                  flatListRef.current?.scrollToIndex({
+                    index: info.index,
+                    animated: true,
+                    viewPosition: 0.5,
+                  });
+                }, 100);
+              }}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="chatbubbles-outline" size={64} color={colors.textSecondary} style={{ opacity: 0.3 }} />
+                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                    {searchQuery.trim() ? 'No se encontraron recordatorios con esa búsqueda.' : 'No hay recordatorios registrados.'}
+                  </Text>
+                  <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+                    {searchQuery.trim() ? 'Intenta escribir otra palabra clave.' : 'Escribe un recordatorio abajo y haz clic en programar.'}
+                  </Text>
+                </View>
+              }
+            />
+          </View>
         </View>
 
         {/* Bottom Chat Input Composer */}
@@ -1583,6 +2211,43 @@ export default function RememberDashboard() {
                       {/* Picker Calendar */}
                       <View style={styles.pickerCalendarWrapper}>
                         {getCalendarList()}
+                        {/* Selection Summary */}
+                        {chosenDates.length > 0 && (
+                          <View style={{ paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', borderTopWidth: 0.5, borderTopColor: 'rgba(255, 255, 255, 0.1)' }}>
+                            <Text style={{ fontSize: 13, color: '#FF9500', fontWeight: '700', marginBottom: 2 }}>
+                              Rango de Recordatorio:
+                            </Text>
+                            <Text style={{ fontSize: 12, color: colors.text, fontWeight: '600', textAlign: 'center' }}>
+                              {getDatesDisplayString({ dates: chosenDates } as Reminder)}
+                            </Text>
+
+                            {/* Divider line for clear section separation */}
+                            <View style={{ width: '100%', height: 0.5, backgroundColor: 'rgba(255, 255, 255, 0.08)', marginVertical: 16 }} />
+
+                            {/* Estimated Hours Input (Optional) */}
+                            <Text style={{ fontSize: 15, color: '#FF9500', fontWeight: 'bold', marginBottom: 8 }}>
+                              Tiempo de trabajo estimado:
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.backgroundSelected, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, width: 140 }}>
+                              <TextInput
+                                keyboardType="numeric"
+                                placeholder="0"
+                                placeholderTextColor={colors.textSecondary}
+                                value={chosenHoursToComplete}
+                                onChangeText={setChosenHoursToComplete}
+                                style={{
+                                  color: colors.text,
+                                  fontSize: 14,
+                                  fontWeight: '600',
+                                  flex: 1,
+                                  textAlign: 'center',
+                                  padding: 0,
+                                }}
+                              />
+                              <Text style={{ color: colors.textSecondary, fontSize: 14, fontWeight: '600', marginLeft: 4 }}>horas</Text>
+                            </View>
+                          </View>
+                        )}
                       </View>
 
                       {/* Time Picker Controls */}
@@ -1859,7 +2524,12 @@ export default function RememberDashboard() {
                             editingReminder.id,
                             editingText.trim(),
                             editingReminder.date,
-                            editingReminder.time
+                            editingReminder.time,
+                            editingReminder.timeSlotId,
+                            editingReminder.goalId,
+                            editingReminder.phaseId,
+                            editingReminder.dates,
+                            editingReminder.estimatedHours
                           );
                         }
                         setEditingReminder(null);
@@ -2094,6 +2764,107 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  timelineSection: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  timelineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  timelineTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  timelineItemContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 10,
+    gap: 8,
+  },
+  timelineItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  timelineTaskText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  availableDaysBadge: {
+    backgroundColor: 'rgba(255, 149, 0, 0.12)',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 149, 0, 0.3)',
+  },
+  availableDaysText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FF9500',
+  },
+  timelineBarWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  timelineDateText: {
+    fontSize: 9,
+    fontWeight: '600',
+    width: 32,
+    textAlign: 'center',
+  },
+  timelineTrackContainer: {
+    flex: 1,
+    height: 12,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  timelineTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 4,
+    borderRadius: 2,
+  },
+  timelineProgress: {
+    position: 'absolute',
+    left: 0,
+    height: 4,
+    borderRadius: 2,
+  },
+  timelineMarker: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: -3,
+    marginLeft: -5,
+    top: '50%',
+    shadowRadius: 2,
+    shadowOpacity: 0.5,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  timelineItemFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  timelineRemainingText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
   upcomingSection: {
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -2227,7 +2998,7 @@ const styles = StyleSheet.create({
   daysAdjusterContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   adjusterBtn: {
     width: 24,
@@ -2617,5 +3388,28 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     marginTop: 2,
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    height: 40,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    height: '100%',
+    padding: 0,
+  },
+  clearSearchBtn: {
+    padding: 4,
   },
 });

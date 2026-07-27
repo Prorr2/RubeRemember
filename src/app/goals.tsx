@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useRememberStore, Goal, Phase, Reminder } from '../hooks/use-remember-store';
+import { useRememberStore, Goal, Phase, Reminder, getReminderActiveDate } from '../hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from 'react-native';
 
@@ -278,6 +278,258 @@ export default function GoalsScreen() {
   // Quick Task Creator state
   const [quickTaskText, setQuickTaskText] = useState('');
   const [quickTaskPhaseId, setQuickTaskPhaseId] = useState<string | null>(null);
+
+  // State for filtering by specific goal
+  const [filterGoalId, setFilterGoalId] = useState<string | null>(null);
+
+  // Set default filtered goal on mount or when goals load
+  useEffect(() => {
+    if (!filterGoalId && store.goals.length > 0) {
+      setFilterGoalId(store.goals[0].id);
+    }
+  }, [store.goals]);
+
+  // Calculate days difference
+  const getDaysDifference = (dateStr: string): number => {
+    if (!dateStr) return 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const targetDate = new Date(y, m - 1, d);
+    targetDate.setHours(0, 0, 0, 0);
+    const diffTime = targetDate.getTime() - today.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  // Filtered timeline tasks for selected goal
+  const filteredTimelineTasks = useMemo(() => {
+    if (!filterGoalId) return [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return store.reminders
+      .filter((item) => {
+        if (item.completed || item.goalId !== filterGoalId) return false;
+        const startDateStr = item.startDate || item.date;
+        const activeEndDate = item.endDate || item.date;
+        if (!startDateStr || !activeEndDate) return false;
+
+        // Exclude 1-day tasks
+        if (startDateStr === activeEndDate) return false;
+
+        return true;
+      })
+      .sort((a, b) => {
+        const endA = a.endDate || a.date || '';
+        const endB = b.endDate || b.date || '';
+
+        const [ay, am, ad] = endA.split('-').map(Number);
+        const [by, bm, bd] = endB.split('-').map(Number);
+        const dateObjA = new Date(ay, am - 1, ad);
+        const dateObjB = new Date(by, bm - 1, bd);
+        dateObjA.setHours(0, 0, 0, 0);
+        dateObjB.setHours(0, 0, 0, 0);
+
+        const remainingA = Math.max(1, Math.ceil((dateObjA.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+        const remainingB = Math.max(1, Math.ceil((dateObjB.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+
+        const hoursA = a.estimatedHours || 0;
+        const hoursB = b.estimatedHours || 0;
+
+        const priorityA = hoursA > 0 ? (hoursA / remainingA) : 0;
+        const priorityB = hoursB > 0 ? (hoursB / remainingB) : 0;
+
+        if (priorityA !== priorityB) {
+          return priorityB - priorityA;
+        }
+
+        const diffA = getDaysDifference(endA);
+        const diffB = getDaysDifference(endB);
+        return diffA - diffB;
+      });
+  }, [store.reminders, filterGoalId]);
+
+  // Filtered upcoming reminders for selected goal
+  const filteredUpcomingReminders = useMemo(() => {
+    if (!filterGoalId) return [];
+    const todayStr = getLocalDateStr();
+
+    return store.reminders
+      .filter((item) => {
+        if (item.completed || item.goalId !== filterGoalId) return false;
+
+        const isMarkedToday = item.dates && item.dates.includes(todayStr);
+        const activeDate = isMarkedToday ? todayStr : (getReminderActiveDate(item) || item.date || '');
+        if (!activeDate) return false;
+
+        const diff = getDaysDifference(activeDate);
+        return diff >= 0;
+      })
+      .sort((a, b) => {
+        const isMarkedTodayA = a.dates && a.dates.includes(todayStr);
+        const isMarkedTodayB = b.dates && b.dates.includes(todayStr);
+        const activeA = isMarkedTodayA ? todayStr : (getReminderActiveDate(a) || '');
+        const activeB = isMarkedTodayB ? todayStr : (getReminderActiveDate(b) || '');
+        
+        const dateTimeA = `${activeA}T${a.time || '00:00'}`;
+        const dateTimeB = `${activeB}T${b.time || '00:00'}`;
+        return dateTimeA.localeCompare(dateTimeB);
+      });
+  }, [store.reminders, filterGoalId]);
+
+  const handleReminderTap = (id: string) => {
+    router.replace({
+      pathname: '/',
+      params: { highlightReminderId: id },
+    });
+  };
+
+  const renderTimelineItem = (item: Reminder) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const startDateStr = item.startDate || item.date;
+    const endDateStr = item.endDate || item.date;
+
+    if (!startDateStr || !endDateStr) return null;
+
+    const [sy, sm, sd] = startDateStr.split('-').map(Number);
+    const [ey, em, ed] = endDateStr.split('-').map(Number);
+
+    const start = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
+
+    const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const elapsedDays = Math.ceil((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    let pct = 0;
+    if (totalDays > 1) {
+      pct = Math.max(0, Math.min(1, elapsedDays / (totalDays - 1)));
+    } else {
+      pct = today >= start ? 1 : 0;
+    }
+
+    const availableDays = item.dates ? item.dates.length : 1;
+
+    const formatShortDate = (dateStr: string) => {
+      if (!dateStr) return '';
+      const [, m, d] = dateStr.split('-');
+      const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1]}`;
+    };
+
+    const hours = item.estimatedHours || 0;
+    const daysLeft = Math.max(1, remainingDays);
+    const priorityIndex = hours / daysLeft;
+    let priorityColor = '#8E8E93';
+
+    let priorityText = '';
+    if (hours > 0) {
+      if (priorityIndex >= 4) {
+        priorityColor = '#FF3B30';
+      } else if (priorityIndex >= 2.5) {
+        priorityColor = '#FF9500';
+      } else if (priorityIndex >= 1) {
+        priorityColor = '#FFCC00';
+      } else {
+        priorityColor = '#34C759';
+      }
+
+      const totalMinutes = Math.round(priorityIndex * 60);
+      const h = Math.floor(totalMinutes / 60);
+      const m = totalMinutes % 60;
+      if (h > 0 && m > 0) {
+        priorityText = `${h}h y ${m}m`;
+      } else if (h > 0) {
+        priorityText = `${h}h`;
+      } else {
+        priorityText = `${m}m`;
+      }
+    }
+
+    return (
+      <Pressable 
+        key={`timeline-${item.id}`} 
+        onPress={() => handleReminderTap(item.id)}
+        style={styles.timelineItemContainer}
+      >
+        <View style={styles.timelineItemHeader}>
+          <Text style={[styles.timelineTaskText, { color: colors.text, flex: 1, marginRight: 8 }]} numberOfLines={1}>
+            {item.text}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {hours > 0 && (
+              <View style={{ 
+                backgroundColor: priorityColor, 
+                paddingHorizontal: 6, 
+                paddingVertical: 2, 
+                borderRadius: 6 
+              }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: 'bold' }}>
+                  {priorityText} por día
+                </Text>
+              </View>
+            )}
+            <View style={styles.availableDaysBadge}>
+              <Text style={styles.availableDaysText}>
+                {availableDays} {availableDays === 1 ? 'día disp.' : 'días disp.'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.timelineBarWrapper}>
+          <Text style={[styles.timelineDateText, { color: colors.textSecondary }]}>
+            {formatShortDate(startDateStr)}
+          </Text>
+          
+          <View style={styles.timelineTrackContainer}>
+            <View style={[styles.timelineTrack, { backgroundColor: colors.backgroundSelected }]} />
+            <View 
+              style={[
+                styles.timelineProgress, 
+                { 
+                  width: `${pct * 100}%`, 
+                  backgroundColor: remainingDays < 0 ? '#FF3B30' : '#FF9500' 
+                }
+              ]} 
+            />
+            <View 
+              style={[
+                styles.timelineMarker, 
+                { 
+                  left: `${pct * 100}%`,
+                  backgroundColor: remainingDays < 0 ? '#FF3B30' : '#FF9500',
+                }
+              ]} 
+            />
+          </View>
+
+          <Text style={[styles.timelineDateText, { color: colors.textSecondary }]}>
+            {formatShortDate(endDateStr)}
+          </Text>
+        </View>
+
+        <View style={styles.timelineItemFooter}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[styles.timelineRemainingText, { color: remainingDays < 0 ? '#FF3B30' : colors.textSecondary }]}>
+              {remainingDays === 0 
+                ? 'Finaliza hoy' 
+                : remainingDays < 0 
+                  ? `Vencido hace ${Math.abs(remainingDays)}d` 
+                  : `Quedan ${remainingDays}d`}
+            </Text>
+            {hours > 0 && (
+              <Text style={{ fontSize: 10, color: colors.textSecondary }}>
+                • {hours} {hours === 1 ? 'hora' : 'horas'}
+              </Text>
+            )}
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
 
   // Format YYYY-MM-DD to DD/MM/YYYY
   const formatDisplayDate = (dStr: string) => {
@@ -699,6 +951,160 @@ export default function GoalsScreen() {
             );
           })
         )}
+
+        {/* Timeline & Upcoming Events for Selected Goal Section */}
+        {store.goals.length > 0 && (
+          <View style={[styles.bottomSectionContainer, { borderTopWidth: 1, borderTopColor: colors.backgroundSelected, paddingTop: 16 }]}>
+            
+            {/* Section Title */}
+            <Text style={[styles.sectionTitleHeader, { color: colors.text }]}>Línea de Tiempo y Eventos por Objetivo</Text>
+
+            {/* Goal Selector Chips */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.goalChipsContainer}
+              style={{ marginVertical: 12 }}
+            >
+              {store.goals.map((g) => {
+                const isSelected = filterGoalId === g.id;
+                return (
+                  <Pressable
+                    key={g.id}
+                    onPress={() => setFilterGoalId(g.id)}
+                    style={[
+                      styles.goalChipBtn,
+                      {
+                        backgroundColor: isSelected ? '#FF2D55' : colors.backgroundElement,
+                        borderColor: isSelected ? '#FF2D55' : colors.backgroundSelected,
+                        borderWidth: 1,
+                      }
+                    ]}
+                  >
+                    <Text style={[styles.goalChipText, { color: isSelected ? '#FFFFFF' : colors.text, fontWeight: isSelected ? 'bold' : 'normal' }]}>
+                      {g.title}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {/* Timeline Sub-section */}
+            <View style={styles.subSectionWrapper}>
+              <View style={[styles.subSectionHeader, { marginBottom: 10 }]}>
+                <Ionicons name="git-commit-outline" size={16} color="#FF9500" />
+                <Text style={[styles.subSectionTitle, { color: colors.text }]}>
+                  Líneas de Tiempo ({filteredTimelineTasks.length})
+                </Text>
+              </View>
+
+              {filteredTimelineTasks.length === 0 ? (
+                <View style={[styles.emptySectionCard, { borderColor: 'rgba(255, 149, 0, 0.2)' }]}>
+                  <Text style={[styles.emptySectionText, { color: colors.textSecondary }]}>
+                    No hay líneas de tiempo para este objetivo.
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ gap: 10 }}>
+                  {filteredTimelineTasks.map((t) => renderTimelineItem(t))}
+                </View>
+              )}
+            </View>
+
+            {/* Upcoming Events Sub-section */}
+            <View style={[styles.subSectionWrapper, { marginTop: 20 }]}>
+              <View style={styles.subSectionHeader}>
+                <Ionicons name="calendar-outline" size={16} color="#007AFF" />
+                <Text style={[styles.subSectionTitle, { color: colors.text }]}>
+                  Próximos Eventos ({filteredUpcomingReminders.length})
+                </Text>
+              </View>
+
+              {filteredUpcomingReminders.length === 0 ? (
+                <View style={[styles.emptySectionCard, { borderColor: 'rgba(0, 122, 255, 0.2)' }]}>
+                  <Text style={[styles.emptySectionText, { color: colors.textSecondary }]}>
+                    No hay eventos próximos para este objetivo.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.gridContainer}>
+                  {filteredUpcomingReminders.map((item) => {
+                    const todayStr = getLocalDateStr();
+                    const isMarkedToday = item.dates && item.dates.includes(todayStr);
+                    const activeDate = isMarkedToday ? todayStr : (getReminderActiveDate(item) || item.date || '');
+                    const diff = getDaysDifference(activeDate);
+                    const isToday = diff === 0;
+
+                    const useYellow = isToday && isMarkedToday;
+
+                    let diffLabel = '';
+                    if (isToday) diffLabel = 'Hoy';
+                    else if (diff === 1) diffLabel = 'Mañana';
+                    else diffLabel = `En ${diff} d`;
+
+                    const cardBg = useYellow 
+                      ? 'rgba(255, 204, 0, 0.12)' 
+                      : isToday 
+                        ? 'rgba(255, 59, 48, 0.12)' 
+                        : 'rgba(0, 122, 255, 0.08)';
+
+                    const cardBorder = useYellow 
+                      ? '#FFCC00' 
+                      : isToday 
+                        ? '#FF3B30' 
+                        : 'rgba(0, 122, 255, 0.3)';
+
+                    return (
+                      <Pressable
+                        key={`upcoming-${item.id}`}
+                        onPress={() => handleReminderTap(item.id)}
+                        style={[
+                          styles.gridCard,
+                          {
+                            backgroundColor: cardBg,
+                            borderColor: cardBorder,
+                            borderWidth: isToday ? 2 : 1,
+                          },
+                        ]}
+                      >
+                        <View style={styles.gridCardHeader}>
+                          <Text
+                            style={[
+                              styles.gridCardDiff,
+                              { color: useYellow ? '#FFCC00' : isToday ? '#FF3B30' : '#007AFF' },
+                            ]}
+                          >
+                            {diffLabel}
+                          </Text>
+                          {item.time ? (
+                            <View style={styles.gridCardTimeGroup}>
+                              <Ionicons
+                                name="time-outline"
+                                size={10}
+                                color={useYellow ? '#FFCC00' : isToday ? '#FF3B30' : '#007AFF'}
+                              />
+                              <Text
+                                style={[
+                                  styles.gridCardTime,
+                                  { color: useYellow ? '#FFCC00' : isToday ? '#FF3B30' : '#007AFF' },
+                                ]}
+                              >
+                                {item.time}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={[styles.gridCardText, { color: colors.text }]} numberOfLines={2}>
+                          {item.text}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       {/* ───────────────────────────────────────────────────────────────────────
@@ -873,6 +1279,192 @@ const styles = StyleSheet.create({
   quickTaskInput: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, fontSize: 12 },
   quickTaskBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, alignSelf: 'flex-start' },
   addReminderPlaceholderBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 6 },
+  bottomSectionContainer: {
+    marginTop: 20,
+    paddingTop: 16,
+  },
+  sectionTitleHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  goalChipsContainer: {
+    gap: 8,
+    paddingRight: 16,
+  },
+  goalChipBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  goalChipText: {
+    fontSize: 12,
+  },
+  subSectionWrapper: {
+    marginTop: 12,
+  },
+  subSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  subSectionTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  emptySectionCard: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptySectionText: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  timelineItemContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 10,
+    gap: 8,
+  },
+  timelineItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  timelineTaskText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  availableDaysBadge: {
+    backgroundColor: 'rgba(255, 149, 0, 0.12)',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 149, 0, 0.3)',
+  },
+  availableDaysText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FF9500',
+  },
+  timelineBarWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  timelineDateText: {
+    fontSize: 9,
+    fontWeight: '600',
+    width: 32,
+    textAlign: 'center',
+  },
+  timelineTrackContainer: {
+    flex: 1,
+    height: 12,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  timelineTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 4,
+    borderRadius: 2,
+  },
+  timelineProgress: {
+    position: 'absolute',
+    left: 0,
+    height: 4,
+    borderRadius: 2,
+  },
+  timelineMarker: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: -3,
+    marginLeft: -5,
+    top: '50%',
+    shadowRadius: 2,
+    shadowOpacity: 0.5,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  timelineItemFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  timelineRemainingText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  gridCard: {
+    width: '48.5%',
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  gridCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  gridCardDiff: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  gridCardTimeGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  gridCardTime: {
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  gridCardText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+  },
+  daysAdjusterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  adjusterBtn: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  adjusterBtnText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#007AFF',
+  },
 });
 
 const modalStyles = StyleSheet.create({
