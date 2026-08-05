@@ -378,9 +378,9 @@ export default function GoalsScreen() {
   }, [store.reminders, filterGoalId]);
 
   const handleReminderTap = (id: string) => {
-    router.replace({
-      pathname: '/',
-      params: { highlightReminderId: id },
+    router.push({
+      pathname: '/editor',
+      params: { id },
     });
   };
 

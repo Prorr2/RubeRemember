@@ -22,6 +22,13 @@ export default function RootLayout() {
             <Stack.Screen name="backup" />
             <Stack.Screen name="slots" />
             <Stack.Screen name="goals" />
+            <Stack.Screen name="tasks" />
+            <Stack.Screen name="reminders" />
+            <Stack.Screen name="activities" />
+            <Stack.Screen name="trash" />
+            <Stack.Screen name="editor" />
+            <Stack.Screen name="search" />
+            <Stack.Screen name="lists" />
           </Stack>
         </View>
       </ThemeProvider>
