@@ -8,9 +8,9 @@ import {
   ScrollView,
   Alert,
   useColorScheme,
-  SafeAreaView,
   Switch,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
@@ -366,7 +366,8 @@ export default function ItemEditorScreen() {
             placeholderTextColor={colors.textSecondary + '80'}
             value={title}
             onChangeText={setTitle}
-            style={[styles.textInput, { color: colors.text }]}
+            multiline={true}
+            style={[styles.textInput, { color: colors.text, textAlignVertical: 'top' }]}
           />
 
           <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
@@ -422,6 +423,50 @@ export default function ItemEditorScreen() {
                     keyboardType="numeric"
                     style={[styles.textInput, { color: colors.text, textAlign: 'center' }]}
                   />
+                  {(() => {
+                    const hoursNum = parseFloat(estimatedHours.trim().replace(',', '.'));
+                    if (isNaN(hoursNum) || hoursNum <= 0) return null;
+                    const sortedWeights = [...store.hourWeights].sort((a, b) => b.minHours - a.minHours);
+                    const matched = sortedWeights.find((w) => hoursNum >= w.minHours);
+                    const label = matched ? matched.name : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].name : null);
+                    if (!label) return null;
+                    return (
+                      <Text style={{ fontSize: 11, color: '#007AFF', fontWeight: 'bold', textAlign: 'center', marginTop: 4 }}>
+                        {label}
+                      </Text>
+                    );
+                  })()}
+                </View>
+              </View>
+
+              <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
+
+              {/* Dynamic Hour Weights Quick Selector buttons */}
+              <View>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 8 }]}>Asignar Peso (Mínimo de Horas)</Text>
+                <View style={styles.priorityRow}>
+                  {store.hourWeights.map((w) => {
+                    const hoursNum = parseFloat(estimatedHours.trim().replace(',', '.'));
+                    const sortedWeights = [...store.hourWeights].sort((a, b) => b.minHours - a.minHours);
+                    const matched = sortedWeights.find((sw) => !isNaN(hoursNum) && hoursNum >= sw.minHours);
+                    const isActive = matched && matched.id === w.id;
+
+                    return (
+                      <Pressable
+                        key={w.id}
+                        onPress={() => setEstimatedHours(String(w.minHours))}
+                        style={[
+                          styles.priorityButton,
+                          isActive ? { backgroundColor: '#007AFF' } : { backgroundColor: colors.backgroundSelected },
+                          { paddingVertical: 8 }
+                        ]}
+                      >
+                        <Text style={{ color: isActive ? '#fff' : colors.text, fontSize: 12, fontWeight: '700', textAlign: 'center' }}>
+                          {w.name} ({w.minHours}h)
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </View>
 
@@ -705,7 +750,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 18,
+    paddingBottom: 12,
     borderBottomWidth: 1,
   },
   headerButton: {

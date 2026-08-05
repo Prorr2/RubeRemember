@@ -26,9 +26,20 @@ export default function TasksScreen() {
   const colors = Colors[scheme];
 
   // Filters
-  const [filterPriority, setFilterPriority] = useState<Priority | 'ALL'>('ALL');
+  const [filterPriorities, setFilterPriorities] = useState<Priority[]>([]);
   const [filterGoalId, setFilterGoalId] = useState<string>('ALL');
+  const [filterWeightIds, setFilterWeightIds] = useState<string[]>([]);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const handleToggleSelect = (id: string) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter((item) => item !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
 
   // Comments/Detail expansion
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
@@ -42,12 +53,30 @@ export default function TasksScreen() {
       list = list.filter((t) => t.completed);
     }
 
-    if (filterPriority !== 'ALL') {
-      list = list.filter((t) => t.priority === filterPriority);
+    if (filterPriorities.length > 0) {
+      list = list.filter((t) => filterPriorities.includes(t.priority));
     }
 
     if (filterGoalId !== 'ALL') {
       list = list.filter((t) => t.goalId === filterGoalId);
+    }
+
+    if (filterWeightIds.length > 0) {
+      list = list.filter((t) => {
+        if (!t.estimatedHours || t.estimatedHours <= 0) return false;
+        const sortedWeights = [...store.hourWeights].sort((a, b) => b.minHours - a.minHours);
+        const matched = sortedWeights.find((w) => t.estimatedHours! >= w.minHours);
+        const labelId = matched ? matched.id : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].id : null);
+        return labelId ? filterWeightIds.includes(labelId) : false;
+      });
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((t) => 
+        t.title.toLowerCase().includes(q) || 
+        (t.description && t.description.toLowerCase().includes(q))
+      );
     }
 
     // Sort by priority (HIGH -> MEDIUM -> LOW) then date
@@ -58,7 +87,27 @@ export default function TasksScreen() {
       if (wA !== wB) return wB - wA;
       return a.createdAt.localeCompare(b.createdAt);
     });
-  }, [store.items, filterPriority, filterGoalId, showCompleted]);
+  }, [store.items, store.hourWeights, filterPriorities, filterGoalId, filterWeightIds, showCompleted, searchQuery]);
+
+  const handleBulkDelete = () => {
+    Alert.alert(
+      'Mover a la papelera',
+      `¿Deseas mover ${selectedIds.length} tareas a la papelera?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Mover',
+          style: 'destructive',
+          onPress: async () => {
+            for (const id of selectedIds) {
+              await store.deleteItem(id);
+            }
+            setSelectedIds([]);
+          },
+        },
+      ]
+    );
+  };
 
   const handleAddComment = async (taskId: string) => {
     const text = commentInputs[taskId]?.trim();
@@ -90,6 +139,35 @@ export default function TasksScreen() {
     Alert.alert('Archivada', `Se archivó la tarea "${task.title}".`);
   };
 
+  const handleChangePriority = (task: Task) => {
+    Alert.alert(
+      'Cambiar Prioridad',
+      `Selecciona la nueva prioridad para "${task.title}":`,
+      [
+        {
+          text: 'Alta (HIGH)',
+          onPress: async () => {
+            await store.updateItem(task.id, { priority: Priority.HIGH });
+          },
+        },
+        {
+          text: 'Media (MEDIUM)',
+          onPress: async () => {
+            await store.updateItem(task.id, { priority: Priority.MEDIUM });
+          },
+        },
+        {
+          text: 'Baja (LOW)',
+          onPress: async () => {
+            await store.updateItem(task.id, { priority: Priority.LOW });
+          },
+        },
+        { text: 'Cancelar', style: 'cancel' },
+      ],
+      { cancelable: true }
+    );
+  };
+
   const renderTaskItem = ({ item }: { item: Task }) => {
     const isExpanded = expandedTaskId === item.id;
     const goal = store.goals.find((g) => g.id === item.goalId);
@@ -98,21 +176,50 @@ export default function TasksScreen() {
     const priorityColor =
       item.priority === Priority.HIGH ? '#FF3B30' : item.priority === Priority.MEDIUM ? '#FF9500' : '#34C759';
 
+    const isSelected = selectedIds.includes(item.id);
+
     return (
-      <View style={[styles.taskCard, { backgroundColor: colors.backgroundElement }]}>
+      <Pressable
+        onLongPress={() => handleToggleSelect(item.id)}
+        onPress={() => {
+          if (selectedIds.length > 0) {
+            handleToggleSelect(item.id);
+          } else {
+            setExpandedTaskId(isExpanded ? null : item.id);
+          }
+        }}
+        style={[
+          styles.taskCard,
+          { backgroundColor: colors.backgroundElement },
+          isSelected && { borderColor: '#FF9500', borderWidth: 1.5 },
+        ]}
+      >
         <View style={styles.cardMain}>
-          <Pressable
-            onPress={async () => {
-              await store.toggleItemCompleted(item.id);
-            }}
-            style={styles.checkboxContainer}
-          >
-            <Ionicons
-              name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
-              size={24}
-              color={item.completed ? '#FF9500' : colors.textSecondary}
-            />
-          </Pressable>
+          {selectedIds.length > 0 ? (
+            <Pressable
+              onPress={() => handleToggleSelect(item.id)}
+              style={styles.checkboxContainer}
+            >
+              <Ionicons
+                name={isSelected ? 'checkbox' : 'square-outline'}
+                size={24}
+                color={isSelected ? '#FF9500' : colors.textSecondary}
+              />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={async () => {
+                await store.toggleItemCompleted(item.id);
+              }}
+              style={styles.checkboxContainer}
+            >
+              <Ionicons
+                name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                size={24}
+                color={item.completed ? '#FF9500' : colors.textSecondary}
+              />
+            </Pressable>
+          )}
 
           <View style={{ flex: 1, marginHorizontal: 8 }}>
             <Text
@@ -126,18 +233,39 @@ export default function TasksScreen() {
             </Text>
             
             <View style={styles.tagRow}>
-              <View style={[styles.priorityBadge, { backgroundColor: priorityColor + '20' }]}>
+              <Pressable
+                onPress={() => handleChangePriority(item)}
+                style={({ pressed }) => [
+                  styles.priorityBadge,
+                  { backgroundColor: priorityColor + '20', opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
                 <Text style={{ color: priorityColor, fontSize: 10, fontWeight: '700' }}>
                   {item.priority}
                 </Text>
-              </View>
+              </Pressable>
 
               {item.estimatedHours ? (
-                <View style={[styles.metaBadge, { backgroundColor: colors.backgroundSelected }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>
-                    ⌛ {item.estimatedHours}h
-                  </Text>
-                </View>
+                <>
+                  <View style={[styles.metaBadge, { backgroundColor: colors.backgroundSelected }]}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>
+                      ⌛ {item.estimatedHours}h
+                    </Text>
+                  </View>
+                  {(() => {
+                    const sortedWeights = [...store.hourWeights].sort((a, b) => b.minHours - a.minHours);
+                    const matched = sortedWeights.find((w) => item.estimatedHours! >= w.minHours);
+                    const label = matched ? matched.name : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].name : null);
+                    if (!label) return null;
+                    return (
+                      <View style={[styles.metaBadge, { backgroundColor: 'rgba(0, 122, 255, 0.1)' }]}>
+                        <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '700' }}>
+                          {label}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                </>
               ) : null}
 
               {goal ? (
@@ -233,23 +361,52 @@ export default function TasksScreen() {
             </View>
           </View>
         )}
-      </View>
+      </Pressable>
     );
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-        <Pressable onPress={() => router.back()} style={styles.headerButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Tareas</Text>
-        <Pressable
-          onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.TASK } })}
-          style={styles.headerButton}
-        >
-          <Ionicons name="add" size={26} color="#FF9500" />
-        </Pressable>
+      {selectedIds.length > 0 ? (
+        <View style={[styles.header, { borderBottomColor: colors.backgroundElement, backgroundColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => setSelectedIds([])} style={styles.headerButton}>
+            <Ionicons name="close" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{selectedIds.length} seleccionadas</Text>
+          <Pressable onPress={handleBulkDelete} style={styles.headerButton}>
+            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => router.back()} style={styles.headerButton}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Tareas</Text>
+          <Pressable
+            onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.TASK } })}
+            style={styles.headerButton}
+          >
+            <Ionicons name="add" size={26} color="#FF9500" />
+          </Pressable>
+        </View>
+      )}
+
+      {/* Search Bar */}
+      <View style={[styles.searchBarContainer, { borderBottomColor: colors.backgroundSelected }]}>
+        <Ionicons name="search" size={18} color={colors.textSecondary} style={styles.searchIcon} />
+        <TextInput
+          placeholder="Buscar tareas por nombre..."
+          placeholderTextColor={colors.textSecondary + '80'}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          style={[styles.searchInput, { color: colors.text, backgroundColor: colors.backgroundElement }]}
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery('')} style={styles.searchClearBtn}>
+            <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+          </Pressable>
+        )}
       </View>
 
       {/* Filter Tabs */}
@@ -273,24 +430,69 @@ export default function TasksScreen() {
         {/* Priority Filter */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters}>
           <Pressable
-            onPress={() => setFilterPriority('ALL')}
-            style={[styles.filterChip, filterPriority === 'ALL' && { backgroundColor: '#FF9500' }, filterPriority !== 'ALL' && { backgroundColor: colors.backgroundElement }]}
+            onPress={() => setFilterPriorities([])}
+            style={[
+              styles.filterChip,
+              filterPriorities.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
+            ]}
           >
-            <Text style={[styles.filterChipText, { color: filterPriority === 'ALL' ? '#fff' : colors.text }]}>Todas</Text>
+            <Text style={[styles.filterChipText, { color: filterPriorities.length === 0 ? '#fff' : colors.text }]}>Todas</Text>
           </Pressable>
-          {([Priority.HIGH, Priority.MEDIUM, Priority.LOW] as Priority[]).map((p) => (
-            <Pressable
-              key={p}
-              onPress={() => setFilterPriority(p)}
-              style={[
-                styles.filterChip,
-                filterPriority === p && { backgroundColor: '#FF9500' },
-                filterPriority !== p && { backgroundColor: colors.backgroundElement },
-              ]}
-            >
-              <Text style={[styles.filterChipText, { color: filterPriority === p ? '#fff' : colors.text }]}>{p}</Text>
-            </Pressable>
-          ))}
+          {([Priority.HIGH, Priority.MEDIUM, Priority.LOW] as Priority[]).map((p) => {
+            const isActive = filterPriorities.includes(p);
+            return (
+              <Pressable
+                key={p}
+                onPress={() => {
+                  if (isActive) {
+                    setFilterPriorities(filterPriorities.filter((x) => x !== p));
+                  } else {
+                    setFilterPriorities([...filterPriorities, p]);
+                  }
+                }}
+                style={[
+                  styles.filterChip,
+                  isActive ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement },
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: isActive ? '#fff' : colors.text }]}>{p}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {/* Weight Filter */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters} style={{ marginTop: -2 }}>
+          <Pressable
+            onPress={() => setFilterWeightIds([])}
+            style={[
+              styles.filterChip,
+              filterWeightIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
+            ]}
+          >
+            <Text style={[styles.filterChipText, { color: filterWeightIds.length === 0 ? '#fff' : colors.text }]}>Todos los pesos</Text>
+          </Pressable>
+          {store.hourWeights.map((w) => {
+            const isActive = filterWeightIds.includes(w.id);
+            return (
+              <Pressable
+                key={w.id}
+                onPress={() => {
+                  if (isActive) {
+                    setFilterWeightIds(filterWeightIds.filter((x) => x !== w.id));
+                  } else {
+                    setFilterWeightIds([...filterWeightIds, w.id]);
+                  }
+                }}
+                style={[
+                  styles.filterChip,
+                  isActive ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: isActive ? '#fff' : colors.text }]}>{w.name}</Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </View>
 
@@ -319,7 +521,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 18,
+    paddingBottom: 12,
     borderBottomWidth: 1,
   },
   headerButton: {
@@ -349,7 +552,7 @@ const styles = StyleSheet.create({
   },
   horizontalFilters: {
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingVertical: 3,
     gap: 8,
   },
   filterChip: {
@@ -476,5 +679,29 @@ const styles = StyleSheet.create({
   emptyContainer: {
     paddingVertical: 40,
     alignItems: 'center',
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  searchIcon: {
+    marginRight: -26,
+    zIndex: 1,
+  },
+  searchInput: {
+    flex: 1,
+    height: 38,
+    borderRadius: 19,
+    paddingLeft: 32,
+    paddingRight: 32,
+    fontSize: 14,
+  },
+  searchClearBtn: {
+    marginLeft: -26,
+    zIndex: 1,
+    padding: 4,
   },
 });

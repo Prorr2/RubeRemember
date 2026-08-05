@@ -5,13 +5,13 @@ import {
   Text,
   Pressable,
   ScrollView,
-  SafeAreaView,
   Alert,
   useColorScheme,
   FlatList,
   Modal,
   TextInput,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
@@ -29,6 +29,36 @@ export default function ActivitiesScreen() {
   // Tab: 'SUGGESTIONS' or 'ALL'
   const [activeTab, setActiveTab] = useState<'SUGGESTIONS' | 'ALL'>('SUGGESTIONS');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const handleToggleSelect = (id: string) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter((item) => item !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    Alert.alert(
+      'Mover a la papelera',
+      `¿Deseas mover ${selectedIds.length} actividades a la papelera?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Mover',
+          style: 'destructive',
+          onPress: async () => {
+            for (const id of selectedIds) {
+              await store.deleteItem(id);
+            }
+            setSelectedIds([]);
+          },
+        },
+      ]
+    );
+  };
 
   // Category Manager Modal States
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
@@ -40,14 +70,22 @@ export default function ActivitiesScreen() {
   const [suggestionKey, setSuggestionKey] = useState(0);
 
   const suggestedList = useMemo(() => {
-    // Generate suggested activities from store selector
-    return store.getSuggestedActivities();
-  }, [store.items, suggestionKey]);
+    let list = store.getSuggestedActivities();
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((a) => a.title.toLowerCase().includes(q) || (a.description && a.description.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [store.items, suggestionKey, searchQuery]);
 
   const filteredAllList = useMemo(() => {
     let list = store.getActivities();
     if (selectedCategory !== 'ALL') {
       list = list.filter((a) => a.category === selectedCategory);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((a) => a.title.toLowerCase().includes(q) || (a.description && a.description.toLowerCase().includes(q)));
     }
     // Sort: favorites first, then by title
     return list.sort((a, b) => {
@@ -55,7 +93,7 @@ export default function ActivitiesScreen() {
       if (!a.favourite && b.favourite) return 1;
       return a.title.localeCompare(b.title);
     });
-  }, [store.items, selectedCategory]);
+  }, [store.items, selectedCategory, searchQuery]);
 
   const handleRegisterDone = async (activity: Activity) => {
     await store.registerActivityDone(activity.id);
@@ -99,17 +137,46 @@ export default function ActivitiesScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-        <Pressable onPress={() => router.back()} style={styles.headerButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Ocio / Tiempo Libre</Text>
-        <Pressable
-          onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.ACTIVITY } })}
-          style={styles.headerButton}
-        >
-          <Ionicons name="add" size={26} color="#5856D6" />
-        </Pressable>
+      {selectedIds.length > 0 ? (
+        <View style={[styles.header, { borderBottomColor: colors.backgroundElement, backgroundColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => setSelectedIds([])} style={styles.headerButton}>
+            <Ionicons name="close" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{selectedIds.length} seleccionadas</Text>
+          <Pressable onPress={handleBulkDelete} style={styles.headerButton}>
+            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => router.back()} style={styles.headerButton}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Ocio / Tiempo Libre</Text>
+          <Pressable
+            onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.ACTIVITY } })}
+            style={styles.headerButton}
+          >
+            <Ionicons name="add" size={26} color="#5856D6" />
+          </Pressable>
+        </View>
+      )}
+
+      {/* Search Bar */}
+      <View style={[styles.searchBarContainer, { borderBottomColor: colors.backgroundSelected }]}>
+        <Ionicons name="search" size={18} color={colors.textSecondary} style={styles.searchIcon} />
+        <TextInput
+          placeholder="Buscar actividades por nombre..."
+          placeholderTextColor={colors.textSecondary + '80'}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          style={[styles.searchInput, { color: colors.text, backgroundColor: colors.backgroundElement }]}
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery('')} style={styles.searchClearBtn}>
+            <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+          </Pressable>
+        )}
       </View>
 
       {/* Tabs */}
@@ -152,40 +219,56 @@ export default function ActivitiesScreen() {
 
           {suggestedList.length > 0 ? (
             <View style={styles.suggestionsGrid}>
-              {suggestedList.map((activity, idx) => (
-                <View key={activity.id} style={[styles.suggestedCard, { backgroundColor: colors.backgroundElement }]}>
-                  <View style={styles.cardHeader}>
-                    <Text style={[styles.categoryBadge, { color: '#5856D6' }]}>
-                      {getCategoryName(activity.category)}
-                    </Text>
-                    {activity.favourite && (
-                      <Ionicons name="star" size={16} color="#FFCC00" />
-                    )}
-                  </View>
+              {suggestedList.map((activity, idx) => {
+                const isSelected = selectedIds.includes(activity.id);
+                return (
+                  <Pressable
+                    key={activity.id}
+                    onLongPress={() => handleToggleSelect(activity.id)}
+                    onPress={() => {
+                      if (selectedIds.length > 0) {
+                        handleToggleSelect(activity.id);
+                      }
+                    }}
+                    style={[
+                      styles.suggestedCard,
+                      { backgroundColor: colors.backgroundElement },
+                      isSelected && { borderColor: '#5856D6', borderWidth: 1.5 },
+                    ]}
+                  >
+                    <View style={styles.cardHeader}>
+                      <Text style={[styles.categoryBadge, { color: '#5856D6' }]}>
+                        {getCategoryName(activity.category)}
+                      </Text>
+                      {activity.favourite && (
+                        <Ionicons name="star" size={16} color="#FFCC00" />
+                      )}
+                    </View>
 
-                  <Text style={[styles.activityTitle, { color: colors.text }]}>{activity.title}</Text>
-                  
-                  {activity.description ? (
-                    <Text style={[styles.activityDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                      {activity.description}
-                    </Text>
-                  ) : null}
-
-                  <View style={styles.cardFooter}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                      Realizada: {activity.doneCount || 0} {activity.doneCount === 1 ? 'vez' : 'veces'}
-                    </Text>
+                    <Text style={[styles.activityTitle, { color: colors.text }]}>{activity.title}</Text>
                     
-                    <Pressable
-                      onPress={() => handleRegisterDone(activity)}
-                      style={[styles.actionBadgeBtn, { backgroundColor: '#5856D6' }]}
-                    >
-                      <Ionicons name="checkmark" size={14} color="#fff" />
-                      <Text style={styles.actionBadgeBtnText}>¡Hecho!</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
+                    {activity.description ? (
+                      <Text style={[styles.activityDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                        {activity.description}
+                      </Text>
+                    ) : null}
+
+                    <View style={styles.cardFooter}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                        Realizada: {activity.doneCount || 0} {activity.doneCount === 1 ? 'vez' : 'veces'}
+                      </Text>
+                      
+                      <Pressable
+                        onPress={() => handleRegisterDone(activity)}
+                        style={[styles.actionBadgeBtn, { backgroundColor: '#5856D6' }]}
+                      >
+                        <Ionicons name="checkmark" size={14} color="#fff" />
+                        <Text style={styles.actionBadgeBtnText}>¡Hecho!</Text>
+                      </Pressable>
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
           ) : (
             <View style={styles.emptyContainer}>
@@ -242,40 +325,63 @@ export default function ActivitiesScreen() {
             data={filteredAllList}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
-              <View style={[styles.activityRow, { backgroundColor: colors.backgroundElement }]}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[styles.rowTitle, { color: colors.text }]}>{item.title}</Text>
-                    {item.favourite && <Ionicons name="star" size={14} color="#FFCC00" />}
+            renderItem={({ item }) => {
+              const isSelected = selectedIds.includes(item.id);
+              return (
+                <Pressable
+                  onLongPress={() => handleToggleSelect(item.id)}
+                  onPress={() => {
+                    if (selectedIds.length > 0) {
+                      handleToggleSelect(item.id);
+                    }
+                  }}
+                  style={[
+                    styles.activityRow,
+                    { backgroundColor: colors.backgroundElement },
+                    isSelected && { borderColor: '#5856D6', borderWidth: 1.5 },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      {selectedIds.length > 0 && (
+                        <Ionicons
+                          name={isSelected ? 'checkbox' : 'square-outline'}
+                          size={18}
+                          color={isSelected ? '#5856D6' : colors.textSecondary}
+                          style={{ marginRight: 4 }}
+                        />
+                      )}
+                      <Text style={[styles.rowTitle, { color: colors.text }]}>{item.title}</Text>
+                      {item.favourite && <Ionicons name="star" size={14} color="#FFCC00" />}
+                    </View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                      {getCategoryName(item.category)}
+                      {item.doneCount ? ` · Realizada ${item.doneCount} veces` : ' · Sin realizar'}
+                    </Text>
                   </View>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                    {getCategoryName(item.category)}
-                    {item.doneCount ? ` · Realizada ${item.doneCount} veces` : ' · Sin realizar'}
-                  </Text>
-                </View>
 
-                <View style={styles.rowActions}>
-                  <Pressable
-                    onPress={() => store.updateItem(item.id, { favourite: !item.favourite })}
-                    style={styles.actionBtn}
-                  >
-                    <Ionicons name={item.favourite ? 'star' : 'star-outline'} size={18} color="#FFCC00" />
-                  </Pressable>
+                  <View style={styles.rowActions}>
+                    <Pressable
+                      onPress={() => store.updateItem(item.id, { favourite: !item.favourite })}
+                      style={styles.actionBtn}
+                    >
+                      <Ionicons name={item.favourite ? 'star' : 'star-outline'} size={18} color="#FFCC00" />
+                    </Pressable>
 
-                  <Pressable
-                    onPress={() => router.push({ pathname: '/editor', params: { id: item.id } })}
-                    style={styles.actionBtn}
-                  >
-                    <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
-                  </Pressable>
+                    <Pressable
+                      onPress={() => router.push({ pathname: '/editor', params: { id: item.id } })}
+                      style={styles.actionBtn}
+                    >
+                      <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
+                    </Pressable>
 
-                  <Pressable onPress={() => handleDeleteActivity(item)} style={styles.actionBtn}>
-                    <Ionicons name="trash-outline" size={18} color="#FF3B30" />
-                  </Pressable>
-                </View>
-              </View>
-            )}
+                    <Pressable onPress={() => handleDeleteActivity(item)} style={styles.actionBtn}>
+                      <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                    </Pressable>
+                  </View>
+                </Pressable>
+              );
+            }}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="sparkles-outline" size={48} color={colors.textSecondary} />
@@ -435,7 +541,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 18,
+    paddingBottom: 12,
     borderBottomWidth: 1,
   },
   headerButton: {
@@ -651,6 +758,30 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   categoryActionBtn: {
+    padding: 4,
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  searchIcon: {
+    marginRight: -26,
+    zIndex: 1,
+  },
+  searchInput: {
+    flex: 1,
+    height: 38,
+    borderRadius: 19,
+    paddingLeft: 32,
+    paddingRight: 32,
+    fontSize: 14,
+  },
+  searchClearBtn: {
+    marginLeft: -26,
+    zIndex: 1,
     padding: 4,
   },
 });

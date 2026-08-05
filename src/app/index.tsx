@@ -9,16 +9,17 @@ import {
   Alert,
   useColorScheme,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { useRememberStore, ItemType, Task, Reminder as ReminderV2, Activity, getLocalDateStr } from '@/hooks/use-remember-store';
+import { useRememberStore, ItemType, Priority, Task, Reminder as ReminderV2, Activity, getLocalDateStr } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 
 export default function DecisionCenterScreen() {
   const store = useRememberStore();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
@@ -86,6 +87,35 @@ export default function DecisionCenterScreen() {
     });
   };
 
+  const handleChangePriority = (task: Task) => {
+    Alert.alert(
+      'Cambiar Prioridad',
+      `Selecciona la nueva prioridad para "${task.title}":`,
+      [
+        {
+          text: 'Alta (HIGH)',
+          onPress: async () => {
+            await store.updateItem(task.id, { priority: Priority.HIGH });
+          },
+        },
+        {
+          text: 'Media (MEDIUM)',
+          onPress: async () => {
+            await store.updateItem(task.id, { priority: Priority.MEDIUM });
+          },
+        },
+        {
+          text: 'Baja (LOW)',
+          onPress: async () => {
+            await store.updateItem(task.id, { priority: Priority.LOW });
+          },
+        },
+        { text: 'Cancelar', style: 'cancel' },
+      ],
+      { cancelable: true }
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header bar */}
@@ -98,7 +128,7 @@ export default function DecisionCenterScreen() {
           <Pressable onPress={() => router.push('/search')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
             <Ionicons name="search-outline" size={22} color={colors.text} />
           </Pressable>
-          <Pressable onPress={() => router.push('/backup')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => router.push('/settings')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
             <Ionicons name="settings-outline" size={22} color={colors.text} />
           </Pressable>
         </View>
@@ -139,15 +169,59 @@ export default function DecisionCenterScreen() {
               style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: '#FF9500' }]}
             >
               <View style={styles.focusHeader}>
-                <View style={[styles.priorityBadge, { backgroundColor: focusTask.priority === 'HIGH' ? 'rgba(255, 59, 48, 0.15)' : 'rgba(255, 149, 0, 0.15)' }]}>
-                  <Text style={[styles.priorityBadgeText, { color: focusTask.priority === 'HIGH' ? '#FF3B30' : '#FF9500' }]}>
-                    Prioridad {focusTask.priority === 'HIGH' ? 'Alta' : focusTask.priority === 'MEDIUM' ? 'Media' : 'Baja'}
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleChangePriority(focusTask);
+                  }}
+                  style={({ pressed }) => [
+                    styles.priorityBadge,
+                    {
+                      backgroundColor:
+                        focusTask.priority === Priority.HIGH
+                          ? 'rgba(255, 59, 48, 0.15)'
+                          : focusTask.priority === Priority.MEDIUM
+                          ? 'rgba(255, 149, 0, 0.15)'
+                          : 'rgba(52, 199, 89, 0.15)',
+                      opacity: pressed ? 0.6 : 1.0,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.priorityBadgeText,
+                      {
+                        color:
+                          focusTask.priority === Priority.HIGH
+                            ? '#FF3B30'
+                            : focusTask.priority === Priority.MEDIUM
+                            ? '#FF9500'
+                            : '#34C759',
+                      },
+                    ]}
+                  >
+                    Prioridad {focusTask.priority === Priority.HIGH ? 'Alta' : focusTask.priority === Priority.MEDIUM ? 'Media' : 'Baja'}
                   </Text>
-                </View>
+                </Pressable>
                 {focusTask.estimatedHours && (
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
-                    ⌛ {focusTask.estimatedHours}h est.
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                      ⌛ {focusTask.estimatedHours}h est.
+                    </Text>
+                    {(() => {
+                      const sortedWeights = [...store.hourWeights].sort((a, b) => b.minHours - a.minHours);
+                      const matched = sortedWeights.find((w) => focusTask.estimatedHours! >= w.minHours);
+                      const label = matched ? matched.name : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].name : null);
+                      if (!label) return null;
+                      return (
+                        <View style={{ backgroundColor: 'rgba(0, 122, 255, 0.1)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '700' }}>
+                            {label}
+                          </Text>
+                        </View>
+                      );
+                    })()}
+                  </View>
                 )}
               </View>
 
@@ -440,11 +514,11 @@ export default function DecisionCenterScreen() {
           </View>
         </View>
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 100 + insets.bottom }} />
       </ScrollView>
 
       {/* QUICK COMPOSER BAR */}
-      <View style={[styles.composerContainer, { backgroundColor: colors.backgroundElement, borderTopColor: colors.backgroundSelected }]}>
+      <View style={[styles.composerContainer, { backgroundColor: colors.backgroundElement, borderTopColor: colors.backgroundSelected, paddingBottom: (insets.bottom || 24) + 12 }]}>
         <TextInput
           placeholder="Escribe algo rápido aquí..."
           placeholderTextColor={colors.textSecondary + '80'}
@@ -477,7 +551,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 24,
+    paddingBottom: 16,
   },
   greeting: {
     fontSize: 13,

@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Platform, Alert, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { NotificationService } from '@/services/notification-service';
 
-import { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES } from '@/models/Item';
+import { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS } from '@/models/Item';
 import { Goal, Phase } from '@/models/Goal';
 import { TimeSlot } from '@/models/TimeSlot';
 import { ReminderList, ListItem } from '@/models/ReminderList';
@@ -15,7 +16,7 @@ export { Comment } from '@/models/Comment';
 export { Goal, Phase } from '@/models/Goal';
 export { TimeSlot } from '@/models/TimeSlot';
 export { ReminderList, ListItem } from '@/models/ReminderList';
-export { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES } from '@/models/Item';
+export { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS } from '@/models/Item';
 
 
 
@@ -161,12 +162,20 @@ interface RememberStore {
   addListItem: (listId: string, text: string, imageUri?: string) => Promise<void>;
   updateListItem: (listId: string, itemId: string, text: string, imageUri?: string) => Promise<void>;
   deleteListItem: (listId: string, itemId: string) => Promise<void>;
+  setListAlarm: (listId: string, time: string | null) => Promise<void>;
+  setListItemAlarm: (listId: string, itemId: string, time: string | null) => Promise<void>;
 
   // Activity Categories
   activityCategories: CustomCategory[];
   addActivityCategory: (name: string) => Promise<void>;
   updateActivityCategory: (id: string, name: string) => Promise<void>;
   deleteActivityCategory: (id: string) => Promise<void>;
+
+  // Hour Weights configuration
+  hourWeights: HourWeight[];
+  addHourWeight: (name: string, minHours: number) => Promise<void>;
+  updateHourWeight: (id: string, name: string, minHours: number) => Promise<void>;
+  deleteHourWeight: (id: string) => Promise<void>;
 }
 
 const V2_DB_KEY = 'rube_v2_database';
@@ -369,6 +378,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [lists, setLists] = useState<ReminderList[]>([]);
   const [activityCategories, setActivityCategories] = useState<CustomCategory[]>(DEFAULT_ACTIVITY_CATEGORIES);
+  const [hourWeights, setHourWeights] = useState<HourWeight[]>(DEFAULT_HOUR_WEIGHTS);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Initialize notifications handler
@@ -392,6 +402,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           setActivityCategories(db.activityCategories);
         } else {
           setActivityCategories(DEFAULT_ACTIVITY_CATEGORIES);
+        }
+
+        if (db.hourWeights && db.hourWeights.length > 0) {
+          setHourWeights(db.hourWeights);
+        } else {
+          setHourWeights(DEFAULT_HOUR_WEIGHTS);
         }
       } catch (e) {
         console.error('Error loading database in store:', e);
@@ -1438,6 +1454,107 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await saveLists(updated);
   }, [lists, saveLists]);
 
+  const setListAlarm = useCallback(async (listId: string, time: string | null) => {
+    let listName = '';
+    const updated = lists.map((l) => {
+      if (l.id === listId) {
+        listName = l.name;
+        return { ...l, alarmTime: time || undefined };
+      }
+      return l;
+    });
+
+    if (time) {
+      const now = new Date();
+      const [hours, minutes] = time.split(':').map(Number);
+      const alarmDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+      const isToday = alarmDate.getTime() > now.getTime();
+
+      // Configure system clock alarm on Android for today's alarms
+      if (isToday && Platform.OS === 'android') {
+        try {
+          await IntentLauncher.startActivityAsync('android.intent.action.SET_ALARM', {
+            extra: {
+              'android.intent.extra.alarm.HOUR': hours,
+              'android.intent.extra.alarm.MINUTES': minutes,
+              'android.intent.extra.alarm.MESSAGE': `Lista: ${listName}`,
+              'android.intent.extra.alarm.SKIP_UI': true,
+            },
+          });
+        } catch (err) {
+          console.warn('Failed to start system alarm intent:', err);
+        }
+      }
+
+      if (alarmDate.getTime() <= now.getTime()) {
+        alarmDate.setDate(alarmDate.getDate() + 1);
+      }
+      const yyyy = alarmDate.getFullYear();
+      const mm = String(alarmDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(alarmDate.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      await NotificationService.scheduleNotification(listId, `Lista: ${listName}`, [dateStr], time);
+    } else {
+      await NotificationService.cancelNotification(listId);
+    }
+
+    await saveLists(updated);
+  }, [lists, saveLists]);
+
+  const setListItemAlarm = useCallback(async (listId: string, itemId: string, time: string | null) => {
+    let itemText = '';
+    const updated = lists.map((l) => {
+      if (l.id === listId) {
+        const updatedItems = l.items.map((it) => {
+          if (it.id === itemId) {
+            itemText = it.text;
+            return { ...it, alarmTime: time || undefined };
+          }
+          return it;
+        });
+        return { ...l, items: updatedItems };
+      }
+      return l;
+    });
+
+    const notifId = `${listId}_item_${itemId}`;
+    if (time) {
+      const now = new Date();
+      const [hours, minutes] = time.split(':').map(Number);
+      const alarmDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+      const isToday = alarmDate.getTime() > now.getTime();
+
+      // Configure system clock alarm on Android for today's alarms
+      if (isToday && Platform.OS === 'android') {
+        try {
+          await IntentLauncher.startActivityAsync('android.intent.action.SET_ALARM', {
+            extra: {
+              'android.intent.extra.alarm.HOUR': hours,
+              'android.intent.extra.alarm.MINUTES': minutes,
+              'android.intent.extra.alarm.MESSAGE': itemText,
+              'android.intent.extra.alarm.SKIP_UI': true,
+            },
+          });
+        } catch (err) {
+          console.warn('Failed to start system alarm intent:', err);
+        }
+      }
+
+      if (alarmDate.getTime() <= now.getTime()) {
+        alarmDate.setDate(alarmDate.getDate() + 1);
+      }
+      const yyyy = alarmDate.getFullYear();
+      const mm = String(alarmDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(alarmDate.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      await NotificationService.scheduleNotification(notifId, itemText, [dateStr], time);
+    } else {
+      await NotificationService.cancelNotification(notifId);
+    }
+
+    await saveLists(updated);
+  }, [lists, saveLists]);
+
   // Activity Categories CRUD
   const saveActivityCategories = useCallback(async (newCategories: CustomCategory[]) => {
     setActivityCategories(newCategories);
@@ -1499,6 +1616,48 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await MigrationEngine.saveDatabase(db);
   }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories]);
 
+  // Hour Weights CRUD
+  const saveHourWeights = useCallback(async (newWeights: HourWeight[]) => {
+    setHourWeights(newWeights);
+    const db: DatabaseV2 = {
+      version: 2,
+      items,
+      goals,
+      lists,
+      timeSlots,
+      activityCategories,
+      hourWeights: newWeights,
+      settings: {
+        proximityDays,
+        slotSeparationMinutes,
+      },
+    };
+    await MigrationEngine.saveDatabase(db);
+  }, [items, goals, lists, timeSlots, activityCategories, proximityDays, slotSeparationMinutes]);
+
+  const addHourWeight = useCallback(async (name: string, minHours: number) => {
+    const id = `weight-${Math.random().toString(36).substring(7)}`;
+    const newWeight: HourWeight = {
+      id,
+      name: name.trim(),
+      minHours,
+    };
+    const updated = [...hourWeights, newWeight].sort((a, b) => a.minHours - b.minHours);
+    await saveHourWeights(updated);
+  }, [hourWeights, saveHourWeights]);
+
+  const updateHourWeight = useCallback(async (id: string, name: string, minHours: number) => {
+    const updated = hourWeights
+      .map((w) => (w.id === id ? { ...w, name: name.trim(), minHours } : w))
+      .sort((a, b) => a.minHours - b.minHours);
+    await saveHourWeights(updated);
+  }, [hourWeights, saveHourWeights]);
+
+  const deleteHourWeight = useCallback(async (id: string) => {
+    const updated = hourWeights.filter((w) => w.id !== id);
+    await saveHourWeights(updated);
+  }, [hourWeights, saveHourWeights]);
+
   return (
     <RememberStoreContext.Provider
       value={{
@@ -1523,8 +1682,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         toggleItemCompleted,
         registerActivityDone,
         convertItem,
-         emptyTrash,
-         deleteItemPermanently,
+        emptyTrash,
+        deleteItemPermanently,
         addReminder,
         updateReminder,
         deleteReminder,
@@ -1564,10 +1723,16 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         addListItem,
         updateListItem,
         deleteListItem,
+        setListAlarm,
+        setListItemAlarm,
         activityCategories,
         addActivityCategory,
         updateActivityCategory,
         deleteActivityCategory,
+        hourWeights,
+        addHourWeight,
+        updateHourWeight,
+        deleteHourWeight,
       }}
     >
       {children}

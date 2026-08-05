@@ -5,6 +5,7 @@ import { TimeSlot } from '../models/TimeSlot';
 import { ReminderList } from '../models/ReminderList';
 
 import { CustomCategory } from '../models/Activity';
+import { HourWeight } from '../models/HourWeight';
 
 export interface DatabaseV2 {
   version: number;
@@ -13,6 +14,7 @@ export interface DatabaseV2 {
   lists: ReminderList[];
   timeSlots: TimeSlot[];
   activityCategories?: CustomCategory[];
+  hourWeights?: HourWeight[];
   settings: {
     proximityDays: number;
     slotSeparationMinutes: number;
@@ -75,13 +77,16 @@ export const MigrationEngine = {
     try {
       db.version = 2; // Always ensure version is correct
       
-      // Preserve properties like activityCategories that might not be in the updated db object
+      // Preserve properties like activityCategories and hourWeights that might not be in the updated db object
       try {
         const existingRaw = await AsyncStorage.getItem(V2_DB_KEY);
         if (existingRaw) {
           const existing = JSON.parse(existingRaw);
           if (db.activityCategories === undefined && existing.activityCategories !== undefined) {
             db.activityCategories = existing.activityCategories;
+          }
+          if (db.hourWeights === undefined && existing.hourWeights !== undefined) {
+            db.hourWeights = existing.hourWeights;
           }
         }
       } catch (err) {

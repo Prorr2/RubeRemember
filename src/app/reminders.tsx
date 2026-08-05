@@ -7,6 +7,7 @@ import {
   FlatList,
   Alert,
   useColorScheme,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,35 @@ export default function RemindersScreen() {
   const colors = Colors[scheme];
 
   const [showCompleted, setShowCompleted] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const handleToggleSelect = (id: string) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter((item) => item !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    Alert.alert(
+      'Mover a la papelera',
+      `¿Deseas mover ${selectedIds.length} alarmas a la papelera?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Mover',
+          style: 'destructive',
+          onPress: async () => {
+            for (const id of selectedIds) {
+              await store.deleteItem(id);
+            }
+            setSelectedIds([]);
+          },
+        },
+      ]
+    );
+  };
 
   // Grouped reminders
   const groupedReminders = useMemo(() => {
@@ -111,21 +141,49 @@ export default function RemindersScreen() {
       ? `${dates.length} días (${dates[0]} al ${dates[dates.length - 1]})`
       : (dates[0] || 'Sin fecha');
 
+    const isSelected = selectedIds.includes(item.id);
+
     return (
-      <View key={item.id} style={[styles.reminderCard, { backgroundColor: colors.backgroundElement }]}>
+      <Pressable
+        key={item.id}
+        onLongPress={() => handleToggleSelect(item.id)}
+        onPress={() => {
+          if (selectedIds.length > 0) {
+            handleToggleSelect(item.id);
+          }
+        }}
+        style={[
+          styles.reminderCard,
+          { backgroundColor: colors.backgroundElement },
+          isSelected && { borderColor: '#007AFF', borderWidth: 1.5 },
+        ]}
+      >
         <View style={styles.cardMain}>
-          <Pressable
-            onPress={async () => {
-              await store.toggleItemCompleted(item.id);
-            }}
-            style={styles.checkbox}
-          >
-            <Ionicons
-              name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
-              size={24}
-              color={item.completed ? '#007AFF' : colors.textSecondary}
-            />
-          </Pressable>
+          {selectedIds.length > 0 ? (
+            <Pressable
+              onPress={() => handleToggleSelect(item.id)}
+              style={styles.checkbox}
+            >
+              <Ionicons
+                name={isSelected ? 'checkbox' : 'square-outline'}
+                size={24}
+                color={isSelected ? '#007AFF' : colors.textSecondary}
+              />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={async () => {
+                await store.toggleItemCompleted(item.id);
+              }}
+              style={styles.checkbox}
+            >
+              <Ionicons
+                name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                size={24}
+                color={item.completed ? '#007AFF' : colors.textSecondary}
+              />
+            </Pressable>
+          )}
 
           <View style={{ flex: 1, marginHorizontal: 8 }}>
             <Text
@@ -164,7 +222,7 @@ export default function RemindersScreen() {
             </Pressable>
           </View>
         </View>
-      </View>
+      </Pressable>
     );
   };
 
@@ -174,18 +232,30 @@ export default function RemindersScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-        <Pressable onPress={() => router.back()} style={styles.headerButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Alarmas</Text>
-        <Pressable
-          onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.REMINDER } })}
-          style={styles.headerButton}
-        >
-          <Ionicons name="add" size={26} color="#007AFF" />
-        </Pressable>
-      </View>
+      {selectedIds.length > 0 ? (
+        <View style={[styles.header, { borderBottomColor: colors.backgroundElement, backgroundColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => setSelectedIds([])} style={styles.headerButton}>
+            <Ionicons name="close" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{selectedIds.length} seleccionadas</Text>
+          <Pressable onPress={handleBulkDelete} style={styles.headerButton}>
+            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => router.back()} style={styles.headerButton}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Alarmas</Text>
+          <Pressable
+            onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.REMINDER } })}
+            style={styles.headerButton}
+          >
+            <Ionicons name="add" size={26} color="#007AFF" />
+          </Pressable>
+        </View>
+      )}
 
       {/* Tabs */}
       <View style={styles.tabRow}>
@@ -234,7 +304,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 18,
+    paddingBottom: 12,
     borderBottomWidth: 1,
   },
   headerButton: {

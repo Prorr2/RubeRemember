@@ -6,12 +6,13 @@ import {
   TextInput,
   Pressable,
   ScrollView,
-  SafeAreaView,
   Alert,
   useColorScheme,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
@@ -39,6 +40,12 @@ export default function ListsScreen() {
   // Editing list item state
   const [editingItemId, setEditingItemId] = useState<{ listId: string; itemId: string } | null>(null);
   const [editingItemText, setEditingItemText] = useState('');
+
+  // Alarm Modal state
+  const [alarmModalVisible, setAlarmModalVisible] = useState(false);
+  const [alarmTarget, setAlarmTarget] = useState<{ listId: string; itemId?: string } | null>(null);
+  const [alarmHour, setAlarmHour] = useState('');
+  const [alarmMinute, setAlarmMinute] = useState('');
 
   const handleCreateList = async () => {
     if (!newListName.trim()) {
@@ -96,6 +103,66 @@ export default function ListsScreen() {
     setEditingItemId(null);
   };
 
+  // Alarm Scheduling Logic
+  const openAlarmModal = (listId: string, itemId?: string, currentAlarmTime?: string) => {
+    setAlarmTarget({ listId, itemId });
+    if (currentAlarmTime) {
+      const [h, m] = currentAlarmTime.split(':');
+      setAlarmHour(h);
+      setAlarmMinute(m);
+    } else {
+      const now = new Date();
+      setAlarmHour(String(now.getHours()).padStart(2, '0'));
+      setAlarmMinute(String(now.getMinutes()).padStart(2, '0'));
+    }
+    setAlarmModalVisible(true);
+  };
+
+  const handleSaveAlarm = async () => {
+    if (!alarmTarget) return;
+
+    const hour = alarmHour.trim().padStart(2, '0');
+    const minute = alarmMinute.trim().padStart(2, '0');
+
+    const hNum = parseInt(hour, 10);
+    const mNum = parseInt(minute, 10);
+
+    if (isNaN(hNum) || hNum < 0 || hNum > 23 || isNaN(mNum) || mNum < 0 || mNum > 59) {
+      Alert.alert('Hora inválida', 'Por favor introduce una hora (00-23) y minuto (00-59) válidos.');
+      return;
+    }
+
+    const timeStr = `${hour}:${minute}`;
+
+    try {
+      if (alarmTarget.itemId) {
+        await store.setListItemAlarm(alarmTarget.listId, alarmTarget.itemId, timeStr);
+      } else {
+        await store.setListAlarm(alarmTarget.listId, timeStr);
+      }
+      setAlarmModalVisible(false);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'No se pudo configurar la alarma.');
+    }
+  };
+
+  const handleRemoveAlarm = async () => {
+    if (!alarmTarget) return;
+
+    try {
+      if (alarmTarget.itemId) {
+        await store.setListItemAlarm(alarmTarget.listId, alarmTarget.itemId, null);
+      } else {
+        await store.setListAlarm(alarmTarget.listId, null);
+      }
+      setAlarmModalVisible(false);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'No se pudo eliminar la alarma.');
+    }
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header bar */}
@@ -121,7 +188,8 @@ export default function ListsScreen() {
                 placeholderTextColor={colors.textSecondary + '80'}
                 value={newListName}
                 onChangeText={setNewListName}
-                style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
+                multiline
+                style={[styles.input, { color: colors.text, backgroundColor: colors.background, textAlignVertical: 'top' }]}
               />
               <Pressable onPress={handleCreateList} style={styles.createButton}>
                 <Ionicons name="add-circle" size={32} color="#34C759" />
@@ -158,16 +226,35 @@ export default function ListsScreen() {
                           value={editingListName}
                           onChangeText={setEditingListName}
                           autoFocus
-                          style={[styles.editListInput, { color: colors.text }]}
+                          multiline
+                          style={[styles.editListInput, { color: colors.text, textAlignVertical: 'top' }]}
                         />
                       ) : (
                         <Text style={[styles.listTitle, { color: colors.text }]}>{list.name}</Text>
                       )}
                     </Pressable>
 
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      {/* List Alarm Icon */}
+                      {list.alarmTime ? (
+                        <Pressable
+                          onPress={() => openAlarmModal(list.id, undefined, list.alarmTime)}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4 }}
+                        >
+                          <Ionicons name="notifications" size={18} color="#FF9500" />
+                          <Text style={{ fontSize: 12, color: '#FF9500', fontWeight: 'bold' }}>{list.alarmTime}</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          onPress={() => openAlarmModal(list.id, undefined, undefined)}
+                          style={{ padding: 4, opacity: 0.5 }}
+                        >
+                          <Ionicons name="notifications-outline" size={18} color={colors.textSecondary} />
+                        </Pressable>
+                      )}
+
                       {isEditingThisList ? (
-                        <Pressable onPress={handleSaveListName}>
+                        <Pressable onPress={handleSaveListName} style={{ padding: 4 }}>
                           <Ionicons name="checkmark-circle" size={22} color="#34C759" />
                         </Pressable>
                       ) : (
@@ -176,12 +263,13 @@ export default function ListsScreen() {
                             setEditingListId(list.id);
                             setEditingListName(list.name);
                           }}
+                          style={{ padding: 4 }}
                         >
                           <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
                         </Pressable>
                       )}
 
-                      <Pressable onPress={() => handleDeleteListPress(list.id, list.name)}>
+                      <Pressable onPress={() => handleDeleteListPress(list.id, list.name)} style={{ padding: 4 }}>
                         <Ionicons name="trash-outline" size={20} color="#FF3B30" />
                       </Pressable>
                     </View>
@@ -205,15 +293,34 @@ export default function ListsScreen() {
                                 value={editingItemText}
                                 onChangeText={setEditingItemText}
                                 autoFocus
-                                style={[styles.editItemInput, { color: colors.text }]}
+                                multiline
+                                style={[styles.editItemInput, { color: colors.text, textAlignVertical: 'top' }]}
                               />
                             ) : (
                               <Text style={[styles.itemText, { color: colors.text }]}>{item.text}</Text>
                             )}
 
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                              {/* Item Alarm Icon */}
+                              {item.alarmTime ? (
+                                <Pressable
+                                  onPress={() => openAlarmModal(list.id, item.id, item.alarmTime)}
+                                  style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4 }}
+                                >
+                                  <Ionicons name="notifications" size={14} color="#FF9500" />
+                                  <Text style={{ fontSize: 10, color: '#FF9500', fontWeight: 'bold' }}>{item.alarmTime}</Text>
+                                </Pressable>
+                              ) : (
+                                <Pressable
+                                  onPress={() => openAlarmModal(list.id, item.id, undefined)}
+                                  style={{ padding: 4, opacity: 0.5 }}
+                                >
+                                  <Ionicons name="notifications-outline" size={14} color={colors.textSecondary} />
+                                </Pressable>
+                              )}
+
                               {isEditingThisItem ? (
-                                <Pressable onPress={handleSaveListItemText}>
+                                <Pressable onPress={handleSaveListItemText} style={{ padding: 4 }}>
                                   <Ionicons name="checkmark-circle" size={18} color="#34C759" />
                                 </Pressable>
                               ) : (
@@ -222,12 +329,13 @@ export default function ListsScreen() {
                                     setEditingItemId({ listId: list.id, itemId: item.id });
                                     setEditingItemText(item.text);
                                   }}
+                                  style={{ padding: 4 }}
                                 >
                                   <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
                                 </Pressable>
                               )}
 
-                              <Pressable onPress={() => store.deleteListItem(list.id, item.id)}>
+                              <Pressable onPress={() => store.deleteListItem(list.id, item.id)} style={{ padding: 4 }}>
                                 <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
                               </Pressable>
                             </View>
@@ -244,7 +352,8 @@ export default function ListsScreen() {
                           onChangeText={(txt) =>
                             setNewItemTexts((prev) => ({ ...prev, [list.id]: txt }))
                           }
-                          style={[styles.itemInput, { color: colors.text, backgroundColor: colors.background }]}
+                          multiline
+                          style={[styles.itemInput, { color: colors.text, backgroundColor: colors.background, textAlignVertical: 'top' }]}
                         />
                         <Pressable
                           onPress={() => handleAddListItem(list.id)}
@@ -261,6 +370,82 @@ export default function ListsScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Alarm Configuration Modal */}
+      <Modal
+        visible={alarmModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAlarmModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.backgroundElement }]}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="alarm-outline" size={24} color="#FF9500" />
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Programar Recordatorio (Hoy)</Text>
+            </View>
+
+            <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+              Establece una hora de alarma. Se te enviará una notificación a esa hora.
+            </Text>
+
+            <View style={styles.timeInputRow}>
+              <View style={styles.timeInputBox}>
+                <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>Hora</Text>
+                <TextInput
+                  value={alarmHour}
+                  onChangeText={(val) => setAlarmHour(val.slice(0, 2))}
+                  keyboardType="numeric"
+                  placeholder="HH"
+                  placeholderTextColor={colors.textSecondary + '60'}
+                  maxLength={2}
+                  style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+                />
+              </View>
+
+              <Text style={[styles.timeSeparator, { color: colors.text }]}>:</Text>
+
+              <View style={styles.timeInputBox}>
+                <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>Minutos</Text>
+                <TextInput
+                  value={alarmMinute}
+                  onChangeText={(val) => setAlarmMinute(val.slice(0, 2))}
+                  keyboardType="numeric"
+                  placeholder="MM"
+                  placeholderTextColor={colors.textSecondary + '60'}
+                  maxLength={2}
+                  style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={handleRemoveAlarm}
+                style={[styles.modalBtn, { backgroundColor: 'rgba(255, 59, 48, 0.1)' }]}
+              >
+                <Text style={[styles.modalBtnText, { color: '#FF3B30' }]}>Eliminar Alarma</Text>
+              </Pressable>
+
+              <View style={{ flex: 1 }} />
+
+              <Pressable
+                onPress={() => setAlarmModalVisible(false)}
+                style={[styles.modalBtn, { backgroundColor: colors.backgroundSelected }]}
+              >
+                <Text style={[styles.modalBtnText, { color: colors.text }]}>Cancelar</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleSaveAlarm}
+                style={[styles.modalBtn, { backgroundColor: '#FF9500' }]}
+              >
+                <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>Guardar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -274,7 +459,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 18,
+    paddingBottom: 12,
     borderBottomWidth: 1,
   },
   headerButton: {
@@ -305,9 +491,11 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    height: 40,
+    minHeight: 40,
+    maxHeight: 100,
     borderRadius: 10,
     paddingHorizontal: 12,
+    paddingVertical: 8,
     fontSize: 14,
   },
   createButton: {
@@ -332,6 +520,7 @@ const styles = StyleSheet.create({
   listTitle: {
     fontSize: 16,
     fontWeight: '700',
+    flex: 1,
   },
   editListInput: {
     fontSize: 16,
@@ -353,11 +542,13 @@ const styles = StyleSheet.create({
   itemText: {
     fontSize: 14,
     flex: 1,
+    marginRight: 8,
   },
   editItemInput: {
     fontSize: 14,
     padding: 0,
     flex: 1,
+    marginRight: 8,
   },
   addItemRow: {
     flexDirection: 'row',
@@ -367,9 +558,11 @@ const styles = StyleSheet.create({
   },
   itemInput: {
     flex: 1,
-    height: 36,
+    minHeight: 36,
+    maxHeight: 100,
     borderRadius: 8,
     paddingHorizontal: 10,
+    paddingVertical: 8,
     fontSize: 13,
   },
   addItemButton: {
@@ -378,5 +571,75 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Alarm Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    borderRadius: 20,
+    padding: 20,
+    gap: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  timeInputRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 12,
+  },
+  timeInputBox: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  timeLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  timeInput: {
+    width: 70,
+    height: 60,
+    borderWidth: 1,
+    borderRadius: 12,
+    textAlign: 'center',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  timeSeparator: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  modalBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  modalBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
