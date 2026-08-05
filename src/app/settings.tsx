@@ -18,10 +18,26 @@ import { useRouter } from 'expo-router';
 
 import { useRememberStore, HourWeight, CustomCategory } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { useSettingsService } from '@/services/SettingsService';
 
 export default function SettingsScreen() {
   const store = useRememberStore();
   const router = useRouter();
+  const settingsService = useSettingsService();
+
+  const moveItem = async (listName: 'preferredOrderEnergy' | 'preferredOrderWeight', index: number, direction: 'up' | 'down') => {
+    const currentList = [...(store.userSettings[listName] || [])];
+    if (direction === 'up' && index > 0) {
+      const temp = currentList[index];
+      currentList[index] = currentList[index - 1];
+      currentList[index - 1] = temp;
+    } else if (direction === 'down' && index < currentList.length - 1) {
+      const temp = currentList[index];
+      currentList[index] = currentList[index + 1];
+      currentList[index + 1] = temp;
+    }
+    await settingsService.updateSettings({ [listName]: currentList });
+  };
 
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
@@ -278,6 +294,255 @@ export default function SettingsScreen() {
                 </View>
               ))
             )}
+          </View>
+        </View>
+
+        {/* Section 4: Algoritmo y Cognitive Engine */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>ALGORITMO COGNITIVO</Text>
+          <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>
+            Personaliza el comportamiento del RubeRemember Cognitive Engine para adaptarlo a tus ritmos de trabajo.
+          </Text>
+
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement }]}>
+            {/* Max Focus */}
+            <View style={styles.settingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>Máximo de tareas en Focus</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Límite para la auto-promoción y foco manual</Text>
+              </View>
+              <TextInput
+                value={String(store.userSettings.maxFocusTasks)}
+                onChangeText={async (val) => {
+                  const num = parseInt(val, 10);
+                  if (!isNaN(num) && num > 0) {
+                    await settingsService.updateSettings({ maxFocusTasks: num });
+                  }
+                }}
+                keyboardType="number-pad"
+                style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Cooldown */}
+            <View style={styles.settingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>Duración Cooldown (minutos)</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Tiempo de penalización al presionar "No ahora"</Text>
+              </View>
+              <TextInput
+                value={String(store.userSettings.defaultCooldown)}
+                onChangeText={async (val) => {
+                  const num = parseInt(val, 10);
+                  if (!isNaN(num) && num >= 0) {
+                    await settingsService.updateSettings({ defaultCooldown: num });
+                  }
+                }}
+                keyboardType="number-pad"
+                style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Notifications Enabled */}
+            <View style={styles.settingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>Notificaciones Activas</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Activar recordatorios y alertas inteligentes</Text>
+              </View>
+              <Pressable
+                onPress={async () => {
+                  await settingsService.updateSettings({ notificationsEnabled: !store.userSettings.notificationsEnabled });
+                }}
+                style={[styles.toggleBtn, { backgroundColor: store.userSettings.notificationsEnabled ? '#34C759' : colors.backgroundSelected }]}
+              >
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+                  {store.userSettings.notificationsEnabled ? 'SÍ' : 'NO'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+
+        {/* Section 5: Duraciones de Bloques */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DURACIONES DE BLOQUES (MINUTOS)</Text>
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement }]}>
+            {/* Luna */}
+            <View style={styles.settingRow}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>🌙 Bloque Luna (Completar)</Text>
+              <TextInput
+                value={String(store.userSettings.lunaDuration)}
+                onChangeText={async (val) => {
+                  const num = parseInt(val, 10);
+                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ lunaDuration: num });
+                }}
+                keyboardType="number-pad"
+                style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Terra */}
+            <View style={styles.settingRow}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>🌍 Bloque Terra (Avanzar)</Text>
+              <TextInput
+                value={String(store.userSettings.terraDuration)}
+                onChangeText={async (val) => {
+                  const num = parseInt(val, 10);
+                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ terraDuration: num });
+                }}
+                keyboardType="number-pad"
+                style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Sol */}
+            <View style={styles.settingRow}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>☀️ Bloque Sol (Hito)</Text>
+              <TextInput
+                value={String(store.userSettings.solDuration)}
+                onChangeText={async (val) => {
+                  const num = parseInt(val, 10);
+                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ solDuration: num });
+                }}
+                keyboardType="number-pad"
+                style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Astra */}
+            <View style={styles.settingRow}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>⭐ Bloque Astra (Hábito)</Text>
+              <TextInput
+                value={String(store.userSettings.astraDuration)}
+                onChangeText={async (val) => {
+                  const num = parseInt(val, 10);
+                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ astraDuration: num });
+                }}
+                keyboardType="number-pad"
+                style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* Section 6: Horarios */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>HORARIOS Y DESCANSO</Text>
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement }]}>
+            {/* Sleep Schedule */}
+            <View style={styles.settingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>Horario de Sueño / Descanso</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Inicio y Fin (HH:MM)</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                <TextInput
+                  value={store.userSettings.sleepSchedule?.start || '23:00'}
+                  onChangeText={async (val) => {
+                    const end = store.userSettings.sleepSchedule?.end || '07:00';
+                    await settingsService.updateSettings({ sleepSchedule: { start: val, end } });
+                  }}
+                  style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+                />
+                <Text style={{ color: colors.textSecondary }}>a</Text>
+                <TextInput
+                  value={store.userSettings.sleepSchedule?.end || '07:00'}
+                  onChangeText={async (val) => {
+                    const start = store.userSettings.sleepSchedule?.start || '23:00';
+                    await settingsService.updateSettings({ sleepSchedule: { start, end: val } });
+                  }}
+                  style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+                />
+              </View>
+            </View>
+
+            {/* Working Hours */}
+            <View style={styles.settingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>Horario Laboral / Enfoque</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Inicio y Fin (HH:MM)</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                <TextInput
+                  value={store.userSettings.workingHours?.start || '09:00'}
+                  onChangeText={async (val) => {
+                    const end = store.userSettings.workingHours?.end || '18:00';
+                    await settingsService.updateSettings({ workingHours: { start: val, end } });
+                  }}
+                  style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+                />
+                <Text style={{ color: colors.textSecondary }}>a</Text>
+                <TextInput
+                  value={store.userSettings.workingHours?.end || '18:00'}
+                  onChangeText={async (val) => {
+                    const start = store.userSettings.workingHours?.start || '09:00';
+                    await settingsService.updateSettings({ workingHours: { start, end: val } });
+                  }}
+                  style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Section 7: Reordenamiento de Preferencias */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>SECUENCIA PREFERIDA DE ENERGÍAS</Text>
+          <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>
+            Ordena las energías según tu preferencia. El motor premiará las transiciones de flujo en este orden.
+          </Text>
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement }]}>
+            {(store.userSettings.preferredOrderEnergy || []).map((energy, idx) => (
+              <View key={energy} style={[styles.reorderRow, { borderBottomWidth: idx < (store.userSettings.preferredOrderEnergy || []).length - 1 ? 1 : 0, borderBottomColor: colors.backgroundSelected }]}>
+                <Text style={[styles.reorderText, { color: colors.text }]}>{energy}</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable
+                    disabled={idx === 0}
+                    onPress={() => moveItem('preferredOrderEnergy', idx, 'up')}
+                    style={[styles.iconButton, { opacity: idx === 0 ? 0.3 : 1 }]}
+                  >
+                    <Ionicons name="arrow-up" size={18} color={colors.text} />
+                  </Pressable>
+                  <Pressable
+                    disabled={idx === (store.userSettings.preferredOrderEnergy || []).length - 1}
+                    onPress={() => moveItem('preferredOrderEnergy', idx, 'down')}
+                    style={[styles.iconButton, { opacity: idx === (store.userSettings.preferredOrderEnergy || []).length - 1 ? 0.3 : 1 }]}
+                  >
+                    <Ionicons name="arrow-down" size={18} color={colors.text} />
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>SECUENCIA PREFERIDA DE PESOS</Text>
+          <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>
+            Ordena las clasificaciones de peso recomendadas para guiar tu secuencia diaria de bloques.
+          </Text>
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement }]}>
+            {(store.userSettings.preferredOrderWeight || []).map((weight, idx) => (
+              <View key={weight} style={[styles.reorderRow, { borderBottomWidth: idx < (store.userSettings.preferredOrderWeight || []).length - 1 ? 1 : 0, borderBottomColor: colors.backgroundSelected }]}>
+                <Text style={[styles.reorderText, { color: colors.text }]}>{weight}</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable
+                    disabled={idx === 0}
+                    onPress={() => moveItem('preferredOrderWeight', idx, 'up')}
+                    style={[styles.iconButton, { opacity: idx === 0 ? 0.3 : 1 }]}
+                  >
+                    <Ionicons name="arrow-up" size={18} color={colors.text} />
+                  </Pressable>
+                  <Pressable
+                    disabled={idx === (store.userSettings.preferredOrderWeight || []).length - 1}
+                    onPress={() => moveItem('preferredOrderWeight', idx, 'down')}
+                    style={[styles.iconButton, { opacity: idx === (store.userSettings.preferredOrderWeight || []).length - 1 ? 0.3 : 1 }]}
+                  >
+                    <Ionicons name="arrow-down" size={18} color={colors.text} />
+                  </Pressable>
+                </View>
+              </View>
+            ))}
           </View>
         </View>
       </ScrollView>
@@ -548,5 +813,58 @@ const styles = StyleSheet.create({
   modalBtnText: {
     fontSize: 14,
     fontWeight: '700',
+  },
+  cardGroup: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    padding: 8,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  settingLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  smallInput: {
+    width: 60,
+    height: 36,
+    borderWidth: 1,
+    borderRadius: 8,
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  timeInput: {
+    width: 56,
+    height: 36,
+    borderWidth: 1,
+    borderRadius: 8,
+    textAlign: 'center',
+    fontSize: 13,
+  },
+  toggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  reorderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  reorderText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  iconButton: {
+    padding: 6,
   },
 });

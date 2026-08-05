@@ -32,6 +32,8 @@ export default function RootLayout() {
               <Stack.Screen name="editor" />
               <Stack.Screen name="search" />
               <Stack.Screen name="lists" />
+              <Stack.Screen name="session" />
+              <Stack.Screen name="statistics" />
             </Stack>
           </View>
         </ThemeProvider>

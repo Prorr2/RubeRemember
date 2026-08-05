@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 
 import { useRememberStore, ItemType, Priority, Task, Reminder as ReminderV2, Activity, getLocalDateStr } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { useRecommendationService } from '@/services/RecommendationService';
 
 export default function DecisionCenterScreen() {
   const store = useRememberStore();
@@ -36,20 +37,23 @@ export default function DecisionCenterScreen() {
     return '¡Buenas noches!';
   }, []);
 
-  // 2. Focus Card (Highest priority, uncompleted Task)
-  const focusTask = useMemo(() => {
-    const tasks = store.getTasks().filter((t) => !t.completed);
-    if (tasks.length === 0) return null;
-    
-    // Sort tasks: High priority first, then estimatedHours desc, then oldest
-    return [...tasks].sort((a, b) => {
-      const priorityWeight = { HIGH: 3, MEDIUM: 2, LOW: 1 };
-      const weightA = priorityWeight[a.priority] || 2;
-      const weightB = priorityWeight[b.priority] || 2;
-      if (weightA !== weightB) return weightB - weightA;
-      return a.createdAt.localeCompare(b.createdAt);
-    })[0];
+  // 2. Recommendation Engine Integration
+  const { recommendations, triggerRecalculate, rejectRecommendation } = useRecommendationService();
+  const primaryRec = recommendations[0];
+
+  const recommendedTask = useMemo(() => {
+    if (!primaryRec || !primaryRec.taskId) return null;
+    return store.getTasks().find((t) => t.id === primaryRec.taskId) || null;
+  }, [primaryRec, store.items]);
+
+  // Fetch active focus tasks (focusLocked === true)
+  const focusTasks = useMemo(() => {
+    return store.getTasks().filter((t) => t.focusLocked && !t.completed);
   }, [store.items]);
+
+  React.useEffect(() => {
+    triggerRecalculate();
+  }, [store.items, store.sessions]);
 
   // 3. Today's Alarms
   const todayReminders = useMemo(() => {
@@ -128,6 +132,9 @@ export default function DecisionCenterScreen() {
           <Pressable onPress={() => router.push('/search')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
             <Ionicons name="search-outline" size={22} color={colors.text} />
           </Pressable>
+          <Pressable onPress={() => router.push('/statistics')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
+            <Ionicons name="bar-chart-outline" size={22} color={colors.text} />
+          </Pressable>
           <Pressable onPress={() => router.push('/settings')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
             <Ionicons name="settings-outline" size={22} color={colors.text} />
           </Pressable>
@@ -154,124 +161,214 @@ export default function DecisionCenterScreen() {
           </View>
         </View>
 
-        {/* 1. FOCUS CARD (Siguiente Tarea / Foco) */}
+        {/* 1. RECOMMENDATION CARD */}
         <View style={[styles.sectionContainer]}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>📌 Mi Enfoque Actual</Text>
-            <Pressable onPress={() => router.push('/tasks')}>
-              <Text style={{ color: '#FF9500', fontWeight: '600', fontSize: 13 }}>Ver todas</Text>
-            </Pressable>
-          </View>
-
-          {focusTask ? (
-            <Pressable
-              onPress={() => router.push({ pathname: '/editor', params: { id: focusTask.id } })}
-              style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: '#FF9500' }]}
-            >
-              <View style={styles.focusHeader}>
-                <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleChangePriority(focusTask);
-                  }}
-                  style={({ pressed }) => [
-                    styles.priorityBadge,
-                    {
-                      backgroundColor:
-                        focusTask.priority === Priority.HIGH
-                          ? 'rgba(255, 59, 48, 0.15)'
-                          : focusTask.priority === Priority.MEDIUM
-                          ? 'rgba(255, 149, 0, 0.15)'
-                          : 'rgba(52, 199, 89, 0.15)',
-                      opacity: pressed ? 0.6 : 1.0,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.priorityBadgeText,
-                      {
-                        color:
-                          focusTask.priority === Priority.HIGH
-                            ? '#FF3B30'
-                            : focusTask.priority === Priority.MEDIUM
-                            ? '#FF9500'
-                            : '#34C759',
-                      },
-                    ]}
-                  >
-                    Prioridad {focusTask.priority === Priority.HIGH ? 'Alta' : focusTask.priority === Priority.MEDIUM ? 'Media' : 'Baja'}
-                  </Text>
-                </Pressable>
-                {focusTask.estimatedHours && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
-                      ⌛ {focusTask.estimatedHours}h est.
-                    </Text>
-                    {(() => {
-                      const sortedWeights = [...store.hourWeights].sort((a, b) => b.minHours - a.minHours);
-                      const matched = sortedWeights.find((w) => focusTask.estimatedHours! >= w.minHours);
-                      const label = matched ? matched.name : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].name : null);
-                      if (!label) return null;
-                      return (
-                        <View style={{ backgroundColor: 'rgba(0, 122, 255, 0.1)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                          <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '700' }}>
-                            {label}
-                          </Text>
-                        </View>
-                      );
-                    })()}
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>🎯 Recomendación Principal</Text>
+          
+          {primaryRec ? (
+            recommendedTask ? (
+              // Task Recommendation
+              <View style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: primaryRec.priorityLevel === 'ALTA' ? '#FF3B30' : '#FF9500' }]}>
+                <View style={styles.focusHeader}>
+                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                    <View style={[styles.priorityBadge, { backgroundColor: primaryRec.priorityLevel === 'ALTA' ? 'rgba(255, 59, 48, 0.15)' : 'rgba(255, 149, 0, 0.15)' }]}>
+                      <Text style={[styles.priorityBadgeText, { color: primaryRec.priorityLevel === 'ALTA' ? '#FF3B30' : '#FF9500' }]}>
+                        {primaryRec.priorityLevel}
+                      </Text>
+                    </View>
+                    {primaryRec.confidenceLevel && (
+                      <View style={{ backgroundColor: 'rgba(52, 199, 89, 0.15)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                        <Text style={{ color: '#34C759', fontSize: 10, fontWeight: '700' }}>
+                          {primaryRec.confidenceLevel}% Coincidencia
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                )}
-              </View>
-
-              <Text style={[styles.focusTitle, { color: colors.text }]} numberOfLines={2}>
-                {focusTask.title}
-              </Text>
-              
-              {focusTask.description ? (
-                <Text style={[styles.focusDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                  {focusTask.description}
-                </Text>
-              ) : null}
-
-              {/* Goal information */}
-              {focusTask.goalId && (
-                <View style={styles.goalInfoContainer}>
-                  <Ionicons name="trophy-outline" size={14} color="#FF9500" />
-                  <Text style={[styles.goalInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
-                    Objetivo: {store.goals.find((g) => g.id === focusTask.goalId)?.title || 'Cargando...'}
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                    ⌛ {primaryRec.recommendedDuration} min ({primaryRec.sessionType})
                   </Text>
                 </View>
-              )}
 
-              <View style={styles.cardFooter}>
-                <Pressable
-                  onPress={async () => {
-                    await store.toggleItemCompleted(focusTask.id);
-                  }}
-                  style={[styles.completeButton, { backgroundColor: '#FF9500' }]}
-                >
-                  <Ionicons name="checkmark-done" size={16} color="#fff" />
-                  <Text style={styles.completeButtonText}>Completar</Text>
-                </Pressable>
+                <Text style={[styles.focusTitle, { color: colors.text }]} numberOfLines={2}>
+                  {recommendedTask.title}
+                </Text>
+                
+                <Text style={[styles.recReason, { color: colors.text }]} numberOfLines={3}>
+                  {primaryRec.reason}
+                </Text>
+
+                {primaryRec.reasonsSecondary && primaryRec.reasonsSecondary.length > 0 && (
+                  <View style={styles.secondaryReasonsContainer}>
+                    {primaryRec.reasonsSecondary.map((sec, idx) => (
+                      <Text key={idx} style={[styles.secReasonText, { color: colors.textSecondary }]}>
+                        • {sec}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+
+                <View style={[styles.cardFooter, { justifyContent: 'space-between', marginTop: 12 }]}>
+                  <Pressable
+                    onPress={() => {
+                      router.push({
+                        pathname: '/session',
+                        params: { taskId: recommendedTask.id, duration: primaryRec.recommendedDuration }
+                      });
+                    }}
+                    style={[styles.completeButton, { backgroundColor: '#34C759' }]}
+                  >
+                    <Ionicons name="play" size={16} color="#fff" />
+                    <Text style={styles.completeButtonText}>{primaryRec.actionSuggested || 'Comenzar'}</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => rejectRecommendation(primaryRec.id)}
+                    style={[styles.completeButton, { backgroundColor: 'rgba(255, 59, 48, 0.15)' }]}
+                  >
+                    <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
+                    <Text style={[styles.completeButtonText, { color: '#FF3B30' }]}>No ahora</Text>
+                  </Pressable>
+                </View>
               </View>
-            </Pressable>
+            ) : (
+              // Active Reminder Card
+              <View style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: '#007AFF' }]}>
+                <View style={styles.focusHeader}>
+                  <View style={[styles.priorityBadge, { backgroundColor: 'rgba(0, 122, 255, 0.15)' }]}>
+                    <Text style={[styles.priorityBadgeText, { color: '#007AFF' }]}>ATENCIÓN</Text>
+                  </View>
+                </View>
+
+                <Text style={[styles.focusTitle, { color: colors.text }]} numberOfLines={2}>
+                  {primaryRec.reason}
+                </Text>
+
+                {primaryRec.reasonsSecondary && primaryRec.reasonsSecondary.map((sec, idx) => (
+                  <Text key={idx} style={[styles.secReasonText, { color: colors.textSecondary, marginTop: 4 }]}>
+                    {sec}
+                  </Text>
+                ))}
+
+                <View style={[styles.cardFooter, { marginTop: 12 }]}>
+                  <Pressable
+                    onPress={async () => {
+                      const reminder = store.getReminders().find(r => primaryRec.reason.includes(r.title));
+                      if (reminder) {
+                        await store.toggleItemCompleted(reminder.id);
+                        triggerRecalculate();
+                      } else {
+                        const activeRem = store.getTodayReminders().filter(r => !r.completed)[0];
+                        if (activeRem) {
+                          await store.toggleItemCompleted(activeRem.id);
+                          triggerRecalculate();
+                        }
+                      }
+                    }}
+                    style={[styles.completeButton, { backgroundColor: '#007AFF', flex: 1, justifyContent: 'center' }]}
+                  >
+                    <Ionicons name="checkmark-done" size={16} color="#fff" />
+                    <Text style={styles.completeButtonText}>Marcar como Leído / Completado</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )
           ) : (
             <View style={[styles.emptyCard, { backgroundColor: colors.backgroundElement }]}>
-              <Ionicons name="checkbox-outline" size={32} color={colors.textSecondary} />
+              <Ionicons name="sparkles-outline" size={32} color={colors.textSecondary} />
               <Text style={[styles.emptyCardText, { color: colors.textSecondary }]}>
-                No tienes tareas pendientes. ¡Buen trabajo!
+                No hay recomendaciones listas.
               </Text>
               <Pressable
-                onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.TASK } })}
+                onPress={() => triggerRecalculate()}
                 style={[styles.emptyCardBtn, { borderColor: '#FF9500' }]}
               >
-                <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 13 }}>Nueva Tarea</Text>
+                <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 13 }}>Calcular</Text>
               </Pressable>
             </View>
           )}
         </View>
+
+        {/* 1.2. FOCUS TASKS SECTION */}
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>📌 Tareas en Enfoque (Focus)</Text>
+            <Pressable onPress={() => router.push('/tasks')}>
+              <Text style={{ color: '#FF9500', fontWeight: '600', fontSize: 13 }}>Gestionar</Text>
+            </Pressable>
+          </View>
+
+          {focusTasks.length > 0 ? (
+            <View style={{ gap: 8 }}>
+              {focusTasks.map(task => (
+                <Pressable
+                  key={task.id}
+                  onPress={() => router.push({ pathname: '/editor', params: { id: task.id } })}
+                  style={[styles.reminderItem, { backgroundColor: colors.backgroundElement }]}
+                >
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.reminderTitle, { color: colors.text }]} numberOfLines={1}>
+                      {task.title}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                      {task.energyType} • {task.priority.toUpperCase()}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={async (e) => {
+                      e.stopPropagation();
+                      await store.toggleItemCompleted(task.id);
+                      triggerRecalculate();
+                    }}
+                    style={styles.reminderCheckBtn}
+                  >
+                    <Ionicons name="ellipse-outline" size={24} color={colors.textSecondary} />
+                  </Pressable>
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            <View style={[styles.emptyCard, { backgroundColor: colors.backgroundElement }]}>
+              <Text style={[styles.emptyCardText, { color: colors.textSecondary }]}>
+                No tienes tareas marcadas como Focus. El motor seleccionará las mejores automáticamente.
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* 1.3. ALTERNATIVES SECTION */}
+        {primaryRec && primaryRec.alternatives && primaryRec.alternatives.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>🔄 Otras opciones para hoy</Text>
+            <View style={{ gap: 8 }}>
+              {primaryRec.alternatives.map(altId => {
+                const altTask = store.getTasks().find(t => t.id === altId);
+                if (!altTask) return null;
+                return (
+                  <Pressable
+                    key={altTask.id}
+                    onPress={() => {
+                      router.push({
+                        pathname: '/session',
+                        params: { taskId: altTask.id }
+                      });
+                    }}
+                    style={[styles.reminderItem, { backgroundColor: colors.backgroundElement, opacity: 0.8 }]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.reminderTitle, { color: colors.text, fontSize: 14 }]} numberOfLines={1}>
+                        {altTask.title}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                        {altTask.priority.toUpperCase()} • {altTask.energyType}
+                      </Text>
+                    </View>
+                    <Ionicons name="play-circle-outline" size={24} color="#34C759" />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* 2. TODAY'S REMINDERS */}
         <View style={styles.sectionContainer}>
@@ -877,5 +974,20 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  recReason: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  secondaryReasonsContainer: {
+    marginTop: 6,
+    paddingLeft: 4,
+    gap: 4,
+  },
+  secReasonText: {
+    fontSize: 12,
+    lineHeight: 16,
   },
 });

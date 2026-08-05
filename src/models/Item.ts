@@ -14,3 +14,7 @@ export * from './Goal';
 export * from './TimeSlot';
 export * from './ReminderList';
 export * from './HourWeight';
+export * from './Session';
+export * from './Recommendation';
+export * from './UserSettings';
+export * from './Statistics';

@@ -4,19 +4,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { NotificationService } from '@/services/notification-service';
 
-import { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS } from '@/models/Item';
+import { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS } from '@/models/Item';
 import { Goal, Phase } from '@/models/Goal';
 import { TimeSlot } from '@/models/TimeSlot';
 import { ReminderList, ListItem } from '@/models/ReminderList';
 import { Comment } from '@/models/Comment';
-import { MigrationEngine, DatabaseV2 } from '@/services/migration-engine';
+import { MigrationEngine, DatabaseV2, DatabaseV3 } from '@/services/migration-engine';
 import { ActivityEngine } from '@/services/activity-engine';
 
 export { Comment } from '@/models/Comment';
 export { Goal, Phase } from '@/models/Goal';
 export { TimeSlot } from '@/models/TimeSlot';
 export { ReminderList, ListItem } from '@/models/ReminderList';
-export { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS } from '@/models/Item';
+export { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS } from '@/models/Item';
+
 
 
 
@@ -176,6 +177,18 @@ interface RememberStore {
   addHourWeight: (name: string, minHours: number) => Promise<void>;
   updateHourWeight: (id: string, name: string, minHours: number) => Promise<void>;
   deleteHourWeight: (id: string) => Promise<void>;
+
+  // Cognitive Engine V3 fields & actions
+  sessions: Session[];
+  recommendations: Recommendation[];
+  userSettings: UserSettings;
+  statistics: Statistics;
+  createSession: (taskId: string, plannedDuration: number, notes?: string) => Promise<string>;
+  updateSession: (id: string, updates: Partial<Session>) => Promise<void>;
+  deleteSession: (id: string) => Promise<void>;
+  updateUserSettings: (updates: Partial<UserSettings>) => Promise<void>;
+  updateStatistics: (updates: Partial<Statistics>) => Promise<void>;
+  saveRecommendations: (recs: Recommendation[]) => Promise<void>;
 }
 
 const V2_DB_KEY = 'rube_v2_database';
@@ -379,6 +392,13 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   const [lists, setLists] = useState<ReminderList[]>([]);
   const [activityCategories, setActivityCategories] = useState<CustomCategory[]>(DEFAULT_ACTIVITY_CATEGORIES);
   const [hourWeights, setHourWeights] = useState<HourWeight[]>(DEFAULT_HOUR_WEIGHTS);
+  
+  // Cognitive Engine V3 States
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [statistics, setStatistics] = useState<Statistics>(DEFAULT_STATISTICS);
+  
   const [loading, setLoading] = useState<boolean>(true);
 
   // Initialize notifications handler
@@ -390,7 +410,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     async function loadData() {
       try {
-        const db: DatabaseV2 = await MigrationEngine.getDatabase();
+        const db: DatabaseV3 = await MigrationEngine.getDatabase();
         setItems(db.items || []);
         setGoals(db.goals || []);
         setLists(db.lists || []);
@@ -409,6 +429,11 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         } else {
           setHourWeights(DEFAULT_HOUR_WEIGHTS);
         }
+
+        setSessions(db.sessions || []);
+        setRecommendations(db.recommendations || []);
+        setUserSettings(db.userSettings || DEFAULT_USER_SETTINGS);
+        setStatistics(db.statistics || DEFAULT_STATISTICS);
       } catch (e) {
         console.error('Error loading database in store:', e);
       } finally {
@@ -418,32 +443,70 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     loadData();
   }, []);
 
-  // Persist helper
-  const saveItems = useCallback(async (
-    newItems: Item[],
-    currentSlots = timeSlots,
+  // General V3 Database Persist Helper
+  const saveDatabaseState = useCallback(async (
+    newItems = items,
+    newGoals = goals,
+    newLists = lists,
+    newSlots = timeSlots,
+    newSessions = sessions,
+    newRecs = recommendations,
+    newSettings = userSettings,
+    newStats = statistics,
+    currentProximity = proximityDays,
     currentSeparation = slotSeparationMinutes
   ) => {
     try {
-      const adjusted = recalculateTaskSlotTimes(newItems, currentSlots, currentSeparation);
+      const adjusted = recalculateTaskSlotTimes(newItems, newSlots, currentSeparation);
       setItems(adjusted);
+      setGoals(newGoals);
+      setLists(newLists);
+      setTimeSlots(newSlots);
+      setSessions(newSessions);
+      setRecommendations(newRecs);
+      setUserSettings(newSettings);
+      setStatistics(newStats);
       
-      const db: DatabaseV2 = {
-        version: 2,
+      const db: DatabaseV3 = {
+        version: 3,
         items: adjusted,
-        goals,
-        lists,
-        timeSlots: currentSlots,
+        goals: newGoals,
+        lists: newLists,
+        timeSlots: newSlots,
+        sessions: newSessions,
+        recommendations: newRecs,
+        userSettings: newSettings,
+        statistics: newStats,
         settings: {
-          proximityDays,
+          proximityDays: currentProximity,
           slotSeparationMinutes: currentSeparation,
         },
       };
       await MigrationEngine.saveDatabase(db);
     } catch (e) {
-      console.error('Error saving items database:', e);
+      console.error('Error saving database state:', e);
     }
-  }, [goals, lists, proximityDays, timeSlots, slotSeparationMinutes]);
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes]);
+
+  // Persist helper for tasks/reminders/activities
+  const saveItems = useCallback(async (
+    newItems: Item[],
+    currentSlots = timeSlots,
+    currentSeparation = slotSeparationMinutes
+  ) => {
+    await saveDatabaseState(
+      newItems,
+      goals,
+      lists,
+      currentSlots,
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      currentSeparation
+    );
+  }, [saveDatabaseState, goals, lists, sessions, recommendations, userSettings, statistics, proximityDays, timeSlots, slotSeparationMinutes]);
 
   // Sync calendar and alarms wrapper
   const syncCalendarAndAlarms = useCallback(async (item: Item, isDelete: boolean = false) => {
@@ -946,11 +1009,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [getReminders, syncCalendarAndAlarms]);
 
   const clearAll = useCallback(async () => {
-    await saveItems([]);
+    await saveDatabaseState([], [], [], [], [], [], DEFAULT_USER_SETTINGS, DEFAULT_STATISTICS);
     setLists([]);
     await AsyncStorage.setItem(V2_DB_KEY, ''); // Empty storage key
+    await AsyncStorage.setItem('rube_v3_database', '');
     await NotificationService.cancelAll();
-  }, [saveItems]);
+  }, [saveDatabaseState]);
 
   // Comments logic (for Tasks)
   const addComment = useCallback(async (taskId: string, text: string) => {
@@ -1658,6 +1722,113 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await saveHourWeights(updated);
   }, [hourWeights, saveHourWeights]);
 
+  // V3 Cognitive Engine Actions
+  const createSession = useCallback(async (taskId: string, plannedDuration: number, notes = '') => {
+    const newSession: Session = {
+      id: Math.random().toString(36).substring(7),
+      taskId,
+      startTime: new Date().toISOString(),
+      plannedDuration,
+      completed: false,
+      notes,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextSessions = [...sessions, newSession];
+    await saveDatabaseState(
+      items,
+      goals,
+      lists,
+      timeSlots,
+      nextSessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes
+    );
+    return newSession.id;
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
+
+  const updateSession = useCallback(async (id: string, updates: Partial<Session>) => {
+    const nextSessions = sessions.map((s) => (s.id === id ? { ...s, ...updates } : s));
+    await saveDatabaseState(
+      items,
+      goals,
+      lists,
+      timeSlots,
+      nextSessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
+
+  const deleteSession = useCallback(async (id: string) => {
+    const nextSessions = sessions.filter((s) => s.id !== id);
+    await saveDatabaseState(
+      items,
+      goals,
+      lists,
+      timeSlots,
+      nextSessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
+
+  const updateUserSettings = useCallback(async (updates: Partial<UserSettings>) => {
+    const nextSettings = { ...userSettings, ...updates };
+    await saveDatabaseState(
+      items,
+      goals,
+      lists,
+      timeSlots,
+      sessions,
+      recommendations,
+      nextSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
+
+  const updateStatistics = useCallback(async (updates: Partial<Statistics>) => {
+    const nextStats = { ...statistics, ...updates };
+    await saveDatabaseState(
+      items,
+      goals,
+      lists,
+      timeSlots,
+      sessions,
+      recommendations,
+      userSettings,
+      nextStats,
+      proximityDays,
+      slotSeparationMinutes
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
+
+  const saveRecommendations = useCallback(async (recs: Recommendation[]) => {
+    await saveDatabaseState(
+      items,
+      goals,
+      lists,
+      timeSlots,
+      sessions,
+      recs,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes
+    );
+  }, [items, goals, lists, timeSlots, sessions, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
+
   return (
     <RememberStoreContext.Provider
       value={{
@@ -1733,6 +1904,16 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         addHourWeight,
         updateHourWeight,
         deleteHourWeight,
+        sessions,
+        recommendations,
+        userSettings,
+        statistics,
+        createSession,
+        updateSession,
+        deleteSession,
+        updateUserSettings,
+        updateStatistics,
+        saveRecommendations,
       }}
     >
       {children}

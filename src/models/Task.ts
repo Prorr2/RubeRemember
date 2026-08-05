@@ -8,6 +8,31 @@ export enum Priority {
   HIGH = 'high'
 }
 
+export enum ExecutionStrategy {
+  SPRINT = 'SPRINT',
+  MARATHON = 'MARATHON',
+  CONSTANCY = 'CONSTANCY',
+  WAIT = 'WAIT'
+}
+
+export enum EnergyType {
+  CREATIVE = 'CREATIVE',
+  ANALYTICAL = 'ANALYTICAL',
+  ADMINISTRATIVE = 'ADMINISTRATIVE',
+  SOCIAL = 'SOCIAL',
+  PHYSICAL = 'PHYSICAL',
+  LEARNING = 'LEARNING'
+}
+
+export enum TaskState {
+  THINKING = 'THINKING',
+  PREPARING = 'PREPARING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  BLOCKED = 'BLOCKED',
+  WAITING = 'WAITING',
+  COMPLETED = 'COMPLETED'
+}
+
 export interface Task extends BaseItem {
   type: ItemType.TASK;
   completed: boolean;
@@ -21,4 +46,16 @@ export interface Task extends BaseItem {
   time?: string; // HH:MM (calculated from slot or custom)
   comments: Comment[];
 
+  // Cognitive Engine fields
+  executionStrategy?: ExecutionStrategy;
+  energyType?: EnergyType;
+  taskState?: TaskState;
+  focusLocked?: boolean;
+  progress?: number; // percentage (0-100) or metric
+  nextStep?: string; // for SOL peso
+  lastProgress?: string; // ISO date string
+  workedTime?: number; // total minutes worked
+  sessionsCount?: number;
+  lastSession?: string; // ISO date string of last session
+  recommendationCooldown?: string; // ISO date string when cooldown ends
 }

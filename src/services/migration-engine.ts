@@ -1,9 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Item, ItemType, Priority, Task } from '../models/Item';
+import {
+  Item,
+  ItemType,
+  Priority,
+  Task,
+  ExecutionStrategy,
+  EnergyType,
+  TaskState,
+  Session,
+  Recommendation,
+  UserSettings,
+  Statistics,
+  DEFAULT_USER_SETTINGS,
+  DEFAULT_STATISTICS
+} from '../models/Item';
 import { Goal } from '../models/Goal';
 import { TimeSlot } from '../models/TimeSlot';
 import { ReminderList } from '../models/ReminderList';
-
 import { CustomCategory } from '../models/Activity';
 import { HourWeight } from '../models/HourWeight';
 
@@ -21,6 +34,25 @@ export interface DatabaseV2 {
   };
 }
 
+export interface DatabaseV3 {
+  version: number;
+  items: Item[];
+  goals: Goal[];
+  lists: ReminderList[];
+  timeSlots: TimeSlot[];
+  activityCategories?: CustomCategory[];
+  hourWeights?: HourWeight[];
+  sessions?: Session[];
+  recommendations?: Recommendation[];
+  userSettings?: UserSettings;
+  statistics?: Statistics;
+  settings: {
+    proximityDays: number;
+    slotSeparationMinutes: number;
+  };
+}
+
+const V3_DB_KEY = 'rube_v3_database';
 const V2_DB_KEY = 'rube_v2_database';
 
 // Old V1 keys
@@ -32,26 +64,38 @@ const STORAGE_KEY_SEPARATION = 'rube_remember_slot_separation_v1';
 const STORAGE_KEY_GOALS = 'rube_remember_goals_v1';
 
 export const MigrationEngine = {
-  async getDatabase(): Promise<DatabaseV2> {
+  async getDatabase(): Promise<DatabaseV3> {
     try {
+      // 1. Try to load V3 database
+      const v3Data = await AsyncStorage.getItem(V3_DB_KEY);
+      if (v3Data) {
+        return JSON.parse(v3Data);
+      }
+
+      // 2. Try to load V2 database and migrate to V3
       const v2Data = await AsyncStorage.getItem(V2_DB_KEY);
       if (v2Data) {
-        return JSON.parse(v2Data);
+        console.log('MigrationEngine: V2 data detected. Migrating to V3...');
+        const v2Db = JSON.parse(v2Data);
+        const v3Db = this.migrateV2ToV3(v2Db);
+        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(v3Db));
+        return v3Db;
       }
 
-      // Check if old data exists to migrate
+      // 3. Try to load V1 database, migrate to V2, then V3
       const hasOldData = await AsyncStorage.getItem(STORAGE_KEY);
       if (hasOldData !== null) {
-        console.log('MigrationEngine: Old v1 data detected. Starting migration...');
-        const db = await this.migrateV1ToV2();
-        await AsyncStorage.setItem(V2_DB_KEY, JSON.stringify(db));
-        return db;
+        console.log('MigrationEngine: Old V1 data detected. Starting migrations to V3...');
+        const v2Db = await this.migrateV1ToV2();
+        const v3Db = this.migrateV2ToV3(v2Db);
+        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(v3Db));
+        return v3Db;
       }
 
-      // Return default empty database
-      console.log('MigrationEngine: No database found. Initializing default database...');
-      const defaultDb: DatabaseV2 = {
-        version: 2,
+      // 4. Return default empty V3 database
+      console.log('MigrationEngine: No database found. Initializing default database V3...');
+      const defaultDb: DatabaseV3 = {
+        version: 3,
         items: [],
         goals: [],
         lists: [],
@@ -60,12 +104,16 @@ export const MigrationEngine = {
           { id: 'slot-afternoon', name: 'Tarde', startTime: '16:00', endTime: '18:00' },
           { id: 'slot-night', name: 'Noche', startTime: '20:00', endTime: '23:00' },
         ],
+        sessions: [],
+        recommendations: [],
+        userSettings: DEFAULT_USER_SETTINGS,
+        statistics: DEFAULT_STATISTICS,
         settings: {
           proximityDays: 20,
           slotSeparationMinutes: 30,
         },
       };
-      await AsyncStorage.setItem(V2_DB_KEY, JSON.stringify(defaultDb));
+      await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(defaultDb));
       return defaultDb;
     } catch (e) {
       console.error('MigrationEngine error:', e);
@@ -73,13 +121,13 @@ export const MigrationEngine = {
     }
   },
 
-  async saveDatabase(db: DatabaseV2): Promise<void> {
+  async saveDatabase(db: DatabaseV3): Promise<void> {
     try {
-      db.version = 2; // Always ensure version is correct
+      db.version = 3; // Always ensure version is correct V3
       
-      // Preserve properties like activityCategories and hourWeights that might not be in the updated db object
+      // Preserve properties that might not be in the updated db object
       try {
-        const existingRaw = await AsyncStorage.getItem(V2_DB_KEY);
+        const existingRaw = await AsyncStorage.getItem(V3_DB_KEY);
         if (existingRaw) {
           const existing = JSON.parse(existingRaw);
           if (db.activityCategories === undefined && existing.activityCategories !== undefined) {
@@ -88,16 +136,65 @@ export const MigrationEngine = {
           if (db.hourWeights === undefined && existing.hourWeights !== undefined) {
             db.hourWeights = existing.hourWeights;
           }
+          if (db.sessions === undefined && existing.sessions !== undefined) {
+            db.sessions = existing.sessions;
+          }
+          if (db.recommendations === undefined && existing.recommendations !== undefined) {
+            db.recommendations = existing.recommendations;
+          }
+          if (db.userSettings === undefined && existing.userSettings !== undefined) {
+            db.userSettings = existing.userSettings;
+          }
+          if (db.statistics === undefined && existing.statistics !== undefined) {
+            db.statistics = existing.statistics;
+          }
         }
       } catch (err) {
         console.warn('MigrationEngine: Could not read existing DB for merge', err);
       }
 
-      await AsyncStorage.setItem(V2_DB_KEY, JSON.stringify(db));
+      await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
     } catch (e) {
       console.error('MigrationEngine save error:', e);
       throw e;
     }
+  },
+
+  migrateV2ToV3(v2Db: DatabaseV2): DatabaseV3 {
+    const items = (v2Db.items || []).map((item: Item) => {
+      if (item.type === ItemType.TASK) {
+        const task = item as Task;
+        return {
+          ...task,
+          executionStrategy: task.executionStrategy ?? ExecutionStrategy.SPRINT,
+          energyType: task.energyType ?? EnergyType.CREATIVE,
+          taskState: task.taskState ?? (task.completed ? TaskState.COMPLETED : TaskState.THINKING),
+          focusLocked: task.focusLocked ?? false,
+          progress: task.progress ?? (task.completed ? 100 : 0),
+          workedTime: task.workedTime ?? 0,
+          sessionsCount: task.sessionsCount ?? 0,
+        } as Task;
+      }
+      return item;
+    });
+
+    return {
+      version: 3,
+      items,
+      goals: v2Db.goals || [],
+      lists: v2Db.lists || [],
+      timeSlots: v2Db.timeSlots || [],
+      activityCategories: v2Db.activityCategories || [],
+      hourWeights: v2Db.hourWeights || [],
+      sessions: [],
+      recommendations: [],
+      userSettings: DEFAULT_USER_SETTINGS,
+      statistics: DEFAULT_STATISTICS,
+      settings: v2Db.settings || {
+        proximityDays: 20,
+        slotSeparationMinutes: 30,
+      },
+    };
   },
 
   async migrateV1ToV2(): Promise<DatabaseV2> {
