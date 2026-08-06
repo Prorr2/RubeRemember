@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr } from '@/hooks/use-remember-store';
+import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr, EnergyType, Memo, Plan } from '@/hooks/use-remember-store';
 import { Colors, Spacing } from '@/constants/theme';
 
 export default function ItemEditorScreen() {
@@ -44,6 +44,7 @@ export default function ItemEditorScreen() {
   const [selectedSlotId, setSelectedSlotId] = useState<string>('');
   const [taskStartDate, setTaskStartDate] = useState<string>('');
   const [taskDueDate, setTaskDueDate] = useState<string>('');
+  const [energyType, setEnergyType] = useState<EnergyType>(EnergyType.CREATIVE);
 
   // Reminder Specific State
   const [chosenDates, setChosenDates] = useState<string[]>([]);
@@ -53,6 +54,19 @@ export default function ItemEditorScreen() {
 
   // Activity Specific State
   const [activityCategory, setActivityCategory] = useState<string>('OTHER');
+
+  // Memo Specific State
+  const [memoStartDate, setMemoStartDate] = useState<string>('');
+  const [memoEndDate, setMemoEndDate] = useState<string>('');
+  const [memoHasAlarm, setMemoHasAlarm] = useState(false);
+  const [memoAlarmHour, setMemoAlarmHour] = useState(12);
+  const [memoAlarmMinute, setMemoAlarmMinute] = useState(0);
+
+  // Plan Specific State
+  const [planStartMonth, setPlanStartMonth] = useState<number>(new Date().getMonth() + 1);
+  const [planStartYear, setPlanStartYear] = useState<number>(new Date().getFullYear());
+  const [planEndMonth, setPlanEndMonth] = useState<number>(new Date().getMonth() + 1);
+  const [planEndYear, setPlanEndYear] = useState<number>(new Date().getFullYear());
 
   // Calendar State
   const [calendarMonth, setCalendarMonth] = useState(new Date());
@@ -75,6 +89,7 @@ export default function ItemEditorScreen() {
         setSelectedSlotId(task.timeSlotId || '');
         setTaskStartDate(task.startDate || '');
         setTaskDueDate(task.dueDate || '');
+        setEnergyType(task.energyType || EnergyType.CREATIVE);
       } else if (editingItem.type === ItemType.REMINDER) {
         const rem = editingItem as any;
         setAutoArchive(rem.autoArchive !== false);
@@ -96,6 +111,26 @@ export default function ItemEditorScreen() {
       } else if (editingItem.type === ItemType.ACTIVITY) {
         const act = editingItem as any;
         setActivityCategory(act.category || 'OTHER');
+      } else if (editingItem.type === ItemType.MEMO) {
+        const memo = editingItem as Memo;
+        setMemoStartDate(memo.startDate || '');
+        setMemoEndDate(memo.endDate || '');
+        setMemoHasAlarm(memo.hasAlarm || false);
+        if (memo.alarmTime) {
+          const [h, min] = memo.alarmTime.split(':').map(Number);
+          setMemoAlarmHour(h);
+          setMemoAlarmMinute(min);
+        }
+        if (memo.startDate) {
+          const [y, m] = memo.startDate.split('-').map(Number);
+          setCalendarMonth(new Date(y, m - 1, 1));
+        }
+      } else if (editingItem.type === ItemType.PLAN) {
+        const plan = editingItem as Plan;
+        setPlanStartMonth(plan.startMonth || new Date().getMonth() + 1);
+        setPlanStartYear(plan.startYear || new Date().getFullYear());
+        setPlanEndMonth(plan.endMonth || new Date().getMonth() + 1);
+        setPlanEndYear(plan.endYear || new Date().getFullYear());
       }
     } else {
       // Setup default creation values
@@ -114,6 +149,13 @@ export default function ItemEditorScreen() {
       setTaskStartDate(todayStr);
       setTaskDueDate(todayStr);
       setChosenDates([todayStr]);
+      setMemoStartDate(todayStr);
+      setMemoEndDate(todayStr);
+      const today = new Date();
+      setPlanStartMonth(today.getMonth() + 1);
+      setPlanStartYear(today.getFullYear());
+      setPlanEndMonth(today.getMonth() + 1);
+      setPlanEndYear(today.getFullYear());
     }
   }, [editingItem, params.id, params.type, params.goalId, params.phaseId]);
 
@@ -169,6 +211,18 @@ export default function ItemEditorScreen() {
         }
         return [...prev, dateStr].sort();
       });
+    } else if (itemType === ItemType.MEMO) {
+      if (!memoStartDate || (memoStartDate && memoEndDate)) {
+        setMemoStartDate(dateStr);
+        setMemoEndDate('');
+      } else {
+        if (dateStr < memoStartDate) {
+          setMemoStartDate(dateStr);
+          setMemoEndDate('');
+        } else {
+          setMemoEndDate(dateStr);
+        }
+      }
     } else {
       // For tasks, toggle start/due date
       if (!taskStartDate || (taskStartDate && taskDueDate)) {
@@ -228,6 +282,7 @@ export default function ItemEditorScreen() {
             goalId: selectedGoalId || undefined,
             phaseId: selectedPhaseId || undefined,
             timeSlotId: selectedSlotId || undefined,
+            energyType,
           } as any);
         } else if (itemType === ItemType.REMINDER) {
           const formattedHour = chosenHour.toString().padStart(2, '0');
@@ -249,6 +304,26 @@ export default function ItemEditorScreen() {
             ...commonUpdates,
             category: activityCategory,
           } as any);
+        } else if (itemType === ItemType.MEMO) {
+          const formattedHour = memoAlarmHour.toString().padStart(2, '0');
+          const formattedMin = memoAlarmMinute.toString().padStart(2, '0');
+          const alarmTimeStr = `${formattedHour}:${formattedMin}`;
+
+          await store.updateItem(editingItem.id, {
+            ...commonUpdates,
+            startDate: memoStartDate || undefined,
+            endDate: memoEndDate || undefined,
+            hasAlarm: memoHasAlarm,
+            alarmTime: alarmTimeStr,
+          } as any);
+        } else if (itemType === ItemType.PLAN) {
+          await store.updateItem(editingItem.id, {
+            ...commonUpdates,
+            startMonth: planStartMonth,
+            startYear: planStartYear,
+            endMonth: planEndMonth,
+            endYear: planEndYear,
+          } as any);
         }
       } else {
         // Create new item
@@ -262,7 +337,8 @@ export default function ItemEditorScreen() {
             priority,
             selectedGoalId || undefined,
             selectedPhaseId || undefined,
-            selectedSlotId || undefined
+            selectedSlotId || undefined,
+            energyType
           );
         } else if (itemType === ItemType.REMINDER) {
           const formattedHour = chosenHour.toString().padStart(2, '0');
@@ -285,6 +361,28 @@ export default function ItemEditorScreen() {
             tags,
             favourite
           );
+        } else if (itemType === ItemType.MEMO) {
+          const formattedHour = memoAlarmHour.toString().padStart(2, '0');
+          const formattedMin = memoAlarmMinute.toString().padStart(2, '0');
+          const alarmTimeStr = `${formattedHour}:${formattedMin}`;
+
+          await store.createMemo(
+            cleanTitle,
+            description.trim(),
+            memoStartDate || undefined,
+            memoEndDate || undefined,
+            memoHasAlarm,
+            alarmTimeStr
+          );
+        } else if (itemType === ItemType.PLAN) {
+          await store.createPlan(
+            cleanTitle,
+            description.trim(),
+            planStartMonth,
+            planStartYear,
+            planEndMonth,
+            planEndYear
+          );
         }
       }
       router.back();
@@ -293,10 +391,35 @@ export default function ItemEditorScreen() {
     }
   };
 
+  const handleDelete = () => {
+    if (!editingItem) return;
+    Alert.alert(
+      'Mover a la papelera',
+      '¿Estás seguro de que deseas mover este elemento a la papelera?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Mover a la papelera', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await store.deleteItem(editingItem.id);
+              router.back();
+            } catch (e: any) {
+              Alert.alert('Error', `No se pudo eliminar: ${e.message}`);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // Styling helpers
   const getThemeColor = () => {
     if (itemType === ItemType.TASK) return '#FF9500'; // Orange
     if (itemType === ItemType.REMINDER) return '#007AFF'; // Blue
+    if (itemType === ItemType.MEMO) return '#00C7BE'; // Teal
+    if (itemType === ItemType.PLAN) return '#BF5AF2'; // Violet
     return '#5856D6'; // Indigo
   };
 
@@ -309,11 +432,18 @@ export default function ItemEditorScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.text }]}>
-          {isEditing ? 'Editar' : 'Nuevo'} {itemType === ItemType.TASK ? 'Tarea' : itemType === ItemType.REMINDER ? 'Recordatorio' : 'Actividad'}
+          {isEditing ? 'Editar' : 'Nuevo'} {itemType === ItemType.TASK ? 'Tarea' : itemType === ItemType.REMINDER ? 'Alarma' : itemType === ItemType.MEMO ? 'Recordatorio' : itemType === ItemType.PLAN ? 'Plan' : 'Actividad'}
         </Text>
-        <Pressable onPress={handleSave} style={styles.headerButton}>
-          <Ionicons name="checkmark-done" size={24} color={themeColor} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          {isEditing && (
+            <Pressable onPress={handleDelete} style={styles.headerButton}>
+              <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+            </Pressable>
+          )}
+          <Pressable onPress={handleSave} style={styles.headerButton}>
+            <Ionicons name="checkmark-done" size={24} color={themeColor} />
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
@@ -345,6 +475,18 @@ export default function ItemEditorScreen() {
             </Pressable>
 
             <Pressable
+              onPress={() => setItemType(ItemType.MEMO)}
+              style={[
+                styles.typeTab,
+                { backgroundColor: colors.backgroundElement },
+                itemType === ItemType.MEMO && { backgroundColor: 'rgba(0, 199, 190, 0.15)', borderColor: '#00C7BE', borderWidth: 1.5 },
+              ]}
+            >
+              <Ionicons name="bookmark-outline" size={20} color={itemType === ItemType.MEMO ? '#00C7BE' : colors.textSecondary} />
+              <Text style={[styles.typeText, { color: itemType === ItemType.MEMO ? '#00C7BE' : colors.textSecondary }]}>Recordatorio</Text>
+            </Pressable>
+
+            <Pressable
               onPress={() => setItemType(ItemType.ACTIVITY)}
               style={[
                 styles.typeTab,
@@ -354,6 +496,18 @@ export default function ItemEditorScreen() {
             >
               <Ionicons name="sparkles-outline" size={20} color={itemType === ItemType.ACTIVITY ? '#5856D6' : colors.textSecondary} />
               <Text style={[styles.typeText, { color: itemType === ItemType.ACTIVITY ? '#5856D6' : colors.textSecondary }]}>Ocio</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setItemType(ItemType.PLAN)}
+              style={[
+                styles.typeTab,
+                { backgroundColor: colors.backgroundElement },
+                itemType === ItemType.PLAN && { backgroundColor: 'rgba(191, 90, 242, 0.15)', borderColor: '#BF5AF2', borderWidth: 1.5 },
+              ]}
+            >
+              <Ionicons name="compass-outline" size={20} color={itemType === ItemType.PLAN ? '#BF5AF2' : colors.textSecondary} />
+              <Text style={[styles.typeText, { color: itemType === ItemType.PLAN ? '#BF5AF2' : colors.textSecondary }]}>Plan</Text>
             </Pressable>
           </View>
         )}
@@ -552,6 +706,45 @@ export default function ItemEditorScreen() {
                   </Pressable>
                 ))}
               </ScrollView>
+
+              <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
+
+              {/* Energy Type Picker */}
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Tipo de Energía Requerida</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+                {([
+                  EnergyType.CREATIVE,
+                  EnergyType.ANALYTICAL,
+                  EnergyType.ADMINISTRATIVE,
+                  EnergyType.SOCIAL,
+                  EnergyType.PHYSICAL,
+                  EnergyType.LEARNING,
+                ] as EnergyType[]).map((eType) => {
+                  const label = 
+                    eType === EnergyType.CREATIVE ? '🎨 Creativa' :
+                    eType === EnergyType.ANALYTICAL ? '🧠 Analítica' :
+                    eType === EnergyType.ADMINISTRATIVE ? '📁 Admin' :
+                    eType === EnergyType.SOCIAL ? '💬 Social' :
+                    eType === EnergyType.PHYSICAL ? '🏋️ Física' :
+                    '📖 Aprendizaje';
+                  
+                  return (
+                    <Pressable
+                      key={eType}
+                      onPress={() => setEnergyType(eType)}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: colors.backgroundSelected },
+                        energyType === eType && { backgroundColor: themeColor },
+                      ]}
+                    >
+                      <Text style={[styles.chipText, { color: energyType === eType ? '#fff' : colors.text }]}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
             </View>
 
             {/* Date Selection Card */}
@@ -559,7 +752,7 @@ export default function ItemEditorScreen() {
               <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Rango de Fechas</Text>
               <Text style={{ color: colors.text, fontSize: 13, marginBottom: 8 }}>
                 {taskStartDate ? `Inicio: ${taskStartDate}` : 'Selecciona fecha de inicio'}
-                {taskDueDate ? ` | Vencimiento: ${taskDueDate}` : ''}
+                {taskDueDate ? ` | Finalización: ${taskDueDate}` : ''}
               </Text>
 
               {renderCalendar()}
@@ -620,6 +813,176 @@ export default function ItemEditorScreen() {
               {renderCalendar()}
             </View>
           </>
+        )}
+
+        {/* Memo details */}
+        {itemType === ItemType.MEMO && (
+          <>
+            {/* Range of dates selection Card */}
+            <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Franja de Tiempo (Recordar durante este rango)</Text>
+              <Text style={{ color: colors.text, fontSize: 13, marginBottom: 8 }}>
+                {memoStartDate ? `Inicio: ${memoStartDate}` : 'Selecciona fecha de inicio'}
+                {memoEndDate ? ` | Fin: ${memoEndDate}` : ''}
+              </Text>
+
+              {renderCalendar()}
+            </View>
+
+            {/* Alarm toggle and Picker */}
+            <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
+              <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center' }]}>
+                <View>
+                  <Text style={{ color: colors.text, fontWeight: '600' }}>Fijar Alarma</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Activar una alerta para este recordatorio</Text>
+                </View>
+                <Switch
+                  value={memoHasAlarm}
+                  onValueChange={setMemoHasAlarm}
+                  trackColor={{ false: colors.backgroundSelected, true: '#30B0C7' }}
+                />
+              </View>
+
+              {memoHasAlarm && (
+                <>
+                  <View style={[styles.separator, { backgroundColor: colors.backgroundSelected, marginVertical: 12 }]} />
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 8 }]}>Hora de Alarma</Text>
+                  <View style={styles.timePickerContainer}>
+                    <View style={styles.timeColumn}>
+                      <Pressable onPress={() => setMemoAlarmHour((h) => (h + 1) % 24)}>
+                        <Ionicons name="chevron-up" size={24} color={colors.text} />
+                      </Pressable>
+                      <Text style={[styles.timeText, { color: colors.text }]}>{memoAlarmHour.toString().padStart(2, '0')}</Text>
+                      <Pressable onPress={() => setMemoAlarmHour((h) => (h - 1 + 24) % 24)}>
+                        <Ionicons name="chevron-down" size={24} color={colors.text} />
+                      </Pressable>
+                    </View>
+                    <Text style={[styles.timeSeparator, { color: colors.text }]}>:</Text>
+                    <View style={styles.timeColumn}>
+                      <Pressable onPress={() => setMemoAlarmMinute((m) => (m + 5) % 60)}>
+                        <Ionicons name="chevron-up" size={24} color={colors.text} />
+                      </Pressable>
+                      <Text style={[styles.timeText, { color: colors.text }]}>{memoAlarmMinute.toString().padStart(2, '0')}</Text>
+                      <Pressable onPress={() => setMemoAlarmMinute((m) => (m - 5 + 60) % 60)}>
+                        <Ionicons name="chevron-down" size={24} color={colors.text} />
+                      </Pressable>
+                    </View>
+                  </View>
+                </>
+              )}
+            </View>
+          </>
+        )}
+
+        {/* Plan details */}
+        {itemType === ItemType.PLAN && (
+          <View style={{ gap: 16 }}>
+            {/* Start Date Selection Card */}
+            <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 8 }]}>Fecha de Inicio del Plan</Text>
+              
+              {/* Year selector */}
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6 }}>Año</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+                {[2026, 2027, 2028, 2029, 2030, 2031, 2032].map((y) => (
+                  <Pressable
+                    key={y}
+                    onPress={() => {
+                      setPlanStartYear(y);
+                      if (planEndYear < y) {
+                        setPlanEndYear(y);
+                      }
+                    }}
+                    style={[
+                      styles.chip,
+                      { backgroundColor: colors.backgroundSelected },
+                      planStartYear === y && { backgroundColor: themeColor },
+                    ]}
+                  >
+                    <Text style={[styles.chipText, { color: planStartYear === y ? '#fff' : colors.text }]}>{y}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              {/* Month selector */}
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginTop: 12, marginBottom: 6 }}>Mes</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+                {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((mLabel, idx) => {
+                  const mVal = idx + 1;
+                  return (
+                    <Pressable
+                      key={mVal}
+                      onPress={() => {
+                        setPlanStartMonth(mVal);
+                        if (planStartYear === planEndYear && planEndMonth < mVal) {
+                          setPlanEndMonth(mVal);
+                        }
+                      }}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: colors.backgroundSelected },
+                        planStartMonth === mVal && { backgroundColor: themeColor },
+                      ]}
+                    >
+                      <Text style={[styles.chipText, { color: planStartMonth === mVal ? '#fff' : colors.text }]}>{mLabel}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* End Date Selection Card */}
+            <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 8 }]}>Fecha de Finalización del Plan</Text>
+              
+              {/* Year selector */}
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6 }}>Año</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+                {[2026, 2027, 2028, 2029, 2030, 2031, 2032].map((y) => {
+                  const isDisabled = y < planStartYear;
+                  return (
+                    <Pressable
+                      key={y}
+                      disabled={isDisabled}
+                      onPress={() => setPlanEndYear(y)}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: colors.backgroundSelected },
+                        planEndYear === y && { backgroundColor: themeColor },
+                        isDisabled && { opacity: 0.3 },
+                      ]}
+                    >
+                      <Text style={[styles.chipText, { color: planEndYear === y ? '#fff' : colors.text }]}>{y}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Month selector */}
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginTop: 12, marginBottom: 6 }}>Mes</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+                {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((mLabel, idx) => {
+                  const mVal = idx + 1;
+                  const isDisabled = planEndYear === planStartYear && mVal < planStartMonth;
+                  return (
+                    <Pressable
+                      key={mVal}
+                      disabled={isDisabled}
+                      onPress={() => setPlanEndMonth(mVal)}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: colors.backgroundSelected },
+                        planEndMonth === mVal && { backgroundColor: themeColor },
+                        isDisabled && { opacity: 0.3 },
+                      ]}
+                    >
+                      <Text style={[styles.chipText, { color: planEndMonth === mVal ? '#fff' : colors.text }]}>{mLabel}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
         )}
 
         {/* Activity details */}
@@ -708,9 +1071,14 @@ export default function ItemEditorScreen() {
           {daysInMonth.map((item, idx) => {
             const isSelected = itemType === ItemType.REMINDER
               ? chosenDates.includes(item.dateStr)
-              : (taskStartDate === item.dateStr || taskDueDate === item.dateStr || (taskStartDate && taskDueDate && item.dateStr > taskStartDate && item.dateStr < taskDueDate));
+              : itemType === ItemType.MEMO
+                ? (memoStartDate === item.dateStr || memoEndDate === item.dateStr || (memoStartDate && memoEndDate && item.dateStr > memoStartDate && item.dateStr < memoEndDate))
+                : (taskStartDate === item.dateStr || taskDueDate === item.dateStr || (taskStartDate && taskDueDate && item.dateStr > taskStartDate && item.dateStr < taskDueDate));
 
-            const isRangeMid = itemType === ItemType.TASK && taskStartDate && taskDueDate && item.dateStr > taskStartDate && item.dateStr < taskDueDate;
+            const isRangeMid = (itemType === ItemType.TASK && taskStartDate && taskDueDate && item.dateStr > taskStartDate && item.dateStr < taskDueDate) ||
+              (itemType === ItemType.MEMO && memoStartDate && memoEndDate && item.dateStr > memoStartDate && item.dateStr < memoEndDate);
+
+            const isToday = item.dateStr === getLocalDateStr();
 
             return (
               <Pressable
@@ -720,6 +1088,7 @@ export default function ItemEditorScreen() {
                   styles.gridDayButton,
                   isSelected && { backgroundColor: themeColor },
                   isRangeMid && { backgroundColor: themeColor + '30' },
+                  isToday && !isSelected && { borderColor: themeColor, borderWidth: 1.5 },
                   !item.isCurrentMonth && { opacity: 0.3 },
                 ]}
               >
@@ -727,6 +1096,8 @@ export default function ItemEditorScreen() {
                   style={[
                     styles.gridDayText,
                     { color: colors.text },
+                    isToday && { fontWeight: 'bold' },
+                    isToday && !isSelected && { color: themeColor },
                     isSelected && { color: '#fff', fontWeight: 'bold' },
                   ]}
                 >
@@ -767,10 +1138,12 @@ const styles = StyleSheet.create({
   },
   typeContainer: {
     flexDirection: 'row',
-    gap: 10,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   typeTab: {
-    flex: 1,
+    minWidth: '45%',
+    flexGrow: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

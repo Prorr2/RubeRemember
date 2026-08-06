@@ -282,7 +282,12 @@ export default function ActivitiesScreen() {
       ) : (
         <View style={{ flex: 1 }}>
           {/* Category Filter Chips */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterScroll}
+            style={{ flexGrow: 0 }}
+          >
             <Pressable
               onPress={() => setIsCategoryModalVisible(true)}
               style={[
@@ -639,12 +644,12 @@ const styles = StyleSheet.create({
   },
   filterScroll: {
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 6,
     gap: 8,
   },
   filterChip: {
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 12,
   },
   filterChipText: {

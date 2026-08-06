@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { NotificationService } from '@/services/notification-service';
 
-import { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS } from '@/models/Item';
+import { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
 import { Goal, Phase } from '@/models/Goal';
 import { TimeSlot } from '@/models/TimeSlot';
 import { ReminderList, ListItem } from '@/models/ReminderList';
@@ -16,7 +16,7 @@ export { Comment } from '@/models/Comment';
 export { Goal, Phase } from '@/models/Goal';
 export { TimeSlot } from '@/models/TimeSlot';
 export { ReminderList, ListItem } from '@/models/ReminderList';
-export { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS } from '@/models/Item';
+export { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
 
 
 
@@ -50,6 +50,8 @@ interface RememberStore {
   getTasks: () => Task[];
   getReminders: () => ReminderV2[];
   getActivities: () => Activity[];
+  getMemos: () => Memo[];
+  getPlans: () => Plan[];
   getArchivedItems: () => Item[];
   getTrashItems: () => Item[];
   getTodayReminders: () => ReminderV2[];
@@ -65,8 +67,9 @@ interface RememberStore {
     priority?: Priority,
     goalId?: string,
     phaseId?: string,
-    timeSlotId?: string
-  ) => Promise<void>;
+    timeSlotId?: string,
+    energyType?: EnergyType
+  ) => Promise<string>;
   createReminder: (
     title: string,
     description?: string,
@@ -74,15 +77,32 @@ interface RememberStore {
     time?: string,
     dates?: string[],
     autoArchive?: boolean
-  ) => Promise<void>;
+  ) => Promise<string>;
+  createMemo: (
+    title: string,
+    description?: string,
+    startDate?: string,
+    endDate?: string,
+    hasAlarm?: boolean,
+    alarmTime?: string
+  ) => Promise<string>;
   createActivity: (
     title: string,
     category: string,
     description?: string,
     tags?: string[],
     favourite?: boolean
-  ) => Promise<void>;
+  ) => Promise<string>;
+  createPlan: (
+    title: string,
+    description?: string,
+    startMonth?: number,
+    startYear?: number,
+    endMonth?: number,
+    endYear?: number
+  ) => Promise<string>;
   updateItem: (id: string, updates: Partial<Item>) => Promise<void>;
+  updateItems: (ids: string[], updates: Partial<Item>) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   restoreItem: (id: string) => Promise<void>;
   archiveItem: (id: string) => Promise<void>;
@@ -160,7 +180,7 @@ interface RememberStore {
   updateList: (id: string, name: string) => Promise<void>;
   deleteList: (id: string) => Promise<void>;
   toggleListCollapse: (id: string) => Promise<void>;
-  addListItem: (listId: string, text: string, imageUri?: string) => Promise<void>;
+  addListItem: (listId: string, text: string, imageUri?: string) => Promise<string>;
   updateListItem: (listId: string, itemId: string, text: string, imageUri?: string) => Promise<void>;
   deleteListItem: (listId: string, itemId: string) => Promise<void>;
   setListAlarm: (listId: string, time: string | null) => Promise<void>;
@@ -185,6 +205,13 @@ interface RememberStore {
   statistics: Statistics;
   createSession: (taskId: string, plannedDuration: number, notes?: string) => Promise<string>;
   updateSession: (id: string, updates: Partial<Session>) => Promise<void>;
+  endSession: (
+    sessionId: string,
+    realDuration: number,
+    completed: boolean,
+    notes?: string,
+    taskUpdates?: Partial<Task>
+  ) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   updateUserSettings: (updates: Partial<UserSettings>) => Promise<void>;
   updateStatistics: (updates: Partial<Statistics>) => Promise<void>;
@@ -458,14 +485,31 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   ) => {
     try {
       const adjusted = recalculateTaskSlotTimes(newItems, newSlots, currentSeparation);
-      setItems(adjusted);
-      setGoals(newGoals);
-      setLists(newLists);
-      setTimeSlots(newSlots);
-      setSessions(newSessions);
-      setRecommendations(newRecs);
-      setUserSettings(newSettings);
-      setStatistics(newStats);
+      
+      if (JSON.stringify(adjusted) !== JSON.stringify(items)) {
+        setItems(adjusted);
+      }
+      if (JSON.stringify(newGoals) !== JSON.stringify(goals)) {
+        setGoals(newGoals);
+      }
+      if (JSON.stringify(newLists) !== JSON.stringify(lists)) {
+        setLists(newLists);
+      }
+      if (JSON.stringify(newSlots) !== JSON.stringify(timeSlots)) {
+        setTimeSlots(newSlots);
+      }
+      if (JSON.stringify(newSessions) !== JSON.stringify(sessions)) {
+        setSessions(newSessions);
+      }
+      if (JSON.stringify(newRecs) !== JSON.stringify(recommendations)) {
+        setRecommendations(newRecs);
+      }
+      if (JSON.stringify(newSettings) !== JSON.stringify(userSettings)) {
+        setUserSettings(newSettings);
+      }
+      if (JSON.stringify(newStats) !== JSON.stringify(statistics)) {
+        setStatistics(newStats);
+      }
       
       const db: DatabaseV3 = {
         version: 3,
@@ -524,8 +568,19 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         datesToSchedule = rem.remindAt.dates || (rem.remindAt.date ? [rem.remindAt.date] : []);
         timeStr = rem.remindAt.time || '12:00';
         isCompleted = rem.completed;
+      } else if (item.type === ItemType.MEMO) {
+        const memo = item as Memo;
+        if (!memo.hasAlarm) {
+          await NotificationService.cancelNotification(memo.id, []);
+          return;
+        }
+        reminderText = memo.title;
+        reminderId = memo.id;
+        datesToSchedule = [memo.startDate || getLocalDateStr(new Date())];
+        timeStr = memo.alarmTime || '12:00';
+        isCompleted = memo.completed;
       } else {
-        return; // Tasks and Activities do not trigger push alerts
+        return; // Tasks, Activities, Plans and other types do not trigger push alerts
       }
 
       await NotificationService.cancelNotification(reminderId, datesToSchedule);
@@ -584,6 +639,14 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     return items.filter((i) => i.type === ItemType.ACTIVITY && !i.archived && !i.trash) as Activity[];
   }, [items]);
 
+  const getMemos = useCallback(() => {
+    return items.filter((i) => i.type === ItemType.MEMO && !i.archived && !i.trash) as Memo[];
+  }, [items]);
+
+  const getPlans = useCallback(() => {
+    return items.filter((i) => i.type === ItemType.PLAN && !i.archived && !i.trash) as Plan[];
+  }, [items]);
+
   const getArchivedItems = useCallback(() => {
     return items.filter((i) => i.archived && !i.trash);
   }, [items]);
@@ -626,10 +689,11 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     priority = Priority.MEDIUM,
     goalId?: string,
     phaseId?: string,
-    timeSlotId?: string
+    timeSlotId?: string,
+    energyType?: EnergyType
   ) => {
     const cleanTitle = title.trim();
-    if (!cleanTitle) return;
+    if (!cleanTitle) return '';
 
     const newTask: Task = {
       id: Math.random().toString(36).substring(7),
@@ -650,10 +714,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       goalId,
       phaseId,
       timeSlotId,
+      energyType: energyType || EnergyType.CREATIVE,
       comments: [],
     };
 
     await saveItems([...items, newTask]);
+    return newTask.id;
   }, [items, saveItems]);
 
   const createReminder = useCallback(async (
@@ -665,7 +731,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     autoArchive = false
   ) => {
     const cleanTitle = title.trim();
-    if (!cleanTitle) return;
+    if (!cleanTitle) return '';
 
     const newReminder: ReminderV2 = {
       id: Math.random().toString(36).substring(7),
@@ -690,6 +756,41 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
     await saveItems([...items, newReminder]);
     await syncCalendarAndAlarms(newReminder);
+    return newReminder.id;
+  }, [items, saveItems, syncCalendarAndAlarms]);
+
+  const createMemo = useCallback(async (
+    title: string,
+    description = '',
+    startDate?: string,
+    endDate?: string,
+    hasAlarm = false,
+    alarmTime = '12:00'
+  ) => {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) return '';
+
+    const newMemo: Memo = {
+      id: Math.random().toString(36).substring(7),
+      type: ItemType.MEMO,
+      title: cleanTitle,
+      description,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      archived: false,
+      favourite: false,
+      tags: [],
+      trash: false,
+      startDate,
+      endDate,
+      hasAlarm,
+      alarmTime,
+      completed: false,
+    };
+
+    await saveItems([...items, newMemo]);
+    await syncCalendarAndAlarms(newMemo);
+    return newMemo.id;
   }, [items, saveItems, syncCalendarAndAlarms]);
 
   const createActivity = useCallback(async (
@@ -700,7 +801,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     favourite = false
   ) => {
     const cleanTitle = title.trim();
-    if (!cleanTitle) return;
+    if (!cleanTitle) return '';
 
     const newActivity: Activity = {
       id: Math.random().toString(36).substring(7),
@@ -719,6 +820,40 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     };
 
     await saveItems([...items, newActivity]);
+    return newActivity.id;
+  }, [items, saveItems]);
+
+  const createPlan = useCallback(async (
+    title: string,
+    description = '',
+    startMonth?: number,
+    startYear?: number,
+    endMonth?: number,
+    endYear?: number
+  ) => {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) return '';
+
+    const newPlan: Plan = {
+      id: Math.random().toString(36).substring(7),
+      type: ItemType.PLAN,
+      title: cleanTitle,
+      description,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      archived: false,
+      favourite: false,
+      tags: [],
+      trash: false,
+      startMonth,
+      startYear,
+      endMonth,
+      endYear,
+      completed: false,
+    };
+
+    await saveItems([...items, newPlan]);
+    return newPlan.id;
   }, [items, saveItems]);
 
   const updateItem = useCallback(async (id: string, updates: Partial<Item>) => {
@@ -740,6 +875,29 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     const found = updated.find((i) => i.id === id);
     if (found && found.type === ItemType.REMINDER) {
       await syncCalendarAndAlarms(found);
+    }
+  }, [items, saveItems, syncCalendarAndAlarms]);
+
+  const updateItems = useCallback(async (ids: string[], updates: Partial<Item>) => {
+    const updated = items.map((i) => {
+      if (ids.includes(i.id)) {
+        return {
+          ...i,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        } as Item;
+      }
+      return i;
+    });
+
+    await saveItems(updated);
+
+    // If any updated item is a reminder, reschedule alerts
+    for (const id of ids) {
+      const found = updated.find((i) => i.id === id);
+      if (found && found.type === ItemType.REMINDER) {
+        await syncCalendarAndAlarms(found);
+      }
     }
   }, [items, saveItems, syncCalendarAndAlarms]);
 
@@ -1478,10 +1636,11 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [lists, saveLists]);
 
   const addListItem = useCallback(async (listId: string, text: string, imageUri?: string) => {
+    const newItemId = `item-${Math.random().toString(36).substring(7)}`;
     const updated = lists.map((l) => {
       if (l.id === listId) {
         const newItem: ListItem = {
-          id: `item-${Math.random().toString(36).substring(7)}`,
+          id: newItemId,
           text: text.trim(),
           imageUri,
         };
@@ -1490,6 +1649,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       return l;
     });
     await saveLists(updated);
+    return newItemId;
   }, [lists, saveLists]);
 
   const updateListItem = useCallback(async (listId: string, itemId: string, text: string, imageUri?: string) => {
@@ -1751,7 +1911,21 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const updateSession = useCallback(async (id: string, updates: Partial<Session>) => {
-    const nextSessions = sessions.map((s) => (s.id === id ? { ...s, ...updates } : s));
+    let nextSessions = sessions;
+    const exists = sessions.some((s) => s.id === id);
+    if (exists) {
+      nextSessions = sessions.map((s) => (s.id === id ? { ...s, ...updates } : s));
+    } else {
+      const db = await MigrationEngine.getDatabase();
+      const dbSession = (db.sessions || []).find((s) => s.id === id);
+      if (dbSession) {
+        nextSessions = [...sessions, { ...dbSession, ...updates }];
+      } else {
+        console.warn(`updateSession: Session ${id} not found in state or DB.`);
+        return;
+      }
+    }
+
     await saveDatabaseState(
       items,
       goals,
@@ -1761,6 +1935,87 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       recommendations,
       userSettings,
       statistics,
+      proximityDays,
+      slotSeparationMinutes
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
+
+  const endSession = useCallback(async (
+    sessionId: string,
+    realDuration: number,
+    completed: boolean,
+    notes?: string,
+    taskUpdates?: Partial<Task>
+  ) => {
+    let session = sessions.find((s) => s.id === sessionId);
+    let nextSessions = sessions;
+
+    if (!session) {
+      const db = await MigrationEngine.getDatabase();
+      const dbSession = (db.sessions || []).find((s) => s.id === sessionId);
+      if (dbSession) {
+        session = dbSession;
+        nextSessions = [...sessions, dbSession];
+      }
+    }
+
+    if (!session) {
+      console.warn(`endSession: Session ${sessionId} not found in state or DB.`);
+      return;
+    }
+
+    const endTime = new Date().toISOString();
+
+    nextSessions = nextSessions.map((s) => {
+      if (s.id === sessionId) {
+        return {
+          ...s,
+          endTime,
+          realDuration,
+          completed,
+          notes: notes !== undefined ? notes : s.notes,
+        };
+      }
+      return s;
+    });
+
+    const nextItems = items.map((item) => {
+      if (item.id === session!.taskId && item.type === ItemType.TASK) {
+        const task = item as Task;
+        const workedTime = (task.workedTime || 0) + realDuration;
+        const sessionsCount = (task.sessionsCount || 0) + 1;
+        return {
+          ...task,
+          workedTime,
+          sessionsCount,
+          lastSession: endTime,
+          taskState: completed ? TaskState.COMPLETED : TaskState.IN_PROGRESS,
+          completed,
+          ...(taskUpdates || {}),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return item;
+    });
+
+    const newStats = {
+      ...statistics,
+      totalSessions: statistics.totalSessions + 1,
+      totalWorkedTime: statistics.totalWorkedTime + realDuration,
+      completedTasks: statistics.completedTasks + (completed ? 1 : 0),
+      averageSessionTime: Math.round((statistics.totalWorkedTime + realDuration) / (statistics.totalSessions + 1)),
+      lastActivity: endTime,
+    };
+
+    await saveDatabaseState(
+      nextItems,
+      goals,
+      lists,
+      timeSlots,
+      nextSessions,
+      recommendations,
+      userSettings,
+      newStats,
       proximityDays,
       slotSeparationMinutes
     );
@@ -1838,14 +2093,19 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         getTasks,
         getReminders,
         getActivities,
+        getMemos,
+        getPlans,
         getArchivedItems,
         getTrashItems,
         getTodayReminders,
         getSuggestedActivities,
         createTask,
         createReminder,
+        createMemo,
         createActivity,
+        createPlan,
         updateItem,
+        updateItems,
         deleteItem,
         restoreItem,
         archiveItem,
@@ -1910,6 +2170,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         statistics,
         createSession,
         updateSession,
+        endSession,
         deleteSession,
         updateUserSettings,
         updateStatistics,

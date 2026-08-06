@@ -24,14 +24,14 @@ export default function SearchScreen() {
   const colors = Colors[scheme];
 
   const [query, setQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'todo' | 'tasks' | 'reminders' | 'activities' | 'goals' | 'lists'>('todo');
+  const [activeFilter, setActiveFilter] = useState<'todo' | 'tasks' | 'reminders' | 'memos' | 'plans' | 'activities' | 'goals' | 'lists'>('todo');
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
 
   // Group search results
   const results = useMemo(() => {
     const q = query.toLowerCase().trim();
-    if (!q) return { tasks: [], reminders: [], activities: [], goals: [], lists: [] };
+    if (!q) return { tasks: [], reminders: [], activities: [], memos: [], plans: [], goals: [], lists: [] };
 
     const matchesText = (title: string = '', desc: string = '', tags: string[] = []) => {
       const titleMatch = title.toLowerCase().includes(q);
@@ -51,6 +51,8 @@ export default function SearchScreen() {
     const tasks = filteredItems.filter((i) => i.type === ItemType.TASK);
     const reminders = filteredItems.filter((i) => i.type === ItemType.REMINDER);
     const activities = filteredItems.filter((i) => i.type === ItemType.ACTIVITY);
+    const memos = filteredItems.filter((i) => i.type === ItemType.MEMO);
+    const plans = filteredItems.filter((i) => i.type === ItemType.PLAN);
 
     // 2. Filter Goals
     const goals = store.goals.filter((g) => {
@@ -66,13 +68,15 @@ export default function SearchScreen() {
       return listNameMatch || itemMatch;
     });
 
-    return { tasks, reminders, activities, goals, lists };
+    return { tasks, reminders, activities, memos, plans, goals, lists };
   }, [query, store.items, store.goals, store.lists, onlyFavorites, includeArchived]);
 
   const hasResults =
     results.tasks.length > 0 ||
     results.reminders.length > 0 ||
     results.activities.length > 0 ||
+    results.memos.length > 0 ||
+    results.plans.length > 0 ||
     results.goals.length > 0 ||
     results.lists.length > 0;
 
@@ -115,6 +119,8 @@ export default function SearchScreen() {
             { id: 'todo', label: 'Todo', icon: 'apps-outline' },
             { id: 'tasks', label: 'Tareas', icon: 'checkbox-outline' },
             { id: 'reminders', label: 'Alarmas', icon: 'notifications-outline' },
+            { id: 'memos', label: 'Recordatorios', icon: 'bookmark-outline' },
+            { id: 'plans', label: 'Planes', icon: 'compass-outline' },
             { id: 'activities', label: 'Ocio', icon: 'sparkles-outline' },
             { id: 'goals', label: 'Roadmaps', icon: 'trophy-outline' },
             { id: 'lists', label: 'Listas', icon: 'list-outline' },
@@ -220,7 +226,7 @@ export default function SearchScreen() {
             {/* REMINDERS */}
             {(activeFilter === 'todo' || activeFilter === 'reminders') && results.reminders.length > 0 && (
               <View style={styles.group}>
-                <Text style={[styles.groupTitle, { color: colors.textSecondary }]}>RECORDATORIOS ({results.reminders.length})</Text>
+                <Text style={[styles.groupTitle, { color: colors.textSecondary }]}>ALARMAS ({results.reminders.length})</Text>
                 <View style={styles.groupContent}>
                   {results.reminders.map((item) => (
                     <Pressable
@@ -230,6 +236,62 @@ export default function SearchScreen() {
                     >
                       <View style={styles.resultHeader}>
                         <Ionicons name="notifications" size={20} color="#007AFF" />
+                        <Text style={[styles.resultTitle, { color: colors.text }]} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                      </View>
+                      {item.description ? (
+                        <Text style={[styles.resultDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                          {item.description}
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* MEMOS */}
+            {(activeFilter === 'todo' || activeFilter === 'memos') && results.memos.length > 0 && (
+              <View style={styles.group}>
+                <Text style={[styles.groupTitle, { color: colors.textSecondary }]}>RECORDATORIOS ({results.memos.length})</Text>
+                <View style={styles.groupContent}>
+                  {results.memos.map((item) => (
+                    <Pressable
+                       key={item.id}
+                       onPress={() => navigateToItem(item)}
+                       style={[styles.resultCard, { backgroundColor: colors.backgroundElement }]}
+                    >
+                      <View style={styles.resultHeader}>
+                        <Ionicons name="bookmark" size={20} color="#00C7BE" />
+                        <Text style={[styles.resultTitle, { color: colors.text }]} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                      </View>
+                      {item.description ? (
+                        <Text style={[styles.resultDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                          {item.description}
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* PLANS */}
+            {(activeFilter === 'todo' || activeFilter === 'plans') && results.plans.length > 0 && (
+              <View style={styles.group}>
+                <Text style={[styles.groupTitle, { color: colors.textSecondary }]}>PLANES ({results.plans.length})</Text>
+                <View style={styles.groupContent}>
+                  {results.plans.map((item) => (
+                    <Pressable
+                       key={item.id}
+                       onPress={() => navigateToItem(item)}
+                       style={[styles.resultCard, { backgroundColor: colors.backgroundElement }]}
+                    >
+                      <View style={styles.resultHeader}>
+                        <Ionicons name="compass" size={20} color="#BF5AF2" />
                         <Text style={[styles.resultTitle, { color: colors.text }]} numberOfLines={1}>
                           {item.title}
                         </Text>

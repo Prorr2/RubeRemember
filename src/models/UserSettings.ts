@@ -3,6 +3,24 @@ export interface TimeRange {
   end: string; // HH:MM
 }
 
+export interface VoiceKeywords {
+  type: string[];
+  title: string[];
+  description: string[];
+  priority: string[];
+  weight: string[];
+  hours: string[];
+  date: string[];
+  time: string[];
+  energy: string[];
+  slot: string[];
+  goal: string[];
+  favourite: string[];
+  queryLists: string[];
+  queryListItems: string[];
+  addListItem: string[];
+}
+
 export interface UserSettings {
   maxFocusTasks: number;
   defaultCooldown: number; // in minutes (default 120 = 2 hours)
@@ -17,7 +35,28 @@ export interface UserSettings {
   terraDuration: number;
   solDuration: number;
   astraDuration: number;
+
+  // Voice command assistant keywords
+  voiceKeywords?: VoiceKeywords;
 }
+
+export const DEFAULT_VOICE_KEYWORDS: VoiceKeywords = {
+  type: ['tipo de elemento', 'tipo elemento', 'tipo', 'crear'],
+  title: ['titulo', 'nombre', 'tarea', 'recordatorio', 'alarma', 'ocio', 'actividad', 'plan'],
+  description: ['descripcion', 'nota', 'detalle', 'descripcion de', 'nota de'],
+  priority: ['prioridad', 'importancia'],
+  weight: ['peso', 'bloque', 'clasificacion'],
+  hours: ['horas', 'duracion', 'tiempo', 'horas estimadas'],
+  date: ['fecha', 'dia', 'para el', 'fecha de'],
+  time: ['hora', 'a las'],
+  energy: ['energia', 'tipo de energia', 'actitud'],
+  slot: ['franja', 'horario', 'bloque de tiempo'],
+  goal: ['meta', 'objetivo'],
+  favourite: ['favorito', 'destacado', 'importante'],
+  queryLists: ['nombre de todas las listas', 'cuales son mis listas', 'que listas tengo', 'listas', 'cuales son las listas'],
+  queryListItems: ['elementos de la lista', 'que tiene la lista', 'ver lista', 'contenido de la lista', 'que elementos tiene la lista'],
+  addListItem: ['añadir elemento a la lista', 'añade a la lista', 'agregar a la lista', 'poner en la lista', 'añadir a la lista', 'agrega a la lista'],
+};
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   maxFocusTasks: 3,
@@ -31,4 +70,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   terraDuration: 45,
   solDuration: 90,
   astraDuration: 20,
+  voiceKeywords: DEFAULT_VOICE_KEYWORDS,
 };
+
+

@@ -8,14 +8,444 @@ import {
   TextInput,
   Alert,
   useColorScheme,
+  Modal,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { useRememberStore, ItemType, Priority, Task, Reminder as ReminderV2, Activity, getLocalDateStr } from '@/hooks/use-remember-store';
+import { useRememberStore, ItemType, Priority, Task, Reminder as ReminderV2, Activity, getLocalDateStr, Memo, Plan, VoiceKeywords, EnergyType, DEFAULT_VOICE_KEYWORDS } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { useRecommendationService } from '@/services/RecommendationService';
+
+const speak = (text: string) => {
+  try {
+    const SpeechModule = require('expo-speech');
+    if (SpeechModule && SpeechModule.speak) {
+      SpeechModule.speak(text, { language: 'es-ES' });
+      return;
+    }
+  } catch (e) {
+    // Ignored, fallback below
+  }
+
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'es-ES';
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.warn('Web SpeechSynthesis failed:', e);
+    }
+  }
+};
+
+const parseSpanishWrittenNumber = (words: string[]): number | null => {
+  const units: Record<string, number> = {
+    'un': 1, 'una': 1, 'uno': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5,
+    'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9,
+    'once': 11, 'doce': 12, 'trece': 13, 'catorce': 14, 'quince': 15,
+    'dieciseis': 16, 'diecisiete': 17, 'dieciocho': 18, 'diecinueve': 19,
+    'veintiuno': 21, 'veintidos': 22, 'veintitres': 23, 'veinticuatro': 24, 'veinticinco': 25,
+    'veintiseis': 26, 'veintisiete': 27, 'veintiocho': 28, 'veintinueve': 29
+  };
+
+  const tens: Record<string, number> = {
+    'diez': 10,
+    'veinte': 20,
+    'treinta': 30,
+    'cuarenta': 40,
+    'cincuenta': 50,
+    'cincuanta': 50
+  };
+
+  if (words.length === 0) return null;
+
+  if (words.length === 1) {
+    const w = words[0];
+    if (units[w] !== undefined) return units[w];
+    if (tens[w] !== undefined) return tens[w];
+    const directDigit = parseInt(w, 10);
+    if (!isNaN(directDigit)) return directDigit;
+    return null;
+  }
+
+  if (words.length === 3 && words[1] === 'y') {
+    const tVal = tens[words[0]];
+    const uVal = units[words[2]];
+    if (tVal !== undefined && uVal !== undefined) {
+      return tVal + uVal;
+    }
+  }
+
+  if (words.length === 2) {
+    const tVal = tens[words[0]];
+    const uVal = units[words[1]];
+    if (tVal !== undefined && uVal !== undefined) {
+      return tVal + uVal;
+    }
+  }
+
+  return null;
+};
+
+const parseColloquialSpanishTime = (timeStr: string): string | undefined => {
+  const clean = timeStr.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+  // If it's already HH:MM format
+  const directMatch = clean.match(/(\d{1,2}):(\d{2})/);
+  if (directMatch) {
+    let h = parseInt(directMatch[1], 10);
+    let m = parseInt(directMatch[2], 10);
+    if (clean.includes('tarde') || clean.includes('noche') || clean.includes('pm')) {
+      if (h < 12) h += 12;
+    } else if (clean.includes('manana') || clean.includes('am')) {
+      if (h === 12) h = 0;
+    }
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  }
+
+  // Word-to-number dictionary for Spanish numbers
+  const numberWords: Record<string, number> = {
+    'una': 1, 'uno': 1, 'un': 1,
+    'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5, 'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10,
+    'once': 11, 'doce': 12, 'trece': 13, 'catorce': 14, 'quince': 15, 'dieciseis': 16, 'diecisiete': 17, 'dieciocho': 18, 'diecinueve': 19,
+    'veinte': 20, 'veinticinco': 25, 'media': 30, 'medio': 30, 'cuarto': 15
+  };
+
+  const words = clean.split(/\s+/);
+  
+  let hour: number | null = null;
+  let hourWordIdx = -1;
+
+  // Let's first search for digits for hour
+  for (let i = 0; i < words.length; i++) {
+    const num = parseInt(words[i], 10);
+    if (!isNaN(num) && num >= 0 && num <= 24) {
+      hour = num;
+      hourWordIdx = i;
+      break;
+    }
+  }
+
+  // If no digit hour, search for word number hour
+  if (hour === null) {
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      if (numberWords[word] !== undefined && numberWords[word] >= 1 && numberWords[word] <= 12) {
+        hour = numberWords[word];
+        hourWordIdx = i;
+        break;
+      }
+    }
+  }
+
+  if (hour === null) return undefined;
+
+  let modifier: 'y' | 'menos' | null = null;
+  let modifierIdx = -1;
+
+  for (let i = hourWordIdx + 1; i < words.length; i++) {
+    if (words[i] === 'y') {
+      modifier = 'y';
+      modifierIdx = i;
+      break;
+    }
+    if (words[i] === 'menos') {
+      modifier = 'menos';
+      modifierIdx = i;
+      break;
+    }
+  }
+
+  let minutes = 0;
+
+  if (modifier && modifierIdx !== -1) {
+    const nextWords = words.slice(modifierIdx + 1);
+    const parsedMin = parseSpanishWrittenNumber(nextWords);
+    if (parsedMin !== null) {
+      minutes = parsedMin;
+    } else {
+      const special: Record<string, number> = { 'media': 30, 'medio': 30, 'cuarto': 15 };
+      for (const w of nextWords) {
+        if (special[w] !== undefined) {
+          minutes = special[w];
+          break;
+        }
+      }
+    }
+
+    if (modifier === 'menos') {
+      hour = hour - 1;
+      if (hour < 0) hour = 23;
+      minutes = 60 - minutes;
+    }
+  } else {
+    const nextWords = words.slice(hourWordIdx + 1);
+    const parsedMin = parseSpanishWrittenNumber(nextWords);
+    if (parsedMin !== null) {
+      minutes = parsedMin;
+    } else {
+      const special: Record<string, number> = { 'media': 30, 'medio': 30, 'cuarto': 15 };
+      for (const w of nextWords) {
+        if (special[w] !== undefined) {
+          minutes = special[w];
+          break;
+        }
+      }
+    }
+  }
+
+  const isPM = clean.includes('tarde') || clean.includes('noche') || clean.includes('pm');
+  const isAM = clean.includes('manana') || clean.includes('am');
+
+  if (isPM) {
+    if (hour < 12) {
+      hour += 12;
+    } else if (hour === 12 && clean.includes('noche')) {
+      hour = 0;
+    }
+  } else if (isAM) {
+    if (hour === 12) {
+      hour = 0;
+    }
+  } else {
+    // Default heuristic for tasks/alarms: if hour >= 1 && hour <= 8, assume afternoon PM
+    if (hour >= 1 && hour <= 8) {
+      hour += 12;
+    }
+  }
+
+  return `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+};
+
+const parseVoiceCommand = (text: string, voiceKeywords?: VoiceKeywords) => {
+  const normalized = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .trim();
+
+  const normalizePattern = (p: string) => p.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+  // Define patterns for keywords
+  const keywords = [
+    { tag: 'TYPE', patterns: (voiceKeywords?.type || ['tipo de elemento', 'tipo elemento', 'tipo', 'crear']).map(normalizePattern) },
+    { tag: 'TITLE', patterns: (voiceKeywords?.title || ['titulo', 'nombre', 'tarea', 'recordatorio', 'alarma', 'ocio', 'actividad', 'plan']).map(normalizePattern) },
+    { tag: 'DESCRIPTION', patterns: (voiceKeywords?.description || ['descripcion', 'nota', 'detalle', 'descripcion de', 'nota de']).map(normalizePattern) },
+    { tag: 'PRIORITY', patterns: (voiceKeywords?.priority || ['prioridad', 'importancia']).map(normalizePattern) },
+    { tag: 'WEIGHT', patterns: (voiceKeywords?.weight || ['peso', 'bloque', 'clasificacion']).map(normalizePattern) },
+    { tag: 'HOURS', patterns: (voiceKeywords?.hours || ['horas', 'duracion', 'tiempo', 'horas estimadas']).map(normalizePattern) },
+    { tag: 'DATE', patterns: (voiceKeywords?.date || ['fecha', 'dia', 'para el', 'fecha de']).map(normalizePattern) },
+    { tag: 'TIME', patterns: (voiceKeywords?.time || ['hora', 'a las']).map(normalizePattern) },
+    { tag: 'ENERGY', patterns: (voiceKeywords?.energy || ['energia', 'tipo de energia', 'actitud']).map(normalizePattern) },
+    { tag: 'SLOT', patterns: (voiceKeywords?.slot || ['franja', 'horario', 'bloque de tiempo']).map(normalizePattern) },
+    { tag: 'GOAL', patterns: (voiceKeywords?.goal || ['meta', 'objetivo']).map(normalizePattern) },
+    { tag: 'FAVOURITE', patterns: (voiceKeywords?.favourite || ['favorito', 'destacado', 'importante']).map(normalizePattern) }
+  ];
+
+  // Flatten all patterns with their tags
+  const flatPatterns: { tag: string; pattern: string }[] = [];
+  keywords.forEach(({ tag, patterns }) => {
+    patterns.forEach(pattern => {
+      flatPatterns.push({ tag, pattern });
+    });
+  });
+
+  // Sort patterns by length descending to prioritize longer phrases (e.g. "tarea llamada" before "tarea")
+  flatPatterns.sort((a, b) => b.pattern.length - a.pattern.length);
+
+  // Find all matches in order of length (longest first)
+  const matches: { tag: string; index: number; keywordLength: number; keywordText: string }[] = [];
+
+  flatPatterns.forEach(({ tag, pattern }) => {
+    let idx = normalized.indexOf(pattern);
+    while (idx !== -1) {
+      // Ensure word boundary
+      const beforeChar = idx > 0 ? normalized[idx - 1] : ' ';
+      const afterChar = idx + pattern.length < normalized.length ? normalized[idx + pattern.length] : ' ';
+      const isWordBoundary = /[^a-z0-9]/.test(beforeChar) && /[^a-z0-9]/.test(afterChar);
+
+      if (isWordBoundary) {
+        // Since we process longest first, check if this new match overlaps with an already added longer match
+        const idxEnd = idx + pattern.length;
+        const overlaps = matches.some(m => {
+          const mEnd = m.index + m.keywordLength;
+          return Math.max(m.index, idx) < Math.min(mEnd, idxEnd);
+        });
+
+        if (!overlaps) {
+          matches.push({ tag, index: idx, keywordLength: pattern.length, keywordText: pattern });
+        }
+      }
+      idx = normalized.indexOf(pattern, idx + 1);
+    }
+  });
+
+  // Sort matches by index to parse they in appearance order
+  matches.sort((a, b) => a.index - b.index);
+
+  // If no matches, return null to avoid creating accidental items
+  if (matches.length === 0) {
+    return null;
+  }
+
+  // Extract content for each match
+  const extracted: Record<string, string> = {};
+
+  for (let i = 0; i < matches.length; i++) {
+    const current = matches[i];
+    const next = matches[i + 1];
+    const startIndex = current.index + current.keywordLength;
+    const endIndex = next ? next.index : normalized.length;
+
+    let content = normalized.substring(startIndex, endIndex).trim();
+    content = content.replace(/^[:,\-\s]+|[:,\-\s]+$/g, '').trim();
+
+    if (current.tag === 'TITLE' || current.tag === 'DESCRIPTION') {
+      const origStartIndex = current.index + current.keywordLength;
+      const origEndIndex = next ? next.index : text.length;
+      let origContent = text.substring(origStartIndex, origEndIndex).trim();
+      origContent = origContent.replace(/^[:,\-\s]+|[:,\-\s]+$/g, '').trim();
+      extracted[current.tag] = origContent;
+    } else {
+      extracted[current.tag] = content;
+    }
+  }
+
+  // Determine type
+  let type = ItemType.TASK;
+  if (normalized.includes('alarma') || normalized.includes('alarm') || normalized.includes('reminder')) {
+    type = ItemType.REMINDER;
+  } else if (normalized.includes('recordatorio') || normalized.includes('memo') || normalized.includes('nota')) {
+    type = ItemType.MEMO;
+  } else if (normalized.includes('ocio') || normalized.includes('actividad') || normalized.includes('activity')) {
+    type = ItemType.ACTIVITY;
+  } else if (normalized.includes('plan')) {
+    type = ItemType.PLAN;
+  }
+
+  // Title
+  let title = extracted['TITLE'] || '';
+  
+  if (!title) {
+    const titleMatch = matches.find(m => m.tag === 'TITLE');
+    if (titleMatch) {
+      const idx = matches.indexOf(titleMatch);
+      const nextMatch = matches[idx + 1];
+      const start = titleMatch.index + titleMatch.keywordLength;
+      const end = nextMatch ? nextMatch.index : text.length;
+      title = text.substring(start, end).trim();
+      title = title.replace(/^[:,\-\s]+|[:,\-\s]+$/g, '').trim();
+    }
+  }
+
+  const description = extracted['DESCRIPTION'] || '';
+
+  // Priority
+  let priority = Priority.MEDIUM;
+  const prioVal = extracted['PRIORITY'] || '';
+  if (prioVal.includes('alta') || prioVal.includes('alto') || prioVal.includes('high') || prioVal.includes('urgente') || prioVal.includes('maxima')) {
+    priority = Priority.HIGH;
+  } else if (prioVal.includes('baja') || prioVal.includes('bajo') || prioVal.includes('low') || prioVal.includes('minima')) {
+    priority = Priority.LOW;
+  }
+
+  // Hours
+  let hours: number | undefined = undefined;
+  const hoursVal = extracted['HOURS'] || '';
+  if (hoursVal) {
+    const numWords: Record<string, number> = {
+      'una': 1, 'uno': 1, 'un': 1, 'dos': 2, 'tres': 3, 'cuatro': 4,
+      'cinco': 5, 'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10
+    };
+    if (numWords[hoursVal]) {
+      hours = numWords[hoursVal];
+    } else {
+      const matchNum = hoursVal.match(/[\d\.]+/);
+      if (matchNum) {
+        hours = parseFloat(matchNum[0]);
+      }
+    }
+  }
+
+  // Weight mapping to hours if hours not specified
+  let weightVal = (extracted['WEIGHT'] || '').toLowerCase();
+  if (!hours && weightVal) {
+    if (weightVal.includes('luna')) hours = 1;
+    else if (weightVal.includes('terra')) hours = 5;
+    else if (weightVal.includes('sol')) hours = 10;
+    else if (weightVal.includes('astra')) hours = 0.3;
+  }
+
+  // Date
+  let date: string | undefined = undefined;
+  const dateVal = extracted['DATE'] || '';
+  if (dateVal.includes('hoy')) {
+    date = getLocalDateStr();
+  } else if (dateVal.includes('manana')) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    date = getLocalDateStr(tomorrow);
+  } else {
+    const dateMatch = dateVal.match(/\d{4}-\d{2}-\d{2}/);
+    if (dateMatch) {
+      date = dateMatch[0];
+    }
+  }
+
+  // Time
+  let time: string | undefined = undefined;
+  const timeVal = extracted['TIME'] || '';
+  if (timeVal) {
+    time = parseColloquialSpanishTime(timeVal);
+  }
+
+  // EnergyType
+  let energyType: EnergyType | undefined = undefined;
+  const energyVal = (extracted['ENERGY'] || '').toLowerCase();
+  if (energyVal) {
+    if (energyVal.includes('creativ')) energyType = EnergyType.CREATIVE;
+    else if (energyVal.includes('analit') || energyVal.includes('logic')) energyType = EnergyType.ANALYTICAL;
+    else if (energyVal.includes('aprend') || energyVal.includes('estud') || energyVal.includes('learn')) energyType = EnergyType.LEARNING;
+    else if (energyVal.includes('social') || energyVal.includes('gente') || energyVal.includes('reun')) energyType = EnergyType.SOCIAL;
+    else if (energyVal.includes('admin') || energyVal.includes('gest') || energyVal.includes('pape')) energyType = EnergyType.ADMINISTRATIVE;
+    else if (energyVal.includes('fisic') || energyVal.includes('deport') || energyVal.includes('ejerc') || energyVal.includes('cuerp')) energyType = EnergyType.PHYSICAL;
+  }
+
+  // Favourite
+  let favourite = false;
+  if (extracted['FAVOURITE'] !== undefined) {
+    const favVal = (extracted['FAVOURITE'] || '').toLowerCase();
+    if (favVal.includes('no') || favVal.includes('false') || favVal.includes('desactiv')) {
+      favourite = false;
+    } else {
+      favourite = true;
+    }
+  } else {
+    const hasFavMatch = matches.some(m => m.tag === 'FAVOURITE');
+    if (hasFavMatch) {
+      favourite = true;
+    }
+  }
+
+  return {
+    type,
+    title: title.trim(),
+    description: description.trim(),
+    priority,
+    hours,
+    date,
+    time,
+    energyType,
+    slotName: extracted['SLOT'] || '',
+    goalName: extracted['GOAL'] || '',
+    favourite,
+    weight: extracted['WEIGHT'] || ''
+  };
+};
 
 export default function DecisionCenterScreen() {
   const store = useRememberStore();
@@ -26,8 +456,491 @@ export default function DecisionCenterScreen() {
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
   const colors = Colors[scheme];
 
-  // Quick Input text
-  const [quickInput, setQuickInput] = useState('');
+  // Voice Command Assistant State
+  const [isVoiceModalVisible, setIsVoiceModalVisible] = useState(false);
+  const [voiceInputText, setVoiceInputText] = useState('');
+
+  // Clear voice input when modal is closed
+  React.useEffect(() => {
+    if (!isVoiceModalVisible) {
+      setVoiceInputText('');
+    }
+  }, [isVoiceModalVisible]);
+
+  // Undo support state for voice actions
+  const [lastCreatedItem, setLastCreatedItem] = useState<{
+    id: string;
+    type: 'item' | 'list_item';
+    title: string;
+    listId?: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    if (lastCreatedItem) {
+      const timer = setTimeout(() => {
+        setLastCreatedItem(null);
+      }, 10000); // 10 seconds timeout
+      return () => clearTimeout(timer);
+    }
+  }, [lastCreatedItem]);
+
+  const handleUndo = async () => {
+    if (!lastCreatedItem) return;
+    try {
+      if (lastCreatedItem.type === 'item') {
+        await store.deleteItemPermanently(lastCreatedItem.id);
+      } else if (lastCreatedItem.type === 'list_item' && lastCreatedItem.listId) {
+        await store.deleteListItem(lastCreatedItem.listId, lastCreatedItem.id);
+      }
+      const undoMsg = `Deshecho: se ha eliminado "${lastCreatedItem.title}".`;
+      speak(undoMsg);
+      Alert.alert('Deshacer', undoMsg);
+    } catch (err) {
+      console.error('Failed to undo voice action:', err);
+    } finally {
+      setLastCreatedItem(null);
+    }
+  };
+
+  const handleExecuteVoiceCommand = async (command: string) => {
+    Keyboard.dismiss();
+    if (!command.trim()) {
+      const msg = 'El comando de voz está vacío.';
+      speak(msg);
+      Alert.alert('Error', msg);
+      return;
+    }
+
+    try {
+      const cleanCommand = command.trim();
+      const normalized = cleanCommand
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+
+      const vk = store.userSettings.voiceKeywords || DEFAULT_VOICE_KEYWORDS;
+      const normalizePattern = (p: string) => p.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+      const queryListsPatterns = (vk.queryLists || ['nombre de todas las listas', 'cuales son mis listas', 'que listas tengo', 'listas', 'cuales son las listas']).map(normalizePattern);
+      const queryListItemsPatterns = (vk.queryListItems || ['elementos de la lista', 'que tiene la lista', 'ver lista', 'contenido de la lista', 'que elementos tiene la lista']).map(normalizePattern);
+
+      // Check if it's a list names query
+      let isQueryLists = false;
+      for (const pattern of queryListsPatterns) {
+        if (normalized.includes(pattern)) {
+          isQueryLists = true;
+          break;
+        }
+      }
+
+      if (isQueryLists) {
+        const listNames = store.lists.map(l => l.name);
+        let voiceMsg = '';
+        if (listNames.length === 0) {
+          voiceMsg = 'No tienes ninguna lista creada todavía.';
+        } else {
+          voiceMsg = `Las listas que tienes son: ${listNames.join(', ')}.`;
+        }
+        speak(voiceMsg);
+        Alert.alert('Consulta de Listas', voiceMsg);
+        setIsVoiceModalVisible(false);
+        setVoiceInputText('');
+        return;
+      }
+
+      // Check if it's a list items query
+      let matchedPattern: string | null = null;
+      let patternIndex = -1;
+      for (const pattern of queryListItemsPatterns) {
+        const idx = normalized.indexOf(pattern);
+        if (idx !== -1) {
+          matchedPattern = pattern;
+          patternIndex = idx;
+          break;
+        }
+      }
+
+      if (matchedPattern !== null) {
+        const sortedLists = [...store.lists].sort((a, b) => b.name.length - a.name.length);
+        
+        const findBestMatchingList = (text: string) => {
+          const normalizedText = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+          
+          for (const list of sortedLists) {
+            const normListName = list.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            if (normalizedText.includes(normListName)) {
+              return list;
+            }
+          }
+
+          const wordsToIgnore = new Set(['lista', 'de', 'la', 'el', 'del', 'ver', 'añade', 'añadir', 'agregar', 'agrega', 'poner', 'en', 'los', 'las', 'un', 'una', 'elementos', 'contenido', 'que', 'tiene']);
+          const cleanTextWords = normalizedText.split(/\s+/).filter(w => !wordsToIgnore.has(w) && w.length > 1);
+
+          if (cleanTextWords.length > 0) {
+            for (const list of sortedLists) {
+              const normListName = list.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+              for (const word of cleanTextWords) {
+                if (normListName.includes(word)) {
+                  return list;
+                }
+              }
+            }
+          }
+          return null;
+        };
+
+        const matchedList = findBestMatchingList(cleanCommand);
+
+        let voiceMsg = '';
+        if (matchedList) {
+          const itemsText = matchedList.items.map(it => it.text);
+          if (itemsText.length === 0) {
+            voiceMsg = `La lista ${matchedList.name} está vacía.`;
+          } else {
+            voiceMsg = `La lista ${matchedList.name} tiene ${itemsText.length} elementos: ${itemsText.join(', ')}.`;
+          }
+        } else {
+          let listNameQuery = cleanCommand.substring(patternIndex + matchedPattern.length).trim();
+          listNameQuery = listNameQuery.replace(/^(de la|de el|del|de|la|el)\s+/i, '').trim();
+          if (!listNameQuery) {
+            listNameQuery = cleanCommand.substring(0, patternIndex).trim();
+          }
+          voiceMsg = `No pude encontrar ninguna lista que coincida con "${listNameQuery || cleanCommand}".`;
+        }
+
+        speak(voiceMsg);
+        Alert.alert('Consulta de Lista', voiceMsg);
+        setIsVoiceModalVisible(false);
+        setVoiceInputText('');
+        return;
+      }
+
+      // Check if it's an add item to list command
+      let matchedAddPattern: string | null = null;
+      let addPatternIndex = -1;
+      const addListItemPatterns = (vk.addListItem || ['añadir elemento a la lista', 'añade a la lista', 'agregar a la lista', 'poner en la lista', 'añadir a la lista', 'agrega a la lista']).map(normalizePattern);
+
+      for (const pattern of addListItemPatterns) {
+        const idx = normalized.indexOf(pattern);
+        if (idx !== -1) {
+          matchedAddPattern = pattern;
+          addPatternIndex = idx;
+          break;
+        }
+      }
+
+      if (matchedAddPattern !== null) {
+        const sortedLists = [...store.lists].sort((a, b) => b.name.length - a.name.length);
+
+        const findBestMatchingList = (text: string) => {
+          const normalizedText = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+          
+          for (const list of sortedLists) {
+            const normListName = list.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            if (normalizedText.includes(normListName)) {
+              return { list, matchedText: normListName };
+            }
+          }
+
+          const wordsToIgnore = new Set(['lista', 'de', 'la', 'el', 'del', 'ver', 'añade', 'añadir', 'agregar', 'agrega', 'poner', 'en', 'los', 'las', 'un', 'una', 'elementos', 'contenido', 'que', 'tiene']);
+          const cleanTextWords = normalizedText.split(/\s+/).filter(w => !wordsToIgnore.has(w) && w.length > 1);
+
+          if (cleanTextWords.length > 0) {
+            for (const list of sortedLists) {
+              const normListName = list.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+              for (const word of cleanTextWords) {
+                if (normListName.includes(word)) {
+                  return { list, matchedText: word };
+                }
+              }
+            }
+          }
+          return null;
+        };
+
+        const removeSubstrings = (source: string, sub1: string, sub2: string): string => {
+          const normSource = source.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const normSub1 = sub1.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const normSub2 = sub2.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+          const idx1 = normSource.indexOf(normSub1);
+          const idx2 = normSource.indexOf(normSub2);
+
+          const ranges: { start: number; end: number }[] = [];
+          if (idx1 !== -1) {
+            ranges.push({ start: idx1, end: idx1 + sub1.length });
+          }
+          if (idx2 !== -1) {
+            ranges.push({ start: idx2, end: idx2 + sub2.length });
+          }
+
+          if (ranges.length === 0) return source;
+
+          ranges.sort((a, b) => a.start - b.start);
+          const merged: { start: number; end: number }[] = [];
+          for (const r of ranges) {
+            if (merged.length === 0) {
+              merged.push(r);
+            } else {
+              const last = merged[merged.length - 1];
+              if (r.start <= last.end) {
+                last.end = Math.max(last.end, r.end);
+              } else {
+                merged.push(r);
+              }
+            }
+          }
+
+          let result = '';
+          let lastIdx = 0;
+          for (const r of merged) {
+            result += source.substring(lastIdx, r.start);
+            lastIdx = r.end;
+          }
+          result += source.substring(lastIdx);
+          return result.trim();
+        };
+
+        const matchResult = findBestMatchingList(cleanCommand);
+
+        if (matchResult) {
+          const { list, matchedText } = matchResult;
+          let itemText = removeSubstrings(cleanCommand, matchedAddPattern, matchedText);
+
+          itemText = itemText.replace(/^(añadir|añade|agregar|agrega|poner|poner en|a la|a)\s+/i, '').trim();
+          itemText = itemText.replace(/^(el elemento|un elemento|la tarea|el|la|un|una|que se llama|llamado|llamada|de la|de el|del|de)\s+/i, '').trim();
+
+          if (itemText) {
+            const newItemId = await store.addListItem(list.id, itemText);
+            setLastCreatedItem({
+              id: newItemId,
+              type: 'list_item',
+              title: itemText,
+              listId: list.id
+            });
+            const voiceMsg = `Añadido "${itemText}" a la lista "${list.name}".`;
+            speak(voiceMsg);
+            Alert.alert('Éxito', voiceMsg);
+            setIsVoiceModalVisible(false);
+            setVoiceInputText('');
+            return;
+          }
+        }
+
+        const voiceMsg = `No pude encontrar la lista o el elemento a añadir en tu comando.`;
+        speak(voiceMsg);
+        Alert.alert('Error de comando', voiceMsg);
+        return;
+      }
+
+      const parsed = parseVoiceCommand(command, store.userSettings.voiceKeywords);
+
+      if (!parsed || !parsed.title) {
+        const msg = 'No pude entender el comando. Asegúrate de incluir palabras clave como "tarea", "recordatorio" o "crear".';
+        speak(msg);
+        Alert.alert('Comando no reconocido', msg);
+        return;
+      }
+
+      if (parsed.type === ItemType.TASK) {
+        let timeSlotId: string | undefined = undefined;
+        if (parsed.slotName) {
+          const cleanSlotName = parsed.slotName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const matchedSlot = store.timeSlots.find(s => 
+            s.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(cleanSlotName)
+          );
+          if (matchedSlot) {
+            timeSlotId = matchedSlot.id;
+          }
+        }
+
+        let goalId: string | undefined = undefined;
+        if (parsed.goalName) {
+          const cleanGoalName = parsed.goalName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const matchedGoal = store.goals.find(g => 
+            g.title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(cleanGoalName)
+          );
+          if (matchedGoal) {
+            goalId = matchedGoal.id;
+          }
+        }
+
+        const newId = await store.createTask(
+          parsed.title,
+          parsed.description || '',
+          parsed.date || undefined,
+          parsed.date || undefined,
+          parsed.hours,
+          parsed.priority,
+          goalId,
+          undefined, // phaseId
+          timeSlotId,
+          parsed.energyType
+        );
+
+        setLastCreatedItem({
+          id: newId,
+          type: 'item',
+          title: parsed.title
+        });
+
+        if (parsed.favourite) {
+          setTimeout(async () => {
+            const lastItem = store.items.filter(i => i.title === parsed.title).sort((a,b) => b.createdAt.localeCompare(a.createdAt))[0];
+            if (lastItem) {
+              await store.updateItem(lastItem.id, { favourite: true });
+            }
+          }, 300);
+        }
+
+        let paramsText = [];
+        if (parsed.weight) {
+          paramsText.push(`peso ${parsed.weight}`);
+        } else if (parsed.hours) {
+          paramsText.push(`duración de ${parsed.hours} ${parsed.hours === 1 ? 'hora' : 'horas'}`);
+        }
+        if (parsed.priority) {
+          const prioLabel = parsed.priority === Priority.HIGH ? 'alta' : parsed.priority === Priority.LOW ? 'baja' : 'media';
+          paramsText.push(`prioridad ${prioLabel}`);
+        }
+        if (parsed.energyType) {
+          const energyLabels: Record<string, string> = {
+            CREATIVE: 'creativa', ANALYTICAL: 'analítica', LEARNING: 'aprendizaje',
+            SOCIAL: 'social', ADMINISTRATIVE: 'administrativa', PHYSICAL: 'física'
+          };
+          paramsText.push(`energía ${energyLabels[parsed.energyType] || parsed.energyType}`);
+        }
+        if (parsed.date) {
+          paramsText.push(`fecha ${parsed.date}`);
+        }
+        const paramsSuffix = paramsText.length > 0 ? ` con ${paramsText.join(', ')}` : '';
+        const voiceMsg = `Creada la tarea "${parsed.title}"${paramsSuffix}.`;
+        speak(voiceMsg);
+        Alert.alert('Éxito', voiceMsg);
+      } else if (parsed.type === ItemType.REMINDER) {
+        const timeStr = parsed.time || '12:00';
+        const dateStr = parsed.date || getLocalDateStr();
+        const newId = await store.createReminder(
+          parsed.title,
+          parsed.description || '',
+          dateStr,
+          timeStr,
+          [dateStr],
+          true
+        );
+
+        setLastCreatedItem({
+          id: newId,
+          type: 'item',
+          title: parsed.title
+        });
+
+        if (parsed.favourite) {
+          setTimeout(async () => {
+            const lastItem = store.items.filter(i => i.title === parsed.title).sort((a,b) => b.createdAt.localeCompare(a.createdAt))[0];
+            if (lastItem) {
+              await store.updateItem(lastItem.id, { favourite: true });
+            }
+          }, 300);
+        }
+
+        let paramsText = [];
+        if (timeStr) paramsText.push(`a las ${timeStr}`);
+        if (dateStr) paramsText.push(`para el día ${dateStr}`);
+        const paramsSuffix = paramsText.length > 0 ? ` para ${paramsText.join(' ')}` : '';
+        const voiceMsg = `Creada la alarma "${parsed.title}"${paramsSuffix}.`;
+        speak(voiceMsg);
+        Alert.alert('Éxito', voiceMsg);
+      } else if (parsed.type === ItemType.MEMO) {
+        const dateStr = parsed.date || getLocalDateStr();
+        const newId = await store.createMemo(
+          parsed.title,
+          parsed.description || '',
+          dateStr,
+          dateStr,
+          false,
+          '12:00'
+        );
+
+        setLastCreatedItem({
+          id: newId,
+          type: 'item',
+          title: parsed.title
+        });
+
+        if (parsed.favourite) {
+          setTimeout(async () => {
+            const lastItem = store.items.filter(i => i.title === parsed.title).sort((a,b) => b.createdAt.localeCompare(a.createdAt))[0];
+            if (lastItem) {
+              await store.updateItem(lastItem.id, { favourite: true });
+            }
+          }, 300);
+        }
+
+        let paramsText = [];
+        if (dateStr) paramsText.push(`para el día ${dateStr}`);
+        const paramsSuffix = paramsText.length > 0 ? ` para ${paramsText.join(' ')}` : '';
+        const voiceMsg = `Creado el recordatorio "${parsed.title}"${paramsSuffix}.`;
+        speak(voiceMsg);
+        Alert.alert('Éxito', voiceMsg);
+      } else if (parsed.type === ItemType.ACTIVITY) {
+        const newId = await store.createActivity(
+          parsed.title,
+          'OTHER',
+          parsed.description || '',
+          [],
+          parsed.favourite
+        );
+
+        setLastCreatedItem({
+          id: newId,
+          type: 'item',
+          title: parsed.title
+        });
+
+        const voiceMsg = `Creada la idea de ocio "${parsed.title}".`;
+        speak(voiceMsg);
+        Alert.alert('Éxito', voiceMsg);
+      } else if (parsed.type === ItemType.PLAN) {
+        const today = new Date();
+        const newId = await store.createPlan(
+          parsed.title,
+          parsed.description || '',
+          today.getMonth() + 1,
+          today.getFullYear(),
+          today.getMonth() + 1,
+          today.getFullYear()
+        );
+
+        setLastCreatedItem({
+          id: newId,
+          type: 'item',
+          title: parsed.title
+        });
+
+        if (parsed.favourite) {
+          setTimeout(async () => {
+            const lastItem = store.items.filter(i => i.title === parsed.title).sort((a,b) => b.createdAt.localeCompare(a.createdAt))[0];
+            if (lastItem) {
+              await store.updateItem(lastItem.id, { favourite: true });
+            }
+          }, 300);
+        }
+
+        const voiceMsg = `Creado el plan futuro "${parsed.title}".`;
+        speak(voiceMsg);
+        Alert.alert('Éxito', voiceMsg);
+      }
+
+      setIsVoiceModalVisible(false);
+      setVoiceInputText('');
+    } catch (error: any) {
+      const errorMsg = `Error al crear el elemento: ${error.message}`;
+      speak('Ocurrió un error al procesar el comando.');
+      Alert.alert('Error', errorMsg);
+    }
+  };
 
   // 1. Dynamic Greeting based on hour
   const greeting = useMemo(() => {
@@ -76,18 +989,14 @@ export default function DecisionCenterScreen() {
   // Helper stats
   const pendingTasksCount = useMemo(() => store.getTasks().filter((t) => !t.completed).length, [store.items]);
   const activeAlarmsCount = useMemo(() => store.getReminders().filter((r) => !r.completed).length, [store.items]);
+  const activeMemosCount = useMemo(() => store.getMemos().filter((m) => !m.completed).length, [store.items]);
+  const pendingPlansCount = useMemo(() => store.getPlans().filter((p) => !p.completed).length, [store.items]);
   const trashCount = useMemo(() => store.getTrashItems().length, [store.items]);
 
   const handleQuickCreate = (type: ItemType) => {
-    const txt = quickInput.trim();
-    if (!txt) {
-      Alert.alert('Escribe algo', 'Por favor ingresa un título en la barra inferior primero.');
-      return;
-    }
-    setQuickInput('');
     router.push({
       pathname: '/editor',
-      params: { type, id: undefined, title: txt },
+      params: { type },
     });
   };
 
@@ -145,20 +1054,30 @@ export default function DecisionCenterScreen() {
         
         {/* Dynamic Stats Banner */}
         <View style={[styles.statsBanner, { backgroundColor: colors.backgroundElement }]}>
-          <View style={styles.statBox}>
+          <Pressable onPress={() => router.push('/tasks')} style={styles.statBox}>
             <Text style={[styles.statValue, { color: '#FF9500' }]}>{pendingTasksCount}</Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Tareas</Text>
-          </View>
+          </Pressable>
           <View style={[styles.statDivider, { backgroundColor: colors.backgroundSelected }]} />
-          <View style={styles.statBox}>
+          <Pressable onPress={() => router.push('/reminders')} style={styles.statBox}>
             <Text style={[styles.statValue, { color: '#007AFF' }]}>{activeAlarmsCount}</Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Alarmas</Text>
-          </View>
+          </Pressable>
           <View style={[styles.statDivider, { backgroundColor: colors.backgroundSelected }]} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#34C759' }]}>{store.getActivities().length}</Text>
+          <Pressable onPress={() => router.push('/memos')} style={styles.statBox}>
+            <Text style={[styles.statValue, { color: '#00C7BE' }]}>{activeMemosCount}</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Recs</Text>
+          </Pressable>
+          <View style={[styles.statDivider, { backgroundColor: colors.backgroundSelected }]} />
+          <Pressable onPress={() => router.push('/activities')} style={styles.statBox}>
+            <Text style={[styles.statValue, { color: '#5856D6' }]}>{store.getActivities().length}</Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Ocio</Text>
-          </View>
+          </Pressable>
+          <View style={[styles.statDivider, { backgroundColor: colors.backgroundSelected }]} />
+          <Pressable onPress={() => router.push('/plans')} style={styles.statBox}>
+            <Text style={[styles.statValue, { color: '#BF5AF2' }]}>{pendingPlansCount}</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Planes</Text>
+          </Pressable>
         </View>
 
         {/* 1. RECOMMENDATION CARD */}
@@ -168,7 +1087,15 @@ export default function DecisionCenterScreen() {
           {primaryRec ? (
             recommendedTask ? (
               // Task Recommendation
-              <View style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: primaryRec.priorityLevel === 'ALTA' ? '#FF3B30' : '#FF9500' }]}>
+              <Pressable
+                onPress={() => {
+                  router.push({
+                    pathname: '/editor',
+                    params: { id: recommendedTask.id, type: recommendedTask.type }
+                  });
+                }}
+                style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: primaryRec.priorityLevel === 'ALTA' ? '#FF3B30' : '#FF9500' }]}
+              >
                 <View style={styles.focusHeader}>
                   <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
                     <View style={[styles.priorityBadge, { backgroundColor: primaryRec.priorityLevel === 'ALTA' ? 'rgba(255, 59, 48, 0.15)' : 'rgba(255, 149, 0, 0.15)' }]}>
@@ -209,7 +1136,8 @@ export default function DecisionCenterScreen() {
 
                 <View style={[styles.cardFooter, { justifyContent: 'space-between', marginTop: 12 }]}>
                   <Pressable
-                    onPress={() => {
+                    onPress={(e) => {
+                      e.stopPropagation();
                       router.push({
                         pathname: '/session',
                         params: { taskId: recommendedTask.id, duration: primaryRec.recommendedDuration }
@@ -222,14 +1150,17 @@ export default function DecisionCenterScreen() {
                   </Pressable>
 
                   <Pressable
-                    onPress={() => rejectRecommendation(primaryRec.id)}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      rejectRecommendation(primaryRec.id);
+                    }}
                     style={[styles.completeButton, { backgroundColor: 'rgba(255, 59, 48, 0.15)' }]}
                   >
                     <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
                     <Text style={[styles.completeButtonText, { color: '#FF3B30' }]}>No ahora</Text>
                   </Pressable>
                 </View>
-              </View>
+              </Pressable>
             ) : (
               // Active Reminder Card
               <View style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: '#007AFF' }]}>
@@ -313,16 +1244,30 @@ export default function DecisionCenterScreen() {
                       {task.energyType} • {task.priority.toUpperCase()}
                     </Text>
                   </View>
-                  <Pressable
-                    onPress={async (e) => {
-                      e.stopPropagation();
-                      await store.toggleItemCompleted(task.id);
-                      triggerRecalculate();
-                    }}
-                    style={styles.reminderCheckBtn}
-                  >
-                    <Ionicons name="ellipse-outline" size={24} color={colors.textSecondary} />
-                  </Pressable>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        router.push({
+                          pathname: '/session',
+                          params: { taskId: task.id }
+                        });
+                      }}
+                      style={{ padding: 4 }}
+                    >
+                      <Ionicons name="play-circle-outline" size={26} color="#34C759" />
+                    </Pressable>
+                    <Pressable
+                      onPress={async (e) => {
+                        e.stopPropagation();
+                        await store.toggleItemCompleted(task.id);
+                        triggerRecalculate();
+                      }}
+                      style={styles.reminderCheckBtn}
+                    >
+                      <Ionicons name="ellipse-outline" size={24} color={colors.textSecondary} />
+                    </Pressable>
+                  </View>
                 </Pressable>
               ))}
             </View>
@@ -494,7 +1439,7 @@ export default function DecisionCenterScreen() {
               <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </Pressable>
 
-            {/* Alarmas & Ocio - Side by Side */}
+            {/* Alarmas & Recordatorios - Side by Side */}
             <View style={styles.rowGrid}>
               <Pressable 
                 onPress={() => router.push('/reminders')} 
@@ -510,18 +1455,56 @@ export default function DecisionCenterScreen() {
               </Pressable>
 
               <Pressable 
-                onPress={() => router.push('/activities')} 
+                onPress={() => router.push('/memos')} 
                 style={[styles.halfGridItem, { backgroundColor: colors.backgroundElement }]}
               >
-                <View style={[styles.iconContainer, { backgroundColor: 'rgba(88, 86, 214, 0.1)' }]}>
-                  <Ionicons name="sparkles" size={20} color="#5856D6" />
+                <View style={[styles.iconContainer, { backgroundColor: 'rgba(0, 199, 190, 0.1)' }]}>
+                  <Ionicons name="bookmark" size={20} color="#00C7BE" />
                 </View>
-                <Text style={[styles.gridItemText, { color: colors.text }]}>Ocio</Text>
+                <Text style={[styles.gridItemText, { color: colors.text }]}>Recordatorios</Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                  {store.getActivities().length} {store.getActivities().length === 1 ? 'idea' : 'ideas'}
+                  {activeMemosCount} {activeMemosCount === 1 ? 'activo' : 'activos'}
                 </Text>
               </Pressable>
             </View>
+
+            {/* Ocio - Full Width Banner */}
+            <Pressable 
+              onPress={() => router.push('/activities')} 
+              style={[styles.bannerItem, { backgroundColor: colors.backgroundElement, borderLeftWidth: 4, borderLeftColor: '#5856D6', marginTop: 10 }]}
+            >
+              <View style={styles.bannerLeft}>
+                <View style={[styles.iconContainer, { backgroundColor: 'rgba(88, 86, 214, 0.1)' }]}>
+                  <Ionicons name="sparkles" size={22} color="#5856D6" />
+                </View>
+                <View>
+                  <Text style={[styles.bannerTitle, { color: colors.text }]}>Ocio y Tiempo Libre</Text>
+                  <Text style={[styles.bannerSubtitle, { color: colors.textSecondary }]}>
+                    {store.getActivities().length} {store.getActivities().length === 1 ? 'idea de ocio' : 'ideas de ocio'}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </Pressable>
+
+            {/* Planes a Largo Plazo - Full Width Banner */}
+            <Pressable 
+              onPress={() => router.push('/plans')} 
+              style={[styles.bannerItem, { backgroundColor: colors.backgroundElement, borderLeftWidth: 4, borderLeftColor: '#BF5AF2', marginTop: 10 }]}
+            >
+              <View style={styles.bannerLeft}>
+                <View style={[styles.iconContainer, { backgroundColor: 'rgba(191, 90, 242, 0.1)' }]}>
+                  <Ionicons name="compass" size={22} color="#BF5AF2" />
+                </View>
+                <View>
+                  <Text style={[styles.bannerTitle, { color: colors.text }]}>Planes a Largo Plazo</Text>
+                  <Text style={[styles.bannerSubtitle, { color: colors.textSecondary }]}>
+                    {pendingPlansCount} {pendingPlansCount === 1 ? 'plan futuro' : 'planes futuros'}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </Pressable>
           </View>
         </View>
 
@@ -585,6 +1568,30 @@ export default function DecisionCenterScreen() {
               <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </Pressable>
 
+            {/* Planes a Largo Plazo */}
+            <Pressable 
+              onPress={() => router.push('/plans')} 
+              style={[styles.listGroupItem, { borderBottomWidth: 1, borderBottomColor: colors.backgroundSelected }]}
+            >
+              <View style={styles.listGroupLeft}>
+                <View style={[styles.iconContainer, { backgroundColor: 'rgba(191, 90, 242, 0.1)' }]}>
+                  <Ionicons name="compass" size={18} color="#BF5AF2" />
+                </View>
+                <View>
+                  <Text style={[styles.listGroupTitle, { color: colors.text }]}>Planes a Largo Plazo</Text>
+                  <Text style={[styles.listGroupSubtitle, { color: colors.textSecondary }]}>Aspiraciones y metas futuras</Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {pendingPlansCount > 0 && (
+                  <View style={[styles.inlineTrashBadge, { backgroundColor: 'rgba(191, 90, 242, 0.15)' }]}>
+                    <Text style={[styles.inlineTrashBadgeText, { color: '#BF5AF2' }]}>{pendingPlansCount}</Text>
+                  </View>
+                )}
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </View>
+            </Pressable>
+
             {/* Papelera */}
             <Pressable 
               onPress={() => router.push('/trash')} 
@@ -611,30 +1618,128 @@ export default function DecisionCenterScreen() {
           </View>
         </View>
 
+        {/* Group 4: Guía y Ayuda */}
+        <View style={[styles.sectionContainer, { marginBottom: 20 }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 8 }]}>🔍 Manual de Ayuda Inteligente</Text>
+          <Pressable 
+            onPress={() => router.push('/help')}
+            style={[styles.docCard, { backgroundColor: colors.backgroundElement, borderLeftWidth: 4, borderLeftColor: '#00C7BE' }]}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={[styles.docDescription, { color: colors.text, fontWeight: '600', marginBottom: 4 }]}>
+                  Explorar Guías y Funcionamiento
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                  Consulta el manual completo sobre el motor cognitivo, algoritmos de enfoque, recordatorios y más.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </View>
+          </Pressable>
+        </View>
+
         <View style={{ height: 100 + insets.bottom }} />
       </ScrollView>
 
       {/* QUICK COMPOSER BAR */}
       <View style={[styles.composerContainer, { backgroundColor: colors.backgroundElement, borderTopColor: colors.backgroundSelected, paddingBottom: (insets.bottom || 24) + 12 }]}>
-        <TextInput
-          placeholder="Escribe algo rápido aquí..."
-          placeholderTextColor={colors.textSecondary + '80'}
-          value={quickInput}
-          onChangeText={setQuickInput}
-          style={[styles.composerInput, { color: colors.text, backgroundColor: colors.background }]}
-        />
         <View style={styles.composerActions}>
           <Pressable onPress={() => handleQuickCreate(ItemType.TASK)} style={[styles.composerBtn, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-            <Ionicons name="checkmark-circle" size={20} color="#FF9500" />
+            <Ionicons name="checkmark-circle" size={24} color="#FF9500" />
           </Pressable>
           <Pressable onPress={() => handleQuickCreate(ItemType.REMINDER)} style={[styles.composerBtn, { backgroundColor: 'rgba(0, 122, 255, 0.15)' }]}>
-            <Ionicons name="notifications" size={20} color="#007AFF" />
+            <Ionicons name="notifications" size={24} color="#007AFF" />
+          </Pressable>
+          <Pressable onPress={() => setIsVoiceModalVisible(true)} style={[styles.composerBtn, { backgroundColor: 'rgba(255, 45, 85, 0.15)' }]}>
+            <Ionicons name="mic" size={24} color="#FF2D55" />
+          </Pressable>
+          <Pressable onPress={() => handleQuickCreate(ItemType.MEMO)} style={[styles.composerBtn, { backgroundColor: 'rgba(0, 199, 190, 0.15)' }]}>
+            <Ionicons name="bookmark" size={24} color="#00C7BE" />
           </Pressable>
           <Pressable onPress={() => handleQuickCreate(ItemType.ACTIVITY)} style={[styles.composerBtn, { backgroundColor: 'rgba(88, 86, 214, 0.15)' }]}>
-            <Ionicons name="sparkles" size={20} color="#5856D6" />
+            <Ionicons name="sparkles" size={24} color="#5856D6" />
           </Pressable>
         </View>
       </View>
+
+      {/* VOICE COMMAND ASSISTANT MODAL */}
+      <Modal
+        visible={isVoiceModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsVoiceModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.backgroundElement }]}>
+            <View style={[styles.modalHeader, { justifyContent: 'space-between', alignItems: 'center' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="mic" size={24} color="#FF2D55" />
+                <Text style={[styles.modalDocTitle, { color: colors.text }]}>Asistente de Voz Inteligente</Text>
+              </View>
+              <Pressable onPress={() => setIsVoiceModalVisible(false)} style={styles.modalCloseBtn}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={{ gap: 16 }} keyboardShouldPersistTaps="handled">
+              <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                Dicta o escribe un comando en lenguaje natural. Utiliza palabras clave para definir propiedades:
+              </Text>
+              
+              <Pressable
+                onPress={() => handleExecuteVoiceCommand(voiceInputText)}
+                style={[styles.modalActionBtn, { backgroundColor: '#FF2D55' }]}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="play" size={18} color="#fff" />
+                  <Text style={[styles.modalActionBtnText, { color: '#fff' }]}>Procesar Comando</Text>
+                </View>
+              </Pressable>
+
+              <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                Presiona el icono de micrófono del teclado para dictar:
+              </Text>
+
+              <TextInput
+                placeholder="Escribe o dicta aquí tu comando..."
+                placeholderTextColor={colors.textSecondary + '80'}
+                value={voiceInputText}
+                onChangeText={setVoiceInputText}
+                multiline={true}
+                numberOfLines={4}
+                autoFocus={true}
+                style={[
+                  styles.voiceTextInput, 
+                  { 
+                    color: colors.text, 
+                    backgroundColor: colors.background, 
+                    borderColor: colors.backgroundSelected 
+                  }
+                ]}
+              />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {lastCreatedItem && (
+        <View style={[styles.undoToast, { backgroundColor: colors.backgroundElement }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+            <Ionicons name="checkmark-circle" size={20} color="#4CD964" />
+            <Text style={[styles.undoText, { color: colors.text }]} numberOfLines={1}>
+              Creado: "{lastCreatedItem.title}"
+            </Text>
+          </View>
+          <Pressable onPress={handleUndo} style={styles.undoBtn}>
+            <Ionicons name="arrow-undo-outline" size={16} color="#007AFF" />
+            <Text style={[styles.undoBtnText, { color: '#007AFF' }]}>Deshacer</Text>
+          </Pressable>
+          <Pressable onPress={() => setLastCreatedItem(null)} style={{ padding: 4 }}>
+            <Ionicons name="close" size={18} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -953,25 +2058,20 @@ const styles = StyleSheet.create({
     right: 0,
     padding: 12,
     flexDirection: 'row',
-    gap: 8,
+    justifyContent: 'center',
     alignItems: 'center',
     borderTopWidth: 1,
   },
-  composerInput: {
-    flex: 1,
-    height: 44,
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    fontSize: 14,
-  },
   composerActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   composerBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -989,5 +2089,156 @@ const styles = StyleSheet.create({
   secReasonText: {
     fontSize: 12,
     lineHeight: 16,
+  },
+  docCard: {
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+  },
+  docDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  docSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 40,
+    gap: 8,
+  },
+  docSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    padding: 0,
+  },
+  clearDocBtn: {
+    padding: 2,
+  },
+  docResultsList: {
+    marginTop: 8,
+    gap: 8,
+  },
+  noDocText: {
+    fontSize: 12,
+    textAlign: 'center',
+    paddingVertical: 10,
+    fontStyle: 'italic',
+  },
+  docResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  docResultTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  docResultCategory: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxHeight: '80%',
+    borderRadius: 24,
+    padding: 20,
+    gap: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderBottomWidth: 1,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  modalDocCategory: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  modalDocTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalCloseBtn: {
+    padding: 4,
+  },
+  modalScrollBody: {
+    paddingVertical: 8,
+  },
+  modalDocTextContent: {
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  modalActionBtn: {
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  modalActionBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  voiceTextInput: {
+    borderRadius: 16,
+    borderWidth: 1.5,
+    padding: 14,
+    fontSize: 14,
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  undoToast: {
+    position: 'absolute',
+    bottom: 110,
+    left: 20,
+    right: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  undoText: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  undoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+  },
+  undoBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

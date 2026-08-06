@@ -69,7 +69,6 @@ export default function SessionScreen() {
       try {
         const id = await sessionService.createSession(task.id, parseInt(duration || '30', 10), 'Iniciada desde Home');
         setSessionId(id);
-        await sessionService.startSession(id);
       } catch (err) {
         console.error('Error starting session:', err);
       } finally {
@@ -160,13 +159,8 @@ export default function SessionScreen() {
         taskUpdates.lastSession = new Date().toISOString();
       }
 
-      // 2. End session
-      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, notes);
-
-      // 3. Apply task changes
-      if (Object.keys(taskUpdates).length > 0) {
-        await taskService.updateTask(task.id, taskUpdates);
-      }
+      // 2. End session and apply task updates in a single atomic transaction
+      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, notes, taskUpdates);
 
       setCompletedState('done');
       setTimeout(() => {
@@ -174,7 +168,10 @@ export default function SessionScreen() {
       }, 1500);
     } catch (err) {
       console.error('Error ending session:', err);
-      Alert.alert('Error', 'Ocurrió un error al guardar la sesión.');
+      Alert.alert(
+        'Error',
+        `Ocurrió un error al guardar la sesión: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   };
 

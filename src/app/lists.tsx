@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +47,42 @@ export default function ListsScreen() {
   const [alarmTarget, setAlarmTarget] = useState<{ listId: string; itemId?: string } | null>(null);
   const [alarmHour, setAlarmHour] = useState('');
   const [alarmMinute, setAlarmMinute] = useState('');
+
+  // Selection state
+  const [selectedItems, setSelectedItems] = useState<Record<string, boolean>>({});
+
+  const toggleSelectItem = (itemId: string) => {
+    setSelectedItems((prev) => ({
+      ...prev,
+      [itemId]: !prev[itemId],
+    }));
+  };
+
+  const handleCopyItemText = (text: string) => {
+    Clipboard.setString(text);
+  };
+
+  const selectedItemIds = Object.keys(selectedItems).filter((id) => selectedItems[id]);
+  const numSelected = selectedItemIds.length;
+
+  const handleCopySelected = () => {
+    const texts: string[] = [];
+    store.lists.forEach((list) => {
+      list.items.forEach((item) => {
+        if (selectedItems[item.id]) {
+          texts.push(item.text);
+        }
+      });
+    });
+
+    if (texts.length === 0) return;
+
+    Clipboard.setString(texts.join('\n'));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedItems({});
+  };
 
   const handleCreateList = async () => {
     if (!newListName.trim()) {
@@ -178,7 +215,13 @@ export default function ListsScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            numSelected > 0 && { paddingBottom: 110 }
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
           {/* Creator form */}
           <View style={[styles.creatorCard, { backgroundColor: colors.backgroundElement }]}>
             <Text style={[styles.creatorTitle, { color: colors.text }]}>Crear nueva lista</Text>
@@ -282,12 +325,26 @@ export default function ListsScreen() {
                       {list.items.map((item) => {
                         const isEditingThisItem =
                           editingItemId?.listId === list.id && editingItemId?.itemId === item.id;
+                        const isItemSelected = !!selectedItems[item.id];
 
                         return (
                           <View
                             key={item.id}
                             style={[styles.itemRow, { borderBottomColor: colors.backgroundSelected }]}
                           >
+                            {!isEditingThisItem && (
+                              <Pressable
+                                onPress={() => toggleSelectItem(item.id)}
+                                style={{ marginRight: 6, padding: 4 }}
+                              >
+                                <Ionicons
+                                  name={isItemSelected ? 'checkbox' : 'square-outline'}
+                                  size={20}
+                                  color={isItemSelected ? '#34C759' : colors.textSecondary}
+                                />
+                              </Pressable>
+                            )}
+
                             {isEditingThisItem ? (
                               <TextInput
                                 value={editingItemText}
@@ -316,6 +373,15 @@ export default function ListsScreen() {
                                   style={{ padding: 4, opacity: 0.5 }}
                                 >
                                   <Ionicons name="notifications-outline" size={14} color={colors.textSecondary} />
+                                </Pressable>
+                              )}
+
+                              {!isEditingThisItem && (
+                                <Pressable
+                                  onPress={() => handleCopyItemText(item.text)}
+                                  style={{ padding: 4 }}
+                                >
+                                  <Ionicons name="copy-outline" size={16} color={colors.textSecondary} />
                                 </Pressable>
                               )}
 
@@ -370,6 +436,33 @@ export default function ListsScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Floating Selection Action Bar */}
+      {numSelected > 0 && (
+        <View style={[styles.floatingActionBar, { backgroundColor: colors.backgroundElement, borderTopColor: colors.backgroundSelected }]}>
+          <View style={styles.floatingActionBarLeft}>
+            <Text style={[styles.floatingActionBarText, { color: colors.text }]}>
+              {numSelected} {numSelected === 1 ? 'seleccionado' : 'seleccionados'}
+            </Text>
+          </View>
+          <View style={styles.floatingActionBarActions}>
+            <Pressable
+              onPress={handleCopySelected}
+              style={[styles.floatingActionBtn, { backgroundColor: '#34C759' }]}
+            >
+              <Ionicons name="copy-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.floatingActionBtnText}>Copiar</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleClearSelection}
+              style={[styles.floatingActionBtn, { backgroundColor: colors.backgroundSelected }]}
+            >
+              <Ionicons name="close-circle-outline" size={16} color={colors.text} />
+              <Text style={[styles.floatingActionBtnText, { color: colors.text }]}>Limpiar</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       {/* Alarm Configuration Modal */}
       <Modal
@@ -639,6 +732,51 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   modalBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  floatingActionBar: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 34 : 20,
+    left: 16,
+    right: 16,
+    height: 60,
+    borderRadius: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  floatingActionBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  floatingActionBarText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  floatingActionBarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  floatingActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+  },
+  floatingActionBtnText: {
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
   },

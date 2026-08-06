@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { useRememberStore, HourWeight, CustomCategory } from '@/hooks/use-remember-store';
+import { useRememberStore, HourWeight, CustomCategory, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { useSettingsService } from '@/services/SettingsService';
 
@@ -24,6 +24,93 @@ export default function SettingsScreen() {
   const store = useRememberStore();
   const router = useRouter();
   const settingsService = useSettingsService();
+
+  // Local states for inputs to avoid premature updates during typing
+  const [localMaxFocus, setLocalMaxFocus] = useState(String(store.userSettings.maxFocusTasks));
+  const [localCooldown, setLocalCooldown] = useState(String(store.userSettings.defaultCooldown));
+  const [localLuna, setLocalLuna] = useState(String(store.userSettings.lunaDuration));
+  const [localTerra, setLocalTerra] = useState(String(store.userSettings.terraDuration));
+  const [localSol, setLocalSol] = useState(String(store.userSettings.solDuration));
+  const [localAstra, setLocalAstra] = useState(String(store.userSettings.astraDuration));
+  
+  const [localSleepStart, setLocalSleepStart] = useState(store.userSettings.sleepSchedule?.start || '23:00');
+  const [localSleepEnd, setLocalSleepEnd] = useState(store.userSettings.sleepSchedule?.end || '07:00');
+  
+  const [localWorkStart, setLocalWorkStart] = useState(store.userSettings.workingHours?.start || '09:00');
+  const [localWorkEnd, setLocalWorkEnd] = useState(store.userSettings.workingHours?.end || '18:00');
+
+  const [localVoiceType, setLocalVoiceType] = useState('');
+  const [localVoiceTitle, setLocalVoiceTitle] = useState('');
+  const [localVoiceDesc, setLocalVoiceDesc] = useState('');
+  const [localVoicePrio, setLocalVoicePrio] = useState('');
+  const [localVoiceWeight, setLocalVoiceWeight] = useState('');
+  const [localVoiceHours, setLocalVoiceHours] = useState('');
+  const [localVoiceDate, setLocalVoiceDate] = useState('');
+  const [localVoiceTime, setLocalVoiceTime] = useState('');
+  const [localVoiceEnergy, setLocalVoiceEnergy] = useState('');
+  const [localVoiceSlot, setLocalVoiceSlot] = useState('');
+  const [localVoiceGoal, setLocalVoiceGoal] = useState('');
+  const [localVoiceFavourite, setLocalVoiceFavourite] = useState('');
+  const [localVoiceQueryLists, setLocalVoiceQueryLists] = useState('');
+  const [localVoiceQueryListItems, setLocalVoiceQueryListItems] = useState('');
+  const [localVoiceAddListItem, setLocalVoiceAddListItem] = useState('');
+
+  // Sync local states if store.userSettings changes externally
+  useEffect(() => {
+    setLocalMaxFocus(String(store.userSettings.maxFocusTasks));
+    setLocalCooldown(String(store.userSettings.defaultCooldown));
+    setLocalLuna(String(store.userSettings.lunaDuration));
+    setLocalTerra(String(store.userSettings.terraDuration));
+    setLocalSol(String(store.userSettings.solDuration));
+    setLocalAstra(String(store.userSettings.astraDuration));
+    setLocalSleepStart(store.userSettings.sleepSchedule?.start || '23:00');
+    setLocalSleepEnd(store.userSettings.sleepSchedule?.end || '07:00');
+    setLocalWorkStart(store.userSettings.workingHours?.start || '09:00');
+    setLocalWorkEnd(store.userSettings.workingHours?.end || '18:00');
+
+    const vk = store.userSettings?.voiceKeywords || DEFAULT_VOICE_KEYWORDS || {
+      type: [], title: [], description: [], priority: [], weight: [], hours: [], date: [], time: [], energy: [], slot: [], goal: [], favourite: [], queryLists: [], queryListItems: [], addListItem: []
+    };
+    setLocalVoiceType((vk.type || []).join(', '));
+    setLocalVoiceTitle((vk.title || []).join(', '));
+    setLocalVoiceDesc((vk.description || []).join(', '));
+    setLocalVoicePrio((vk.priority || []).join(', '));
+    setLocalVoiceWeight((vk.weight || []).join(', '));
+    setLocalVoiceHours((vk.hours || []).join(', '));
+    setLocalVoiceDate((vk.date || []).join(', '));
+    setLocalVoiceTime((vk.time || []).join(', '));
+    setLocalVoiceEnergy((vk.energy || []).join(', '));
+    setLocalVoiceSlot((vk.slot || []).join(', '));
+    setLocalVoiceGoal((vk.goal || []).join(', '));
+    setLocalVoiceFavourite((vk.favourite || []).join(', '));
+    setLocalVoiceQueryLists((vk.queryLists || []).join(', '));
+    setLocalVoiceQueryListItems((vk.queryListItems || []).join(', '));
+    setLocalVoiceAddListItem((vk.addListItem || []).join(', '));
+  }, [store.userSettings]);
+
+  const handleUpdateKeywords = async (field: keyof VoiceKeywords, value: string) => {
+    const list = value
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0);
+
+    const currentKeywords = store.userSettings?.voiceKeywords || DEFAULT_VOICE_KEYWORDS || {
+      type: [], title: [], description: [], priority: [], weight: [], hours: [], date: [], time: [], energy: [], slot: [], goal: [], favourite: [], queryLists: [], queryListItems: [], addListItem: []
+    };
+    const updatedKeywords = {
+      ...currentKeywords,
+      [field]: list
+    };
+
+    try {
+      await settingsService.updateSettings({
+        voiceKeywords: updatedKeywords
+      });
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'No se pudieron guardar las palabras clave.');
+    }
+  };
 
   const moveItem = async (listName: 'preferredOrderEnergy' | 'preferredOrderWeight', index: number, direction: 'up' | 'down') => {
     const currentList = [...(store.userSettings[listName] || [])];
@@ -179,7 +266,12 @@ export default function SettingsScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {/* Section 1: Backup & Recovery */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DATOS Y RESPALDOS</Text>
@@ -312,11 +404,14 @@ export default function SettingsScreen() {
                 <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Límite para la auto-promoción y foco manual</Text>
               </View>
               <TextInput
-                value={String(store.userSettings.maxFocusTasks)}
-                onChangeText={async (val) => {
-                  const num = parseInt(val, 10);
+                value={localMaxFocus}
+                onChangeText={setLocalMaxFocus}
+                onBlur={async () => {
+                  const num = parseInt(localMaxFocus, 10);
                   if (!isNaN(num) && num > 0) {
                     await settingsService.updateSettings({ maxFocusTasks: num });
+                  } else {
+                    setLocalMaxFocus(String(store.userSettings.maxFocusTasks));
                   }
                 }}
                 keyboardType="number-pad"
@@ -331,11 +426,14 @@ export default function SettingsScreen() {
                 <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Tiempo de penalización al presionar "No ahora"</Text>
               </View>
               <TextInput
-                value={String(store.userSettings.defaultCooldown)}
-                onChangeText={async (val) => {
-                  const num = parseInt(val, 10);
+                value={localCooldown}
+                onChangeText={setLocalCooldown}
+                onBlur={async () => {
+                  const num = parseInt(localCooldown, 10);
                   if (!isNaN(num) && num >= 0) {
                     await settingsService.updateSettings({ defaultCooldown: num });
+                  } else {
+                    setLocalCooldown(String(store.userSettings.defaultCooldown));
                   }
                 }}
                 keyboardType="number-pad"
@@ -371,10 +469,15 @@ export default function SettingsScreen() {
             <View style={styles.settingRow}>
               <Text style={[styles.settingLabel, { color: colors.text }]}>🌙 Bloque Luna (Completar)</Text>
               <TextInput
-                value={String(store.userSettings.lunaDuration)}
-                onChangeText={async (val) => {
-                  const num = parseInt(val, 10);
-                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ lunaDuration: num });
+                value={localLuna}
+                onChangeText={setLocalLuna}
+                onBlur={async () => {
+                  const num = parseInt(localLuna, 10);
+                  if (!isNaN(num) && num > 0) {
+                    await settingsService.updateSettings({ lunaDuration: num });
+                  } else {
+                    setLocalLuna(String(store.userSettings.lunaDuration));
+                  }
                 }}
                 keyboardType="number-pad"
                 style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
@@ -385,10 +488,15 @@ export default function SettingsScreen() {
             <View style={styles.settingRow}>
               <Text style={[styles.settingLabel, { color: colors.text }]}>🌍 Bloque Terra (Avanzar)</Text>
               <TextInput
-                value={String(store.userSettings.terraDuration)}
-                onChangeText={async (val) => {
-                  const num = parseInt(val, 10);
-                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ terraDuration: num });
+                value={localTerra}
+                onChangeText={setLocalTerra}
+                onBlur={async () => {
+                  const num = parseInt(localTerra, 10);
+                  if (!isNaN(num) && num > 0) {
+                    await settingsService.updateSettings({ terraDuration: num });
+                  } else {
+                    setLocalTerra(String(store.userSettings.terraDuration));
+                  }
                 }}
                 keyboardType="number-pad"
                 style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
@@ -399,10 +507,15 @@ export default function SettingsScreen() {
             <View style={styles.settingRow}>
               <Text style={[styles.settingLabel, { color: colors.text }]}>☀️ Bloque Sol (Hito)</Text>
               <TextInput
-                value={String(store.userSettings.solDuration)}
-                onChangeText={async (val) => {
-                  const num = parseInt(val, 10);
-                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ solDuration: num });
+                value={localSol}
+                onChangeText={setLocalSol}
+                onBlur={async () => {
+                  const num = parseInt(localSol, 10);
+                  if (!isNaN(num) && num > 0) {
+                    await settingsService.updateSettings({ solDuration: num });
+                  } else {
+                    setLocalSol(String(store.userSettings.solDuration));
+                  }
                 }}
                 keyboardType="number-pad"
                 style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
@@ -413,10 +526,15 @@ export default function SettingsScreen() {
             <View style={styles.settingRow}>
               <Text style={[styles.settingLabel, { color: colors.text }]}>⭐ Bloque Astra (Hábito)</Text>
               <TextInput
-                value={String(store.userSettings.astraDuration)}
-                onChangeText={async (val) => {
-                  const num = parseInt(val, 10);
-                  if (!isNaN(num) && num > 0) await settingsService.updateSettings({ astraDuration: num });
+                value={localAstra}
+                onChangeText={setLocalAstra}
+                onBlur={async () => {
+                  const num = parseInt(localAstra, 10);
+                  if (!isNaN(num) && num > 0) {
+                    await settingsService.updateSettings({ astraDuration: num });
+                  } else {
+                    setLocalAstra(String(store.userSettings.astraDuration));
+                  }
                 }}
                 keyboardType="number-pad"
                 style={[styles.smallInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
@@ -437,19 +555,23 @@ export default function SettingsScreen() {
               </View>
               <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
                 <TextInput
-                  value={store.userSettings.sleepSchedule?.start || '23:00'}
-                  onChangeText={async (val) => {
-                    const end = store.userSettings.sleepSchedule?.end || '07:00';
-                    await settingsService.updateSettings({ sleepSchedule: { start: val, end } });
+                  value={localSleepStart}
+                  onChangeText={setLocalSleepStart}
+                  onBlur={async () => {
+                    await settingsService.updateSettings({
+                      sleepSchedule: { start: localSleepStart, end: localSleepEnd }
+                    });
                   }}
                   style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
                 />
                 <Text style={{ color: colors.textSecondary }}>a</Text>
                 <TextInput
-                  value={store.userSettings.sleepSchedule?.end || '07:00'}
-                  onChangeText={async (val) => {
-                    const start = store.userSettings.sleepSchedule?.start || '23:00';
-                    await settingsService.updateSettings({ sleepSchedule: { start, end: val } });
+                  value={localSleepEnd}
+                  onChangeText={setLocalSleepEnd}
+                  onBlur={async () => {
+                    await settingsService.updateSettings({
+                      sleepSchedule: { start: localSleepStart, end: localSleepEnd }
+                    });
                   }}
                   style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
                 />
@@ -464,19 +586,23 @@ export default function SettingsScreen() {
               </View>
               <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
                 <TextInput
-                  value={store.userSettings.workingHours?.start || '09:00'}
-                  onChangeText={async (val) => {
-                    const end = store.userSettings.workingHours?.end || '18:00';
-                    await settingsService.updateSettings({ workingHours: { start: val, end } });
+                  value={localWorkStart}
+                  onChangeText={setLocalWorkStart}
+                  onBlur={async () => {
+                    await settingsService.updateSettings({
+                      workingHours: { start: localWorkStart, end: localWorkEnd }
+                    });
                   }}
                   style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
                 />
                 <Text style={{ color: colors.textSecondary }}>a</Text>
                 <TextInput
-                  value={store.userSettings.workingHours?.end || '18:00'}
-                  onChangeText={async (val) => {
-                    const start = store.userSettings.workingHours?.start || '09:00';
-                    await settingsService.updateSettings({ workingHours: { start, end: val } });
+                  value={localWorkEnd}
+                  onChangeText={setLocalWorkEnd}
+                  onBlur={async () => {
+                    await settingsService.updateSettings({
+                      workingHours: { start: localWorkStart, end: localWorkEnd }
+                    });
                   }}
                   style={[styles.timeInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
                 />
@@ -545,7 +671,238 @@ export default function SettingsScreen() {
             ))}
           </View>
         </View>
+
+        {/* Section: Dictado de Voz Palabras Clave */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DICTADO DE VOZ (PALABRAS CLAVE)</Text>
+          <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>
+            Configura las palabras clave que el asistente de voz busca para identificar cada campo. Separa los valores con comas (,).
+          </Text>
+
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement }]}>
+            {/* Tipo */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Tipo de Elemento (ej. crear, tipo)</Text>
+              <TextInput
+                value={localVoiceType}
+                onChangeText={setLocalVoiceType}
+                onBlur={() => handleUpdateKeywords('type', localVoiceType)}
+                placeholder="crear, tipo"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Título */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Título / Nombre (ej. titulo, nombre)</Text>
+              <TextInput
+                value={localVoiceTitle}
+                onChangeText={setLocalVoiceTitle}
+                onBlur={() => handleUpdateKeywords('title', localVoiceTitle)}
+                placeholder="titulo, nombre, tarea"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Descripción */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Descripción (ej. descripcion, nota)</Text>
+              <TextInput
+                value={localVoiceDesc}
+                onChangeText={setLocalVoiceDesc}
+                onBlur={() => handleUpdateKeywords('description', localVoiceDesc)}
+                placeholder="descripcion, nota, detalle"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Prioridad */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Prioridad de Tarea (ej. prioridad, importancia)</Text>
+              <TextInput
+                value={localVoicePrio}
+                onChangeText={setLocalVoicePrio}
+                onBlur={() => handleUpdateKeywords('priority', localVoicePrio)}
+                placeholder="prioridad, importancia"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Peso */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Peso / Bloque (ej. peso, bloque)</Text>
+              <TextInput
+                value={localVoiceWeight}
+                onChangeText={setLocalVoiceWeight}
+                onBlur={() => handleUpdateKeywords('weight', localVoiceWeight)}
+                placeholder="peso, bloque, clasificacion"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Horas */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Horas Estimadas (ej. horas, duracion)</Text>
+              <TextInput
+                value={localVoiceHours}
+                onChangeText={setLocalVoiceHours}
+                onBlur={() => handleUpdateKeywords('hours', localVoiceHours)}
+                placeholder="horas, duracion, tiempo"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Fecha */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Fecha / Día (ej. fecha, dia)</Text>
+              <TextInput
+                value={localVoiceDate}
+                onChangeText={setLocalVoiceDate}
+                onBlur={() => handleUpdateKeywords('date', localVoiceDate)}
+                placeholder="fecha, dia, para el"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Hora */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Hora / Alarma (ej. hora, a las)</Text>
+              <TextInput
+                value={localVoiceTime}
+                onChangeText={setLocalVoiceTime}
+                onBlur={() => handleUpdateKeywords('time', localVoiceTime)}
+                placeholder="hora, a las"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Energía */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Tipo de Energía (ej. energia, actitud)</Text>
+              <TextInput
+                value={localVoiceEnergy}
+                onChangeText={setLocalVoiceEnergy}
+                onBlur={() => handleUpdateKeywords('energy', localVoiceEnergy)}
+                placeholder="energia, tipo de energia, actitud"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Franja Horaria */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Franja / Horario (ej. franja, horario)</Text>
+              <TextInput
+                value={localVoiceSlot}
+                onChangeText={setLocalVoiceSlot}
+                onBlur={() => handleUpdateKeywords('slot', localVoiceSlot)}
+                placeholder="franja, horario, bloque de tiempo"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Meta */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Meta / Objetivo (ej. meta, objetivo)</Text>
+              <TextInput
+                value={localVoiceGoal}
+                onChangeText={setLocalVoiceGoal}
+                onBlur={() => handleUpdateKeywords('goal', localVoiceGoal)}
+                placeholder="meta, objetivo"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Favorito */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Destacado / Favorito (ej. favorito, destacado)</Text>
+              <TextInput
+                value={localVoiceFavourite}
+                onChangeText={setLocalVoiceFavourite}
+                onBlur={() => handleUpdateKeywords('favourite', localVoiceFavourite)}
+                placeholder="favorito, destacado, importante"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* Section: Dictado de Voz - Comandos de Listas */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DICTADO DE VOZ - COMANDOS DE LISTAS</Text>
+          <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>
+            Configura las palabras clave para realizar consultas y modificaciones sobre tus listas de control por voz. Separa los valores con comas (,).
+          </Text>
+
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement }]}>
+            {/* Consultar Listas */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Consultar Nombres de Listas (ej. nombre de todas las listas, mis listas)</Text>
+              <TextInput
+                value={localVoiceQueryLists}
+                onChangeText={setLocalVoiceQueryLists}
+                onBlur={() => handleUpdateKeywords('queryLists', localVoiceQueryLists)}
+                placeholder="nombre de todas las listas, mis listas, que listas tengo"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Consultar Elementos de Lista */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Consultar Elementos de Lista (ej. ver lista, que tiene la lista)</Text>
+              <TextInput
+                value={localVoiceQueryListItems}
+                onChangeText={setLocalVoiceQueryListItems}
+                onBlur={() => handleUpdateKeywords('queryListItems', localVoiceQueryListItems)}
+                placeholder="elementos de la lista, que tiene la lista, ver lista"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            {/* Añadir Elemento a Lista */}
+            <View style={styles.settingCol}>
+              <Text style={[styles.settingColLabel, { color: colors.text }]}>Añadir Elemento a Lista (ej. añade a la lista, añadir a la lista)</Text>
+              <TextInput
+                value={localVoiceAddListItem}
+                onChangeText={setLocalVoiceAddListItem}
+                onBlur={() => handleUpdateKeywords('addListItem', localVoiceAddListItem)}
+                placeholder="añadir elemento a la lista, añade a la lista, agregar a la lista"
+                placeholderTextColor={colors.textSecondary + '80'}
+                multiline={true}
+                style={[styles.fullWidthInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+          </View>
+        </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Add/Edit Modal */}
       <Modal
@@ -831,7 +1188,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   smallInput: {
-    width: 60,
+    width: 80,
     height: 36,
     borderWidth: 1,
     borderRadius: 8,
@@ -839,7 +1196,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   timeInput: {
-    width: 56,
+    width: 70,
     height: 36,
     borderWidth: 1,
     borderRadius: 8,
@@ -866,5 +1223,24 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     padding: 6,
+  },
+  settingCol: {
+    flexDirection: 'column',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  settingColLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  fullWidthInput: {
+    minHeight: 60,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    textAlignVertical: 'top',
   },
 });

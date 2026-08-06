@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { useRememberStore, ItemType, Priority, Task } from '@/hooks/use-remember-store';
+import { useRememberStore, ItemType, Priority, Task, EnergyType, getLocalDateStr } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 
 export default function TasksScreen() {
@@ -29,7 +29,9 @@ export default function TasksScreen() {
   const [filterPriorities, setFilterPriorities] = useState<Priority[]>([]);
   const [filterGoalId, setFilterGoalId] = useState<string>('ALL');
   const [filterWeightIds, setFilterWeightIds] = useState<string[]>([]);
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [filterEnergyTypes, setFilterEnergyTypes] = useState<EnergyType[]>([]);
+  const [filterDateRange, setFilterDateRange] = useState<'ALL' | 'TODAY_OVERDUE' | 'WEEK' | 'MONTH' | 'FUTURE' | 'UNSCHEDULED'>('ALL');
+  const [taskStatusFilter, setTaskStatusFilter] = useState<'PENDING' | 'COMPLETED' | 'ARCHIVED'>('PENDING');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -46,11 +48,14 @@ export default function TasksScreen() {
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
 
   const tasksList = useMemo(() => {
-    let list = store.getTasks();
-    if (!showCompleted) {
-      list = list.filter((t) => !t.completed);
-    } else {
-      list = list.filter((t) => t.completed);
+    let list = store.items.filter((i) => i.type === ItemType.TASK && !i.trash) as Task[];
+
+    if (taskStatusFilter === 'PENDING') {
+      list = list.filter((t) => !t.completed && !t.archived);
+    } else if (taskStatusFilter === 'COMPLETED') {
+      list = list.filter((t) => t.completed && !t.archived);
+    } else if (taskStatusFilter === 'ARCHIVED') {
+      list = list.filter((t) => t.archived);
     }
 
     if (filterPriorities.length > 0) {
@@ -71,6 +76,40 @@ export default function TasksScreen() {
       });
     }
 
+    if (filterEnergyTypes.length > 0) {
+      list = list.filter((t) => t.energyType && filterEnergyTypes.includes(t.energyType));
+    }
+
+    if (filterDateRange === 'TODAY_OVERDUE') {
+      const todayStr = getLocalDateStr(new Date());
+      list = list.filter((t) => t.dueDate && t.dueDate <= todayStr);
+    } else if (filterDateRange === 'WEEK') {
+      const today = new Date();
+      const todayStr = getLocalDateStr(today);
+      const nextWeek = new Date();
+      nextWeek.setDate(today.getDate() + 7);
+      const nextWeekStr = getLocalDateStr(nextWeek);
+      
+      list = list.filter((t) => t.dueDate && t.dueDate >= todayStr && t.dueDate <= nextWeekStr);
+    } else if (filterDateRange === 'MONTH') {
+      const today = new Date();
+      const todayStr = getLocalDateStr(today);
+      const nextMonth = new Date();
+      nextMonth.setDate(today.getDate() + 30);
+      const nextMonthStr = getLocalDateStr(nextMonth);
+      
+      list = list.filter((t) => t.dueDate && t.dueDate >= todayStr && t.dueDate <= nextMonthStr);
+    } else if (filterDateRange === 'FUTURE') {
+      const today = new Date();
+      const nextMonth = new Date();
+      nextMonth.setDate(today.getDate() + 30);
+      const nextMonthStr = getLocalDateStr(nextMonth);
+      
+      list = list.filter((t) => t.dueDate && t.dueDate > nextMonthStr);
+    } else if (filterDateRange === 'UNSCHEDULED') {
+      list = list.filter((t) => !t.dueDate);
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((t) => 
@@ -79,15 +118,32 @@ export default function TasksScreen() {
       );
     }
 
-    // Sort by priority (HIGH -> MEDIUM -> LOW) then date
+    // Sort by:
+    // 1. Closest completion date (earliest dueDate first; undated tasks go to the end)
+    // 2. Priority (HIGH -> MEDIUM -> LOW)
+    // 3. Newest first (createdAt)
     return list.sort((a, b) => {
+      const dateA = a.dueDate || '';
+      const dateB = b.dueDate || '';
+
+      if (dateA && dateB) {
+        if (dateA !== dateB) {
+          return dateA.localeCompare(dateB);
+        }
+      } else if (dateA) {
+        return -1;
+      } else if (dateB) {
+        return 1;
+      }
+
       const weights = { HIGH: 3, MEDIUM: 2, LOW: 1 };
       const wA = weights[a.priority] || 2;
       const wB = weights[b.priority] || 2;
       if (wA !== wB) return wB - wA;
-      return a.createdAt.localeCompare(b.createdAt);
+      
+      return b.createdAt.localeCompare(a.createdAt);
     });
-  }, [store.items, store.hourWeights, filterPriorities, filterGoalId, filterWeightIds, showCompleted, searchQuery]);
+  }, [store.items, store.hourWeights, filterPriorities, filterGoalId, filterWeightIds, filterEnergyTypes, filterDateRange, taskStatusFilter, searchQuery]);
 
   const handleBulkDelete = () => {
     Alert.alert(
@@ -99,9 +155,10 @@ export default function TasksScreen() {
           text: 'Mover',
           style: 'destructive',
           onPress: async () => {
-            for (const id of selectedIds) {
-              await store.deleteItem(id);
-            }
+            await store.updateItems(selectedIds, {
+              trash: true,
+              deletedAt: new Date().toISOString(),
+            });
             setSelectedIds([]);
           },
         },
@@ -139,6 +196,11 @@ export default function TasksScreen() {
     Alert.alert('Archivada', `Se archivó la tarea "${task.title}".`);
   };
 
+  const handleUnarchiveTask = async (task: Task) => {
+    await store.unarchiveItem(task.id);
+    Alert.alert('Desarchivada', `Se desarchivó la tarea "${task.title}".`);
+  };
+
   const handleChangePriority = (task: Task) => {
     Alert.alert(
       'Cambiar Prioridad',
@@ -165,6 +227,55 @@ export default function TasksScreen() {
         { text: 'Cancelar', style: 'cancel' },
       ],
       { cancelable: true }
+    );
+  };
+
+  const renderDateBadge = (task: Task) => {
+    if (!task.dueDate) return null;
+
+    const todayStr = getLocalDateStr(new Date());
+    let badgeText = '';
+    let isOverdue = false;
+    let isToday = false;
+
+    const formatShortDate = (dateStr: string) => {
+      if (dateStr === todayStr) return 'Hoy';
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      if (dateStr === getLocalDateStr(tomorrow)) return 'Mañana';
+      
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (dateStr === getLocalDateStr(yesterday)) return 'Ayer';
+
+      const [y, m, d] = dateStr.split('-');
+      const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      const monthLabel = months[parseInt(m, 10) - 1] || m;
+      return `${parseInt(d, 10)} ${monthLabel}`;
+    };
+
+    isOverdue = task.dueDate < todayStr && !task.completed;
+    isToday = task.dueDate === todayStr;
+    badgeText = formatShortDate(task.dueDate);
+
+    const badgeBgColor = isOverdue 
+      ? 'rgba(255, 59, 48, 0.15)' 
+      : isToday 
+        ? 'rgba(255, 149, 0, 0.15)' 
+        : 'rgba(52, 199, 89, 0.12)';
+        
+    const badgeTextColor = isOverdue 
+      ? '#FF3B30' 
+      : isToday 
+        ? '#FF9500' 
+        : '#34C759';
+
+    return (
+      <View style={[styles.metaBadge, { backgroundColor: badgeBgColor }]}>
+        <Text style={{ color: badgeTextColor, fontSize: 10, fontWeight: '700' }}>
+          {isOverdue ? '⚠️ Finalización vencida: ' : '🏁 Finalización: '}{badgeText}
+        </Text>
+      </View>
     );
   };
 
@@ -196,19 +307,17 @@ export default function TasksScreen() {
       >
         <View style={styles.cardMain}>
           {selectedIds.length > 0 ? (
-            <Pressable
-              onPress={() => handleToggleSelect(item.id)}
-              style={styles.checkboxContainer}
-            >
+            <View style={styles.checkboxContainer}>
               <Ionicons
                 name={isSelected ? 'checkbox' : 'square-outline'}
                 size={24}
                 color={isSelected ? '#FF9500' : colors.textSecondary}
               />
-            </Pressable>
+            </View>
           ) : (
             <Pressable
-              onPress={async () => {
+              onPress={async (e) => {
+                e.stopPropagation();
                 await store.toggleItemCompleted(item.id);
               }}
               style={styles.checkboxContainer}
@@ -234,16 +343,38 @@ export default function TasksScreen() {
             
             <View style={styles.tagRow}>
               <Pressable
-                onPress={() => handleChangePriority(item)}
+                onPress={(e) => {
+                  if (selectedIds.length > 0) return;
+                  e.stopPropagation();
+                  handleChangePriority(item);
+                }}
                 style={({ pressed }) => [
                   styles.priorityBadge,
-                  { backgroundColor: priorityColor + '20', opacity: pressed ? 0.6 : 1 },
+                  { backgroundColor: priorityColor + '20', opacity: pressed && selectedIds.length === 0 ? 0.6 : 1 },
                 ]}
+                disabled={selectedIds.length > 0}
               >
                 <Text style={{ color: priorityColor, fontSize: 10, fontWeight: '700' }}>
                   {item.priority}
                 </Text>
               </Pressable>
+
+              {renderDateBadge(item)}
+
+              {item.energyType ? (
+                <View style={[styles.metaBadge, { backgroundColor: 'rgba(88, 86, 214, 0.1)' }]}>
+                  <Text style={{ color: '#5856D6', fontSize: 10, fontWeight: '700' }}>
+                    ⚡ {
+                      item.energyType === EnergyType.CREATIVE ? 'Creativa' :
+                      item.energyType === EnergyType.ANALYTICAL ? 'Analítica' :
+                      item.energyType === EnergyType.ADMINISTRATIVE ? 'Admin' :
+                      item.energyType === EnergyType.SOCIAL ? 'Social' :
+                      item.energyType === EnergyType.PHYSICAL ? 'Física' :
+                      'Aprendizaje'
+                    }
+                  </Text>
+                </View>
+              ) : null}
 
               {item.estimatedHours ? (
                 <>
@@ -253,7 +384,7 @@ export default function TasksScreen() {
                     </Text>
                   </View>
                   {(() => {
-                    const sortedWeights = [...store.hourWeights].sort((a, b) => b.minHours - a.minHours);
+                    const sortedWeights = [...(store.hourWeights || [])].sort((a, b) => b.minHours - a.minHours);
                     const matched = sortedWeights.find((w) => item.estimatedHours! >= w.minHours);
                     const label = matched ? matched.name : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].name : null);
                     if (!label) return null;
@@ -279,19 +410,29 @@ export default function TasksScreen() {
           </View>
 
           <View style={styles.cardActions}>
-            <Pressable
-              onPress={() => router.push({ pathname: '/editor', params: { id: item.id } })}
-              style={styles.actionBtn}
-            >
-              <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
-            </Pressable>
+            {selectedIds.length === 0 && (
+              <>
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    router.push({ pathname: '/editor', params: { id: item.id } });
+                  }}
+                  style={styles.actionBtn}
+                >
+                  <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
+                </Pressable>
 
-            <Pressable
-              onPress={() => setExpandedTaskId(isExpanded ? null : item.id)}
-              style={styles.actionBtn}
-            >
-              <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textSecondary} />
-            </Pressable>
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setExpandedTaskId(isExpanded ? null : item.id);
+                  }}
+                  style={styles.actionBtn}
+                >
+                  <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textSecondary} />
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
 
@@ -309,13 +450,23 @@ export default function TasksScreen() {
 
             {/* Utility buttons for Item Lifecycle */}
             <View style={styles.utilityRow}>
-              <Pressable
-                onPress={() => handleArchiveTask(item)}
-                style={[styles.utilityBtn, { backgroundColor: colors.backgroundSelected }]}
-              >
-                <Ionicons name="archive-outline" size={16} color={colors.text} />
-                <Text style={[styles.utilityBtnText, { color: colors.text }]}>Archivar</Text>
-              </Pressable>
+              {item.archived ? (
+                <Pressable
+                  onPress={() => handleUnarchiveTask(item)}
+                  style={[styles.utilityBtn, { backgroundColor: colors.backgroundSelected }]}
+                >
+                  <Ionicons name="archive" size={16} color="#FF9500" />
+                  <Text style={[styles.utilityBtnText, { color: '#FF9500' }]}>Desarchivar</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => handleArchiveTask(item)}
+                  style={[styles.utilityBtn, { backgroundColor: colors.backgroundSelected }]}
+                >
+                  <Ionicons name="archive-outline" size={16} color={colors.text} />
+                  <Text style={[styles.utilityBtnText, { color: colors.text }]}>Archivar</Text>
+                </Pressable>
+              )}
               <Pressable
                 onPress={() => handleDeleteTask(item)}
                 style={[styles.utilityBtn, { backgroundColor: 'rgba(255, 59, 48, 0.1)' }]}
@@ -414,29 +565,92 @@ export default function TasksScreen() {
         {/* Status Filter */}
         <View style={styles.tabRow}>
           <Pressable
-            onPress={() => setShowCompleted(false)}
-            style={[styles.tabBtn, !showCompleted && { borderBottomColor: '#FF9500', borderBottomWidth: 2 }]}
+            onPress={() => setTaskStatusFilter('PENDING')}
+            style={[styles.tabBtn, taskStatusFilter === 'PENDING' && { borderBottomColor: '#FF9500', borderBottomWidth: 2 }]}
           >
-            <Text style={[styles.tabText, { color: !showCompleted ? '#FF9500' : colors.textSecondary }]}>Pendientes</Text>
+            <Text style={[styles.tabText, { color: taskStatusFilter === 'PENDING' ? '#FF9500' : colors.textSecondary }]}>Pendientes</Text>
           </Pressable>
           <Pressable
-            onPress={() => setShowCompleted(true)}
-            style={[styles.tabBtn, showCompleted && { borderBottomColor: '#FF9500', borderBottomWidth: 2 }]}
+            onPress={() => setTaskStatusFilter('COMPLETED')}
+            style={[styles.tabBtn, taskStatusFilter === 'COMPLETED' && { borderBottomColor: '#FF9500', borderBottomWidth: 2 }]}
           >
-            <Text style={[styles.tabText, { color: showCompleted ? '#FF9500' : colors.textSecondary }]}>Completadas</Text>
+            <Text style={[styles.tabText, { color: taskStatusFilter === 'COMPLETED' ? '#FF9500' : colors.textSecondary }]}>Completadas</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setTaskStatusFilter('ARCHIVED')}
+            style={[styles.tabBtn, taskStatusFilter === 'ARCHIVED' && { borderBottomColor: '#FF9500', borderBottomWidth: 2 }]}
+          >
+            <Text style={[styles.tabText, { color: taskStatusFilter === 'ARCHIVED' ? '#FF9500' : colors.textSecondary }]}>Archivadas</Text>
           </Pressable>
         </View>
+
+        {/* Date Filter */}
+        {selectedIds.length === 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters} style={{ marginTop: 8 }}>
+            <Pressable
+              onPress={() => setFilterDateRange('ALL')}
+              style={[styles.filterChip, filterDateRange === 'ALL' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
+            >
+              <Text style={[styles.filterChipText, { color: filterDateRange === 'ALL' ? '#fff' : colors.text }]}>Cualquier finalización</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setFilterDateRange('TODAY_OVERDUE')}
+              style={[styles.filterChip, filterDateRange === 'TODAY_OVERDUE' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
+            >
+              <Text style={[styles.filterChipText, { color: filterDateRange === 'TODAY_OVERDUE' ? '#fff' : colors.text }]}>🏁 Hoy y Atrasadas</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setFilterDateRange('WEEK')}
+              style={[styles.filterChip, filterDateRange === 'WEEK' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
+            >
+              <Text style={[styles.filterChipText, { color: filterDateRange === 'WEEK' ? '#fff' : colors.text }]}>🗓️ Esta semana</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setFilterDateRange('MONTH')}
+              style={[styles.filterChip, filterDateRange === 'MONTH' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
+            >
+              <Text style={[styles.filterChipText, { color: filterDateRange === 'MONTH' ? '#fff' : colors.text }]}>📅 Este mes</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setFilterDateRange('FUTURE')}
+              style={[styles.filterChip, filterDateRange === 'FUTURE' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
+            >
+              <Text style={[styles.filterChipText, { color: filterDateRange === 'FUTURE' ? '#fff' : colors.text }]}>🚀 Más adelante</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setFilterDateRange('UNSCHEDULED')}
+              style={[styles.filterChip, filterDateRange === 'UNSCHEDULED' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
+            >
+              <Text style={[styles.filterChipText, { color: filterDateRange === 'UNSCHEDULED' ? '#fff' : colors.text }]}>❓ Sin fecha</Text>
+            </Pressable>
+          </ScrollView>
+        )}
+
+        {/* Bulk Configuration Mode Indicator */}
+        {selectedIds.length > 0 && (
+          <View style={[styles.bulkEditBanner, { backgroundColor: colors.backgroundSelected, borderColor: '#FF9500' }]}>
+            <Ionicons name="information-circle-outline" size={18} color="#FF9500" />
+            <Text style={[styles.bulkEditText, { color: colors.text }]}>
+              Configuración masiva activa: Toca una prioridad, peso o energía de abajo para asignarlo a las tareas seleccionadas.
+            </Text>
+          </View>
+        )}
 
         {/* Priority Filter */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters}>
           <Pressable
-            onPress={() => setFilterPriorities([])}
+            onPress={() => {
+              if (selectedIds.length > 0) return;
+              setFilterPriorities([]);
+            }}
             style={[
               styles.filterChip,
-              filterPriorities.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
+              selectedIds.length > 0 && { opacity: 0.5 },
+              filterPriorities.length === 0 && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
             ]}
+            disabled={selectedIds.length > 0}
           >
-            <Text style={[styles.filterChipText, { color: filterPriorities.length === 0 ? '#fff' : colors.text }]}>Todas</Text>
+            <Text style={[styles.filterChipText, { color: filterPriorities.length === 0 && selectedIds.length === 0 ? '#fff' : colors.text }]}>Todas</Text>
           </Pressable>
           {([Priority.HIGH, Priority.MEDIUM, Priority.LOW] as Priority[]).map((p) => {
             const isActive = filterPriorities.includes(p);
@@ -444,18 +658,35 @@ export default function TasksScreen() {
               <Pressable
                 key={p}
                 onPress={() => {
-                  if (isActive) {
-                    setFilterPriorities(filterPriorities.filter((x) => x !== p));
+                  if (selectedIds.length > 0) {
+                    Alert.alert(
+                      'Cambiar Prioridad',
+                      `¿Deseas cambiar la prioridad de las ${selectedIds.length} tareas seleccionadas a "${p}"?`,
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        {
+                          text: 'Confirmar',
+                          onPress: async () => {
+                            await store.updateItems(selectedIds, { priority: p });
+                            setSelectedIds([]);
+                          },
+                        },
+                      ]
+                    );
                   } else {
-                    setFilterPriorities([...filterPriorities, p]);
+                    if (isActive) {
+                      setFilterPriorities(filterPriorities.filter((x) => x !== p));
+                    } else {
+                      setFilterPriorities([...filterPriorities, p]);
+                    }
                   }
                 }}
                 style={[
                   styles.filterChip,
-                  isActive ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement },
+                  isActive && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement },
                 ]}
               >
-                <Text style={[styles.filterChipText, { color: isActive ? '#fff' : colors.text }]}>{p}</Text>
+                <Text style={[styles.filterChipText, { color: isActive && selectedIds.length === 0 ? '#fff' : colors.text }]}>{p}</Text>
               </Pressable>
             );
           })}
@@ -464,13 +695,18 @@ export default function TasksScreen() {
         {/* Weight Filter */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters} style={{ marginTop: -2 }}>
           <Pressable
-            onPress={() => setFilterWeightIds([])}
+            onPress={() => {
+              if (selectedIds.length > 0) return;
+              setFilterWeightIds([]);
+            }}
             style={[
               styles.filterChip,
-              filterWeightIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
+              selectedIds.length > 0 && { opacity: 0.5 },
+              filterWeightIds.length === 0 && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
             ]}
+            disabled={selectedIds.length > 0}
           >
-            <Text style={[styles.filterChipText, { color: filterWeightIds.length === 0 ? '#fff' : colors.text }]}>Todos los pesos</Text>
+            <Text style={[styles.filterChipText, { color: filterWeightIds.length === 0 && selectedIds.length === 0 ? '#fff' : colors.text }]}>Todos los pesos</Text>
           </Pressable>
           {store.hourWeights.map((w) => {
             const isActive = filterWeightIds.includes(w.id);
@@ -478,18 +714,106 @@ export default function TasksScreen() {
               <Pressable
                 key={w.id}
                 onPress={() => {
-                  if (isActive) {
-                    setFilterWeightIds(filterWeightIds.filter((x) => x !== w.id));
+                  if (selectedIds.length > 0) {
+                    Alert.alert(
+                      'Cambiar Peso/Horas',
+                      `¿Deseas cambiar el peso de las ${selectedIds.length} tareas seleccionadas a "${w.name}" (${w.minHours}h)?`,
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        {
+                          text: 'Confirmar',
+                          onPress: async () => {
+                            await store.updateItems(selectedIds, { estimatedHours: w.minHours });
+                            setSelectedIds([]);
+                          },
+                        },
+                      ]
+                    );
                   } else {
-                    setFilterWeightIds([...filterWeightIds, w.id]);
+                    if (isActive) {
+                      setFilterWeightIds(filterWeightIds.filter((x) => x !== w.id));
+                    } else {
+                      setFilterWeightIds([...filterWeightIds, w.id]);
+                    }
                   }
                 }}
                 style={[
                   styles.filterChip,
-                  isActive ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
+                  isActive && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
                 ]}
               >
-                <Text style={[styles.filterChipText, { color: isActive ? '#fff' : colors.text }]}>{w.name}</Text>
+                <Text style={[styles.filterChipText, { color: isActive && selectedIds.length === 0 ? '#fff' : colors.text }]}>{w.name}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {/* Energy Category Filter */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters} style={{ marginTop: -2, marginBottom: 6 }}>
+          <Pressable
+            onPress={() => {
+              if (selectedIds.length > 0) return;
+              setFilterEnergyTypes([]);
+            }}
+            style={[
+              styles.filterChip,
+              selectedIds.length > 0 && { opacity: 0.5 },
+              filterEnergyTypes.length === 0 && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
+            ]}
+            disabled={selectedIds.length > 0}
+          >
+            <Text style={[styles.filterChipText, { color: filterEnergyTypes.length === 0 && selectedIds.length === 0 ? '#fff' : colors.text }]}>Todas las energías</Text>
+          </Pressable>
+          {([
+            EnergyType.CREATIVE,
+            EnergyType.ANALYTICAL,
+            EnergyType.ADMINISTRATIVE,
+            EnergyType.SOCIAL,
+            EnergyType.PHYSICAL,
+            EnergyType.LEARNING,
+          ] as EnergyType[]).map((eType) => {
+            const isActive = filterEnergyTypes.includes(eType);
+            const label = 
+              eType === EnergyType.CREATIVE ? '🎨 Creativa' :
+              eType === EnergyType.ANALYTICAL ? '🧠 Analítica' :
+              eType === EnergyType.ADMINISTRATIVE ? '📁 Admin' :
+              eType === EnergyType.SOCIAL ? '💬 Social' :
+              eType === EnergyType.PHYSICAL ? '🏋️ Física' :
+              '📖 Aprendizaje';
+
+            return (
+              <Pressable
+                key={eType}
+                onPress={() => {
+                  if (selectedIds.length > 0) {
+                    Alert.alert(
+                      'Cambiar Categoría de Energía',
+                      `¿Deseas cambiar la categoría de energía de las ${selectedIds.length} tareas seleccionadas a "${label}"?`,
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        {
+                          text: 'Confirmar',
+                          onPress: async () => {
+                            await store.updateItems(selectedIds, { energyType: eType });
+                            setSelectedIds([]);
+                          },
+                        },
+                      ]
+                    );
+                  } else {
+                    if (isActive) {
+                      setFilterEnergyTypes(filterEnergyTypes.filter((x) => x !== eType));
+                    } else {
+                      setFilterEnergyTypes([...filterEnergyTypes, eType]);
+                    }
+                  }
+                }}
+                style={[
+                  styles.filterChip,
+                  isActive && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement },
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: isActive && selectedIds.length === 0 ? '#fff' : colors.text }]}>{label}</Text>
               </Pressable>
             );
           })}
@@ -500,6 +824,7 @@ export default function TasksScreen() {
         data={tasksList}
         renderItem={renderTaskItem}
         keyExtractor={(item) => item.id}
+        extraData={selectedIds}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
@@ -703,5 +1028,23 @@ const styles = StyleSheet.create({
     marginLeft: -26,
     zIndex: 1,
     padding: 4,
+  },
+  bulkEditBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  bulkEditText: {
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+    lineHeight: 15,
   },
 });

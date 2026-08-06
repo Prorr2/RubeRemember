@@ -4,7 +4,7 @@ export function getTaskWeightLabel(estimatedHours: number | undefined, hourWeigh
   if (estimatedHours === undefined || estimatedHours === null || estimatedHours <= 0) {
     return 'luna';
   }
-  const sorted = [...hourWeights].sort((a, b) => b.minHours - a.minHours);
+  const sorted = [...(hourWeights || [])].sort((a, b) => b.minHours - a.minHours);
   for (const w of sorted) {
     if (estimatedHours >= w.minHours) {
       const lowerId = w.id.toLowerCase();
