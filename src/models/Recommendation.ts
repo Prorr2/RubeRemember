@@ -6,7 +6,7 @@ export interface Recommendation {
   reasonsSecondary?: string[];
   recommendedDuration: number; // in minutes
   generatedAt: string; // ISO date string
-  priorityLevel: 'ALTA' | 'MEDIA' | 'BAJA';
+  priorityLevel: 'URGENTE' | 'ALTA' | 'MEDIA' | 'BAJA';
   energyAdjustment?: number;
   transitionAdjustment?: number;
   confidenceLevel?: number; // 0 to 100

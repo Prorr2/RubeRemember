@@ -5,7 +5,8 @@ import { Comment } from './Comment';
 export enum Priority {
   LOW = 'low',
   MEDIUM = 'medium',
-  HIGH = 'high'
+  HIGH = 'high',
+  URGENT = 'urgent'
 }
 
 export enum ExecutionStrategy {

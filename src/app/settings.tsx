@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { useRememberStore, HourWeight, CustomCategory, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { useSettingsService } from '@/services/SettingsService';
+import { ScoreEngine } from '@/engines/ScoreEngine';
 
 export default function SettingsScreen() {
   const store = useRememberStore();
@@ -26,6 +27,7 @@ export default function SettingsScreen() {
   const settingsService = useSettingsService();
 
   // Local states for inputs to avoid premature updates during typing
+  const [localFormula, setLocalFormula] = useState(store.userSettings.scoreFormula || '((hours * (priorityWeight * priorityWeight)) / daysRemaining) / 1000');
   const [localMaxFocus, setLocalMaxFocus] = useState(String(store.userSettings.maxFocusTasks));
   const [localCooldown, setLocalCooldown] = useState(String(store.userSettings.defaultCooldown));
   const [localLuna, setLocalLuna] = useState(String(store.userSettings.lunaDuration));
@@ -57,6 +59,7 @@ export default function SettingsScreen() {
 
   // Sync local states if store.userSettings changes externally
   useEffect(() => {
+    setLocalFormula(store.userSettings.scoreFormula || '((hours * (priorityWeight * priorityWeight)) / daysRemaining) / 1000');
     setLocalMaxFocus(String(store.userSettings.maxFocusTasks));
     setLocalCooldown(String(store.userSettings.defaultCooldown));
     setLocalLuna(String(store.userSettings.lunaDuration));
@@ -458,6 +461,105 @@ export default function SettingsScreen() {
                 </Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+
+        {/* Section: Fórmula Personalizada de Score */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>FÓRMULA DE PRIORIZACIÓN DE TAREAS</Text>
+          <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>
+            Personaliza matemáticamente cómo se calcula el score de prioridad de tus tareas pendientes.
+          </Text>
+
+          <View style={[styles.cardGroup, { backgroundColor: colors.backgroundElement, padding: 12 }]}>
+            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', marginBottom: 6 }}>Fórmula Matemática:</Text>
+            <TextInput
+              value={localFormula}
+              onChangeText={setLocalFormula}
+              placeholder="Ej. (hours * (priorityWeight * priorityWeight)) / daysRemaining"
+              placeholderTextColor={colors.textSecondary + '80'}
+              multiline={true}
+              style={[
+                styles.fullWidthInput,
+                {
+                  color: colors.text,
+                  backgroundColor: colors.background,
+                  borderColor: colors.backgroundSelected,
+                  fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                  fontSize: 13,
+                  padding: 10,
+                  minHeight: 50,
+                  textAlignVertical: 'top',
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  marginBottom: 12,
+                }
+              ]}
+            />
+
+            {/* Variable help text card */}
+            <View style={{ backgroundColor: colors.background, padding: 10, borderRadius: 8, gap: 4, marginBottom: 12 }}>
+              <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>Variables Disponibles:</Text>
+              
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                <Text style={{ color: '#FF9500', fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }}>hours</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'right', flex: 1, marginLeft: 8 }}>Horas estimadas (mín. 1)</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                <Text style={{ color: '#FF9500', fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }}>priorityWeight</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'right', flex: 1, marginLeft: 8 }}>Peso prioridad (Baja:10, Med:30, Alta:60, Urg:100)</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                <Text style={{ color: '#FF9500', fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }}>priority</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'right', flex: 1, marginLeft: 8 }}>Prioridad bruta (1=Baja a 4=Urgente)</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                <Text style={{ color: '#FF9500', fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }}>daysRemaining</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'right', flex: 1, marginLeft: 8 }}>Días restantes ajustados (vencida:0.2, hoy:0.5, sin fecha:0.5)</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                <Text style={{ color: '#FF9500', fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }}>diffDays</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'right', flex: 1, marginLeft: 8 }}>Días restantes reales (negativo si vencida)</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                <Text style={{ color: '#FF9500', fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }}>focusLocked</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'right', flex: 1, marginLeft: 8 }}>1 si está en foco, 0 si no</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                <Text style={{ color: '#FF9500', fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold' }}>daysSinceProgress</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'right', flex: 1, marginLeft: 8 }}>Días desde último avance</Text>
+              </View>
+
+              <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 4, fontStyle: 'italic' }}>
+                Operadores: +, -, *, /, %, ^ (potencia), (, )
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={async () => {
+                const validation = ScoreEngine.validateFormula(localFormula);
+                if (!validation.isValid) {
+                  Alert.alert('Fórmula no válida', validation.error || 'La fórmula ingresada no es válida.');
+                  return;
+                }
+                try {
+                  await settingsService.updateSettings({ scoreFormula: localFormula });
+                  Alert.alert('Guardado', 'Fórmula de prioridad actualizada correctamente.');
+                } catch (e) {
+                  console.error(e);
+                  Alert.alert('Error', 'No se pudo guardar la fórmula.');
+                }
+              }}
+              style={[styles.saveButton, { backgroundColor: '#FF9500', marginTop: 4 }]}
+            >
+              <Text style={styles.saveButtonText}>Guardar Fórmula</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -1242,5 +1344,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     textAlignVertical: 'top',
+  },
+  saveButton: {
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

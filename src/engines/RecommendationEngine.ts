@@ -52,7 +52,7 @@ export const RecommendationEngine = {
 
     // 3. Map candidates with scores
     const candidates: RecommendationCandidate[] = activePool.map(t => {
-      const baseScore = ScoreEngine.calculateScore(t, hourWeights);
+      const baseScore = ScoreEngine.calculateScore(t, hourWeights, userSettings.scoreFormula);
       const energyPenalty = EnergyEngine.calculatePenalty(t.energyType, recentEnergyTypes);
       const adjustedScore = EnergyEngine.applyEnergyAdjustment(baseScore, energyPenalty);
       const transitionBonus = TransitionEngine.calculateTransitionBonus(
@@ -75,17 +75,23 @@ export const RecommendationEngine = {
     });
 
     // 4. Group candidates by priority categories
-    const urgentFocus = candidates.filter(c => c.focusLocked && c.priority === 'high');
-    const normalFocus = candidates.filter(c => c.focusLocked && c.priority !== 'high');
+    const urgentFocus = candidates.filter(c => c.focusLocked && (c.priority === 'high' || c.priority === 'urgent'));
+    const normalFocus = candidates.filter(c => c.focusLocked && c.priority !== 'high' && c.priority !== 'urgent');
     const standardTasks = candidates.filter(c => !c.focusLocked);
 
     // Helper comparator implementing the 5 tie-breaking criteria
     const tieBreakerComparator = (a: RecommendationCandidate, b: RecommendationCandidate) => {
+      // 1. Primary sort: finalScore (higher score is better)
+      if (Math.abs(a.finalScore - b.finalScore) > 0.01) {
+        return b.finalScore - a.finalScore;
+      }
+
+      // 2. Secondary sort: whether it fits in the available time slot
       const aWeight = getTaskWeightLabel(a.estimatedHours, hourWeights).toLowerCase();
       const bWeight = getTaskWeightLabel(b.estimatedHours, hourWeights).toLowerCase();
 
-      const aStandardDuration = aWeight === 'sol' ? 90 : (aWeight === 'terra' ? 45 : 30);
-      const bStandardDuration = bWeight === 'sol' ? 90 : (bWeight === 'terra' ? 45 : 30);
+      const aStandardDuration = aWeight === 'astra' ? 120 : (aWeight === 'sol' ? 90 : (aWeight === 'terra' ? 45 : 30));
+      const bStandardDuration = bWeight === 'astra' ? 120 : (bWeight === 'sol' ? 90 : (bWeight === 'terra' ? 45 : 30));
 
       const aFits = aStandardDuration <= availableTime;
       const bFits = bStandardDuration <= availableTime;
@@ -94,16 +100,19 @@ export const RecommendationEngine = {
         return aFits ? -1 : 1;
       }
 
+      // 3. Transition bonus
       if (a.transitionBonus !== b.transitionBonus) {
         return b.transitionBonus - a.transitionBonus;
       }
 
+      // 4. Last completed task
       const aIsLast = a.id === lastCompletedTaskId;
       const bIsLast = b.id === lastCompletedTaskId;
       if (aIsLast !== bIsLast) {
         return aIsLast ? -1 : 1;
       }
 
+      // 5. Time elapsed since last activity
       const getDaysTimestamp = (t: Task) => {
         const d = new Date(t.lastProgress || t.updatedAt || t.createdAt);
         return d.getTime();
@@ -114,7 +123,7 @@ export const RecommendationEngine = {
         return aTime - bTime;
       }
 
-      return b.finalScore - a.finalScore;
+      return 0;
     };
 
     // Sort the buckets

@@ -14,9 +14,8 @@ export function useSettingsService() {
 
   const updateSettings = useCallback(async (updates: Partial<UserSettings>) => {
     const nextSettings = { ...store.userSettings, ...updates };
-    await SettingsRepository.save(nextSettings);
     await store.updateUserSettings(updates);
-    await recommendationService.triggerRecalculate();
+    await recommendationService.triggerRecalculate(undefined, nextSettings);
   }, [store, recommendationService]);
 
   return {

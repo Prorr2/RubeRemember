@@ -76,6 +76,15 @@ export const NotificationEngine = {
         };
       }
 
+      // Urgent priority task notification
+      if (recommendedTask.priority === Priority.URGENT) {
+        return {
+          shouldNotify: true,
+          message: `🚨 URGENTE: Debes realizar la tarea "${recommendedTask.title}" ahora.`,
+          type: 'TASK_ALERT'
+        };
+      }
+
       // High priority task notification
       if (recommendedTask.priority === Priority.HIGH) {
         return {

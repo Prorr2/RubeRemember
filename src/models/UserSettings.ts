@@ -38,6 +38,9 @@ export interface UserSettings {
 
   // Voice command assistant keywords
   voiceKeywords?: VoiceKeywords;
+
+  // Custom task priority score formula
+  scoreFormula?: string;
 }
 
 export const DEFAULT_VOICE_KEYWORDS: VoiceKeywords = {
@@ -71,6 +74,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   solDuration: 90,
   astraDuration: 20,
   voiceKeywords: DEFAULT_VOICE_KEYWORDS,
+  scoreFormula: '((hours * (priorityWeight * priorityWeight)) / daysRemaining) / 1000',
 };
 
 

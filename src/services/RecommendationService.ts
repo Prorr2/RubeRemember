@@ -1,19 +1,20 @@
 import { useCallback } from 'react';
 import { useRememberStore } from '../hooks/use-remember-store';
 import { CognitiveEngine } from '../engines/CognitiveEngine';
-import { Task, ItemType } from '../models/Item';
+import { Task, ItemType, UserSettings } from '../models/Item';
 
 export function useRecommendationService() {
   const store = useRememberStore();
 
-  const triggerRecalculate = useCallback(async (customItems?: any[]) => {
+  const triggerRecalculate = useCallback(async (customItems?: any[], customSettings?: UserSettings) => {
     try {
       const itemsToUse = customItems || store.items;
+      const settingsToUse = customSettings || store.userSettings;
       const { recommendation, updatedFocusTasks } = CognitiveEngine.generateRecommendation(
         itemsToUse,
         store.sessions,
         store.timeSlots,
-        store.userSettings,
+        settingsToUse,
         store.hourWeights
       );
 

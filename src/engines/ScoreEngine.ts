@@ -19,147 +19,122 @@ export function getTaskWeightLabel(estimatedHours: number | undefined, hourWeigh
 }
 
 export const ScoreEngine = {
-  calculateScore(task: Task, hourWeights: HourWeight[], currentTimeStr?: string): number {
+  validateFormula(formulaStr: string): { isValid: boolean; error?: string } {
+    if (!formulaStr.trim()) {
+      return { isValid: false, error: 'La fórmula no puede estar vacía.' };
+    }
+
+    const allowedVars = ['hours', 'priorityWeight', 'priority', 'daysRemaining', 'diffDays', 'focusLocked', 'daysSinceProgress'];
+    let formulaJs = formulaStr.replace(/\^/g, '**');
+
+    // Replace all allowed variables with 1
+    let testStr = formulaJs;
+    for (const v of allowedVars) {
+      testStr = testStr.replace(new RegExp('\\b' + v + '\\b', 'g'), '1');
+    }
+
+    // Remove whitespace
+    testStr = testStr.replace(/\s+/g, '');
+
+    // Allow only digits, dots, and basic math operators
+    const invalidCharRegex = /[^\d.+\-*/%()]/;
+    let finalTestStr = testStr.replace(/\*\*/g, '*');
+    if (invalidCharRegex.test(finalTestStr)) {
+      return { isValid: false, error: 'La fórmula contiene caracteres o variables no válidos.' };
+    }
+
+    try {
+      const evaluator = new Function(`return ${testStr}`);
+      const result = evaluator();
+      if (typeof result !== 'number' || isNaN(result)) {
+        return { isValid: false, error: 'La fórmula no devuelve un número válido.' };
+      }
+    } catch (e: any) {
+      return { isValid: false, error: 'Sintaxis de fórmula no válida: ' + e.message };
+    }
+
+    return { isValid: true };
+  },
+
+  evaluateCustomFormula(formulaStr: string, variables: Record<string, number>): number {
+    let formulaJs = formulaStr.replace(/\^/g, '**');
+    try {
+      const varKeys = Object.keys(variables);
+      const varValues = Object.values(variables);
+      const evaluator = new Function(...varKeys, `return ${formulaJs}`);
+      const res = evaluator(...varValues);
+      return typeof res === 'number' && !isNaN(res) ? res : 0;
+    } catch (e) {
+      console.warn('Error evaluating custom score formula:', e);
+      return 0;
+    }
+  },
+
+  calculateScore(task: Task, hourWeights: HourWeight[], customFormula?: string): number {
     if (task.completed || task.taskState === TaskState.COMPLETED) {
       return -9999; // Completed tasks do not participate
     }
 
-    let score = 0;
-
-    // 1. Prioridad
-    if (task.priority === Priority.HIGH) {
-      score += 60;
+    // 1. Prepare variables
+    let priorityWeight = 10;
+    let priorityVal = 1;
+    if (task.priority === Priority.URGENT) {
+      priorityWeight = 100;
+      priorityVal = 4;
+    } else if (task.priority === Priority.HIGH) {
+      priorityWeight = 60;
+      priorityVal = 3;
     } else if (task.priority === Priority.MEDIUM) {
-      score += 30;
-    } else {
-      score += 10; // Low
+      priorityWeight = 30;
+      priorityVal = 2;
     }
 
-    // 2. Urgencia (based on dueDate)
-    const todayStr = new Date().toISOString().split('T')[0];
+    const hours = (task.estimatedHours !== undefined && task.estimatedHours > 0) ? task.estimatedHours : 1;
+
+    let daysRemaining = 0.5; // Default if no deadline (treated like today)
+    let diffDays = 0; // Default if no deadline
     if (task.dueDate) {
-      if (task.dueDate < todayStr) {
-        score += 80; // Vencida
-      } else if (task.dueDate === todayStr) {
-        score += 40; // Hoy
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const due = new Date(task.dueDate);
+      due.setHours(0, 0, 0, 0);
+      
+      const diffTime = due.getTime() - today.getTime();
+      diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) {
+        daysRemaining = 0.2; // Tareas vencidas: divisor muy pequeño para amplificar enormemente el score
+      } else if (diffDays === 0) {
+        daysRemaining = 0.5; // Tareas para hoy: divisor pequeño para amplificar el score
       } else {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowStr = tomorrow.toISOString().split('T')[0];
-        
-        if (task.dueDate === tomorrowStr) {
-          score += 25; // Mañana
-        } else {
-          // Check if within this week (next 7 days)
-          const inAWeek = new Date();
-          inAWeek.setDate(inAWeek.getDate() + 7);
-          const inAWeekStr = inAWeek.toISOString().split('T')[0];
-          if (task.dueDate <= inAWeekStr) {
-            score += 15; // Esta semana
-          }
-        }
+        daysRemaining = diffDays;
       }
     }
 
-    // 3. Peso
-    const weightLabel = getTaskWeightLabel(task.estimatedHours, hourWeights);
-    if (weightLabel === 'terra') {
-      score += 20;
-    } else if (weightLabel === 'sol') {
-      score += 30;
-    } else if (weightLabel === 'astra') {
-      score += 40;
-    } else {
-      score += 10; // Luna / default
-    }
+    const focusLocked = task.focusLocked ? 1 : 0;
 
-    // 4. Focus Task
-    if (task.focusLocked) {
-      score += 50;
-    }
-
-    // 5. Tiempo sin avanzar (days since last progress/update/create)
     const lastProgressStr = task.lastProgress || task.updatedAt || task.createdAt;
     const lastProgressDate = new Date(lastProgressStr);
     const now = new Date();
     const diffTime = Math.abs(now.getTime() - lastProgressDate.getTime());
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const daysSinceProgress = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-    if (diffDays >= 30) {
-      score += 50; // Más de un mes
-    } else if (diffDays >= 14) {
-      score += 35; // Dos semanas
-    } else if (diffDays >= 7) {
-      score += 20; // Una semana
-    } else if (diffDays >= 3) {
-      score += 10; // Tres días
-    }
+    // 2. Evaluate formula
+    const formulaToUse = customFormula || '((hours * (priorityWeight * priorityWeight)) / daysRemaining) / 1000';
+    
+    const variables = {
+      hours,
+      priorityWeight,
+      priority: priorityVal,
+      daysRemaining,
+      diffDays,
+      focusLocked,
+      daysSinceProgress
+    };
 
-    // 6. Fecha límite (days remaining until dueDate)
-    if (task.dueDate) {
-      const dueDate = new Date(task.dueDate);
-      dueDate.setHours(0, 0, 0, 0);
-      const todayDate = new Date();
-      todayDate.setHours(0, 0, 0, 0);
-      
-      const diffTimeLimit = dueDate.getTime() - todayDate.getTime();
-      const diffDaysLimit = Math.round(diffTimeLimit / (1000 * 60 * 60 * 24));
-
-      if (diffDaysLimit < 0) {
-        score += 90; // Vencida
-      } else if (diffDaysLimit === 0) {
-        score += 60; // Hoy
-      } else if (diffDaysLimit <= 3) {
-        score += 35; // Tres días
-      } else if (diffDaysLimit <= 7) {
-        score += 20; // Una semana
-      } else if (diffDaysLimit <= 14) {
-        score += 10; // Dos semanas
-      }
-    }
-
-    // 7. Reminder (Virtual Reminder from Task date/time)
-    if (task.startDate || task.dueDate) {
-      const targetDate = task.startDate || task.dueDate;
-      if (targetDate && targetDate < todayStr) {
-        score += 100; // Reminder crítico (overdue)
-      } else if (targetDate === todayStr) {
-        // Check if active or future
-        const taskTime = task.time || '12:00';
-        let currentH = now.getHours();
-        let currentM = now.getMinutes();
-
-        if (currentTimeStr) {
-          const [h, m] = currentTimeStr.split(':').map(Number);
-          currentH = h;
-          currentM = m;
-        }
-
-        const [remH, remM] = taskTime.split(':').map(Number);
-        const currentTotal = currentH * 60 + currentM;
-        const remTotal = remH * 60 + remM;
-
-        if (currentTotal >= remTotal) {
-          // If task has high priority and is today, it can be critical
-          score += task.priority === Priority.HIGH ? 100 : 50; // Reminder crítico or activo
-        } else {
-          score += 10; // Reminder futuro
-        }
-      } else {
-        score += 10; // Reminder futuro
-      }
-    }
-
-    // 8. Estado
-    const state = task.taskState || TaskState.THINKING;
-    if (state === TaskState.BLOCKED || state === TaskState.WAITING) {
-      score -= 1000;
-    } else if (state === TaskState.IN_PROGRESS) {
-      score += 15;
-    } else if (state === TaskState.PREPARING) {
-      score += 5;
-    }
-
-    return score;
+    const evaluated = this.evaluateCustomFormula(formulaToUse, variables);
+    const rounded = Math.round(evaluated);
+    console.log(`[ScoreEngine] Task: "${task.title}", customFormula: "${customFormula}", formulaToUse: "${formulaToUse}", evaluated: ${evaluated}, rounded: ${rounded}`);
+    return rounded;
   }
 };

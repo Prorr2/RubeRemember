@@ -10,6 +10,9 @@ import {
   useColorScheme,
   Modal,
   Keyboard,
+  PanResponder,
+  Animated,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -347,7 +350,9 @@ const parseVoiceCommand = (text: string, voiceKeywords?: VoiceKeywords) => {
   // Priority
   let priority = Priority.MEDIUM;
   const prioVal = extracted['PRIORITY'] || '';
-  if (prioVal.includes('alta') || prioVal.includes('alto') || prioVal.includes('high') || prioVal.includes('urgente') || prioVal.includes('maxima')) {
+  if (prioVal.includes('urgente')) {
+    priority = Priority.URGENT;
+  } else if (prioVal.includes('alta') || prioVal.includes('alto') || prioVal.includes('high') || prioVal.includes('maxima')) {
     priority = Priority.HIGH;
   } else if (prioVal.includes('baja') || prioVal.includes('bajo') || prioVal.includes('low') || prioVal.includes('minima')) {
     priority = Priority.LOW;
@@ -447,6 +452,69 @@ const parseVoiceCommand = (text: string, voiceKeywords?: VoiceKeywords) => {
   };
 };
 
+interface EditableProgressBarProps {
+  task: Task;
+  colors: any;
+  onUpdate: (progress: number) => void;
+}
+
+const EditableProgressBar: React.FC<EditableProgressBarProps> = ({ task, colors, onUpdate }) => {
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const taskProgress = task.progress !== undefined && task.progress !== null
+    ? task.progress 
+    : (task.estimatedHours && task.estimatedHours > 0
+       ? Math.min(100, Math.round(((task.workedTime || 0) / (task.estimatedHours * 60)) * 100))
+       : 0);
+
+  const handlePress = (event: any) => {
+    event.stopPropagation();
+    if (containerWidth <= 0) return;
+    const x = event.nativeEvent.locationX;
+    const percentage = Math.min(100, Math.max(0, Math.round((x / containerWidth) * 100)));
+    onUpdate(percentage);
+  };
+
+  return (
+    <View style={{ marginTop: 8, gap: 4 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>Progreso</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 9, opacity: 0.7 }}>
+            ({task.workedTime || 0}m de {Math.round((task.estimatedHours || 0) * 60)}m est.)
+          </Text>
+        </View>
+        <Text style={{ color: '#34C759', fontSize: 11, fontWeight: '700' }}>{taskProgress}%</Text>
+      </View>
+      
+      <Pressable
+        onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+        onPress={handlePress}
+        style={{
+          height: 14,
+          justifyContent: 'center',
+          width: '100%',
+        }}
+      >
+        <View style={{
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: colors.backgroundSelected,
+          width: '100%',
+          overflow: 'hidden',
+        }}>
+          <View style={{
+            height: '100%',
+            width: `${taskProgress}%`,
+            backgroundColor: '#34C759',
+            borderRadius: 4
+          }} />
+        </View>
+      </Pressable>
+    </View>
+  );
+};
+
 export default function DecisionCenterScreen() {
   const store = useRememberStore();
   const router = useRouter();
@@ -459,6 +527,104 @@ export default function DecisionCenterScreen() {
   // Voice Command Assistant State
   const [isVoiceModalVisible, setIsVoiceModalVisible] = useState(false);
   const [voiceInputText, setVoiceInputText] = useState('');
+  const [isVoicePrivate, setIsVoicePrivate] = useState(false);
+
+  // Calendar Widget State
+  const [isCalendarExpanded, setIsCalendarExpanded] = useState(true);
+  const [calendarSearchQuery, setCalendarSearchQuery] = useState('');
+  const [selectedTaskForSlot, setSelectedTaskForSlot] = useState<Task | null>(null);
+
+  // Local state for dragging tasks
+  const [draggingTask, setDraggingTask] = useState<Task | null>(null);
+  const dragPosition = React.useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const [slotLayouts, setSlotLayouts] = useState<Record<string, { y: number, height: number }>>({});
+  const slotsContainerRef = React.useRef<View>(null);
+  const [slotsContainerY, setSlotsContainerY] = useState(0);
+
+  const todayStr = getLocalDateStr();
+
+  const handleToggleSlotReminders = () => {
+    const isEnabled = store.userSettings.notificationsEnabled;
+    Alert.alert(
+      'Configuración de Recordatorios',
+      `Las notificaciones para tus bloques de trabajo hoy están actualmente ${isEnabled ? 'ACTIVADAS' : 'DESACTIVADAS'}.\n\n¿Quieres cambiar esta configuración?`,
+      [
+        {
+          text: isEnabled ? 'Desactivar recordatorios' : 'Activar recordatorios',
+          onPress: async () => {
+            await store.updateUserSettings({ notificationsEnabled: !isEnabled });
+            Alert.alert('Guardado', `Recordatorios ${!isEnabled ? 'activados' : 'desactivadas'} para hoy.`);
+          }
+        },
+        { text: 'Cancelar', style: 'cancel' }
+      ]
+    );
+  };
+
+  const handleAssignToSlot = async (taskId: string, slotId: string) => {
+    await store.updateItem(taskId, { timeSlotId: slotId, dueDate: todayStr });
+    triggerRecalculate();
+  };
+
+  const handleUnassignFromSlot = async (taskId: string) => {
+    await store.updateItem(taskId, { timeSlotId: undefined });
+    triggerRecalculate();
+  };
+
+  // Filter tasks for available unassigned shelf
+  const unassignedTasks = useMemo(() => {
+    return store.getTasks().filter(t => !t.completed && !t.archived && !t.trash && !t.timeSlotId);
+  }, [store.items]);
+
+  const filteredUnassignedTasks = useMemo(() => {
+    return unassignedTasks.filter(t => t.title.toLowerCase().includes(calendarSearchQuery.toLowerCase()));
+  }, [unassignedTasks, calendarSearchQuery]);
+
+  // Setup PanResponder for dragging a task from the shelf
+  const createPanResponder = (task: Task) => {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt, gestureState) => {
+        setDraggingTask(task);
+        dragPosition.setValue({
+          x: gestureState.x0 - 75,
+          y: gestureState.y0 - 25
+        });
+        // Measure absolute slot container position on layout when drag begins
+        slotsContainerRef.current?.measureInWindow((x, y) => {
+          setSlotsContainerY(y);
+        });
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        dragPosition.setValue({
+          x: gestureState.moveX - 75,
+          y: gestureState.moveY - 25
+        });
+      },
+      onPanResponderRelease: async (evt, gestureState) => {
+        const relativeY = gestureState.moveY - 15 - slotsContainerY;
+        let matchedSlotId: string | null = null;
+        
+        for (const [slotId, layout] of Object.entries(slotLayouts)) {
+          if (relativeY >= layout.y && relativeY <= layout.y + layout.height) {
+            matchedSlotId = slotId;
+            break;
+          }
+        }
+        
+        if (matchedSlotId) {
+          await handleAssignToSlot(task.id, matchedSlotId);
+          speak(`Tarea asignada a la franja horaria.`);
+        }
+        
+        setDraggingTask(null);
+      },
+      onPanResponderTerminate: () => {
+        setDraggingTask(null);
+      }
+    });
+  };
 
   // Clear voice input when modal is closed
   React.useEffect(() => {
@@ -1006,6 +1172,12 @@ export default function DecisionCenterScreen() {
       `Selecciona la nueva prioridad para "${task.title}":`,
       [
         {
+          text: 'Urgente (URGENT)',
+          onPress: async () => {
+            await store.updateItem(task.id, { priority: Priority.URGENT });
+          },
+        },
+        {
           text: 'Alta (HIGH)',
           onPress: async () => {
             await store.updateItem(task.id, { priority: Priority.HIGH });
@@ -1080,6 +1252,270 @@ export default function DecisionCenterScreen() {
           </Pressable>
         </View>
 
+        {/* WIDGET CALENDARIO DE HOY (TIPO GOOGLE CALENDAR) */}
+        <View style={[styles.calendarWidgetCard, { backgroundColor: colors.backgroundElement }]}>
+          <View style={styles.calendarWidgetHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={[styles.calendarHeaderIcon, { backgroundColor: 'rgba(255, 45, 85, 0.15)' }]}>
+                <Ionicons name="calendar" size={18} color="#FF2D55" />
+              </View>
+              <View>
+                <Text style={[styles.calendarWidgetTitle, { color: colors.text }]}>Horario de Hoy</Text>
+                <Text style={{ fontSize: 11, color: colors.textSecondary }}>Organiza tus bloques de trabajo</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Pressable 
+                onPress={handleToggleSlotReminders} 
+                style={[styles.calendarHeaderBtn, { backgroundColor: colors.backgroundSelected }]}
+                android_ripple={{ color: colors.backgroundSelected }}
+              >
+                <Ionicons 
+                  name={store.userSettings.notificationsEnabled ? "notifications" : "notifications-off-outline"} 
+                  size={16} 
+                  color={store.userSettings.notificationsEnabled ? "#FF9500" : colors.textSecondary} 
+                />
+              </Pressable>
+              <Pressable 
+                onPress={() => setIsCalendarExpanded(!isCalendarExpanded)} 
+                style={[styles.calendarHeaderBtn, { backgroundColor: colors.backgroundSelected }]}
+                android_ripple={{ color: colors.backgroundSelected }}
+              >
+                <Ionicons name={isCalendarExpanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          </View>
+
+          {isCalendarExpanded && (
+            <View style={{ paddingHorizontal: 14, paddingBottom: 16 }}>
+              {/* Info banner if task is selected for tap assignment */}
+              {selectedTaskForSlot && (
+                <View style={[styles.tapSelectionBanner, { backgroundColor: 'rgba(255, 149, 0, 0.15)', borderColor: '#FF9500' }]}>
+                  <Ionicons name="information-circle-outline" size={16} color="#FF9500" />
+                  <Text style={{ color: colors.text, fontSize: 12, flex: 1, fontWeight: '500' }}>
+                    Seleccionado: <Text style={{ fontWeight: 'bold' }}>"{selectedTaskForSlot.title}"</Text>. Toca un bloque para asignarla.
+                  </Text>
+                  <Pressable onPress={() => setSelectedTaskForSlot(null)} style={{ padding: 2 }}>
+                    <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                  </Pressable>
+                </View>
+              )}
+
+              {/* Time Slots Grid */}
+              <Text style={[styles.calendarSubTitle, { color: colors.textSecondary }]}>BLOQUES DE TRABAJO</Text>
+              {store.timeSlots.length === 0 ? (
+                <View style={styles.calendarEmptySlots}>
+                  <Ionicons name="hourglass-outline" size={32} color={colors.textSecondary} style={{ opacity: 0.4 }} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginVertical: 6 }}>
+                    No tienes franjas horarias configuradas. Configúralas desde la sección "Mis Tareas".
+                  </Text>
+                </View>
+              ) : (
+                <View ref={slotsContainerRef} style={{ gap: 12, marginVertical: 8 }}>
+                  {store.timeSlots.map((slot, index) => {
+                    const slotTasks = store.getTasks().filter(t => !t.archived && !t.trash && t.timeSlotId === slot.id);
+                    const colorsPalette = ['#007AFF', '#34C759', '#FF9500', '#5856D6', '#FF2D55', '#AF52DE'];
+                    const slotColor = colorsPalette[index % colorsPalette.length];
+
+                    return (
+                      <View 
+                        key={slot.id} 
+                        style={styles.calendarRow}
+                        onLayout={(e) => {
+                          const { y, height } = e.nativeEvent.layout;
+                          setSlotLayouts(prev => ({ ...prev, [slot.id]: { y, height } }));
+                        }}
+                      >
+                        {/* Time label column */}
+                        <View style={styles.timeColumn}>
+                          <Text style={[styles.timeLabelText, { color: colors.textSecondary }]}>{slot.startTime}</Text>
+                          <View style={[styles.timeLabelLine, { backgroundColor: colors.backgroundSelected }]} />
+                        </View>
+
+                        {/* Slot block column */}
+                        <Pressable
+                          onPress={async () => {
+                            if (selectedTaskForSlot) {
+                              await handleAssignToSlot(selectedTaskForSlot.id, slot.id);
+                              setSelectedTaskForSlot(null);
+                            }
+                          }}
+                          style={[
+                            styles.slotBoxCard,
+                            { 
+                              backgroundColor: colors.background, 
+                              borderColor: selectedTaskForSlot ? '#FF9500' : colors.backgroundSelected,
+                              borderLeftColor: slotColor,
+                            },
+                            selectedTaskForSlot && { borderStyle: 'dashed', borderWidth: 1.5 }
+                          ]}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={[styles.slotNameText, { color: colors.text }]}>{slot.name}</Text>
+                            <Text style={{ fontSize: 11, color: slotColor, fontWeight: '700' }}>
+                              {slot.startTime} - {slot.endTime}
+                            </Text>
+                          </View>
+
+                          {/* Task List Inside Slot */}
+                          <View style={{ marginTop: 6, gap: 6 }}>
+                            {slotTasks.length === 0 ? (
+                              <Text style={{ fontSize: 11, color: colors.textSecondary, fontStyle: 'italic' }}>
+                                {selectedTaskForSlot ? '+ Toca para asignar aquí' : 'Sin tareas asignadas'}
+                              </Text>
+                            ) : (
+                              slotTasks.map(task => (
+                                <View 
+                                  key={task.id} 
+                                  style={[styles.calendarTaskChip, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}
+                                >
+                                  <Pressable 
+                                    onPress={() => store.toggleItemCompleted(task.id)}
+                                    style={{ padding: 2 }}
+                                  >
+                                    <Ionicons 
+                                      name={task.completed ? "checkmark-circle" : "ellipse-outline"} 
+                                      size={14} 
+                                      color={task.completed ? "#34C759" : colors.textSecondary} 
+                                    />
+                                  </Pressable>
+                                  <Pressable
+                                    onPress={() => {
+                                      Alert.alert(
+                                        'Iniciar Sesión',
+                                        `¿Deseas iniciar una sesión de enfoque de 30 minutos para "${task.title}"?`,
+                                        [
+                                          { text: 'Cancelar', style: 'cancel' },
+                                          { 
+                                            text: 'Iniciar 30 min', 
+                                            onPress: () => router.push({ pathname: '/session', params: { taskId: task.id, duration: '30' } }) 
+                                          }
+                                        ]
+                                      );
+                                    }}
+                                    style={{ flex: 1, paddingVertical: 2 }}
+                                  >
+                                    <Text 
+                                      numberOfLines={1}
+                                      style={[
+                                        styles.calendarTaskChipText, 
+                                        { color: colors.text },
+                                        task.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
+                                      ]}
+                                    >
+                                      {task.title}
+                                    </Text>
+                                  </Pressable>
+                                  <Pressable 
+                                    onPress={() => handleUnassignFromSlot(task.id)}
+                                    style={{ padding: 4, marginLeft: 'auto' }}
+                                  >
+                                    <Ionicons name="close-circle-outline" size={14} color="#FF3B30" />
+                                  </Pressable>
+                                </View>
+                              ))
+                            )}
+                          </View>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Tasks Shelf / Drawer for Scheduling */}
+              <View style={[styles.separator, { backgroundColor: colors.backgroundSelected, marginVertical: 12 }]} />
+              
+              <Text style={[styles.calendarSubTitle, { color: colors.textSecondary, marginBottom: 6 }]}>
+                TAREAS DISPONIBLES ({unassignedTasks.length})
+              </Text>
+              
+              <View style={[styles.shelfSearchContainer, { backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}>
+                <Ionicons name="search-outline" size={14} color={colors.textSecondary} />
+                <TextInput
+                  placeholder="Buscar tarea para programar..."
+                  placeholderTextColor={colors.textSecondary + '70'}
+                  value={calendarSearchQuery}
+                  onChangeText={setCalendarSearchQuery}
+                  style={[styles.shelfSearchInput, { color: colors.text }]}
+                />
+              </View>
+
+              {filteredUnassignedTasks.length === 0 ? (
+                <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 12, color: colors.textSecondary, fontStyle: 'italic' }}>
+                    {unassignedTasks.length === 0 ? 'No hay tareas sin asignar.' : 'Ninguna coincide con la búsqueda.'}
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView 
+                  nestedScrollEnabled={true}
+                  style={{ maxHeight: 185 }}
+                  contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 8 }}
+                >
+                  {filteredUnassignedTasks.map(task => {
+                    const isSelected = selectedTaskForSlot?.id === task.id;
+                    const responder = createPanResponder(task);
+                    
+                    return (
+                      <Animated.View
+                        key={task.id}
+                        {...responder.panHandlers}
+                        style={[
+                          styles.shelfTaskCard,
+                          { 
+                            backgroundColor: colors.background,
+                            borderColor: isSelected ? '#FF9500' : colors.backgroundSelected 
+                          },
+                          isSelected && { borderWidth: 1.5 }
+                        ]}
+                      >
+                        <Pressable
+                          onPress={() => {
+                            if (isSelected) {
+                              setSelectedTaskForSlot(null);
+                            } else {
+                              setSelectedTaskForSlot(task);
+                            }
+                          }}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                        >
+                          <Ionicons name="grid-outline" size={12} color={colors.textSecondary} style={{ opacity: 0.7 }} />
+                          <Text numberOfLines={1} style={[styles.shelfTaskText, { color: colors.text }]}>
+                            {task.title}
+                          </Text>
+                          <Pressable
+                            onPress={() => {
+                              if (store.timeSlots.length === 0) {
+                                Alert.alert('Sin franjas', 'Configura franjas horarias primero.');
+                                return;
+                              }
+                              Alert.alert(
+                                'Asignar Tarea',
+                                `Selecciona una franja horaria para "${task.title}":`,
+                                [
+                                  ...store.timeSlots.map(slot => ({
+                                    text: slot.name,
+                                    onPress: () => handleAssignToSlot(task.id, slot.id)
+                                  })),
+                                  { text: 'Cancelar', style: 'cancel' }
+                                ]
+                              );
+                            }}
+                            style={{ padding: 2, marginLeft: 2 }}
+                          >
+                            <Ionicons name="ellipsis-vertical" size={12} color={colors.textSecondary} />
+                          </Pressable>
+                        </Pressable>
+                      </Animated.View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+          )}
+        </View>
+
         {/* 1. RECOMMENDATION CARD */}
         <View style={[styles.sectionContainer]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>🎯 Recomendación Principal</Text>
@@ -1119,6 +1555,17 @@ export default function DecisionCenterScreen() {
                 <Text style={[styles.focusTitle, { color: colors.text }]} numberOfLines={2}>
                   {recommendedTask.title}
                 </Text>
+                
+                <EditableProgressBar
+                  task={recommendedTask}
+                  colors={colors}
+                  onUpdate={async (newProgress) => {
+                    await store.updateItems([recommendedTask.id], {
+                      progress: newProgress,
+                      taskState: newProgress === 100 ? TaskState.COMPLETED : recommendedTask.taskState
+                    });
+                  }}
+                />
                 
                 <Text style={[styles.recReason, { color: colors.text }]} numberOfLines={3}>
                   {primaryRec.reason}
@@ -1180,25 +1627,63 @@ export default function DecisionCenterScreen() {
                   </Text>
                 ))}
 
-                <View style={[styles.cardFooter, { marginTop: 12 }]}>
+                <View style={[styles.cardFooter, { marginTop: 12, flexDirection: 'row', gap: 10 }]}>
                   <Pressable
                     onPress={async () => {
-                      const reminder = store.getReminders().find(r => primaryRec.reason.includes(r.title));
-                      if (reminder) {
-                        await store.toggleItemCompleted(reminder.id);
+                      if (primaryRec.taskId) {
+                        await store.toggleItemCompleted(primaryRec.taskId);
                         triggerRecalculate();
                       } else {
-                        const activeRem = store.getTodayReminders().filter(r => !r.completed)[0];
-                        if (activeRem) {
-                          await store.toggleItemCompleted(activeRem.id);
+                        const reminder = store.getReminders().find(r => primaryRec.reason.includes(r.title));
+                        if (reminder) {
+                          await store.toggleItemCompleted(reminder.id);
                           triggerRecalculate();
+                        } else {
+                          const activeRem = store.getTodayReminders().filter(r => !r.completed)[0];
+                          if (activeRem) {
+                            await store.toggleItemCompleted(activeRem.id);
+                            triggerRecalculate();
+                          }
                         }
                       }
                     }}
-                    style={[styles.completeButton, { backgroundColor: '#007AFF', flex: 1, justifyContent: 'center' }]}
+                    style={[styles.completeButton, { backgroundColor: '#34C759', flex: 1, justifyContent: 'center', height: 40, borderRadius: 10 }]}
                   >
                     <Ionicons name="checkmark-done" size={16} color="#fff" />
-                    <Text style={styles.completeButtonText}>Marcar como Leído / Completado</Text>
+                    <Text style={styles.completeButtonText}>Completar</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={async () => {
+                      let rId: string | undefined = primaryRec.taskId;
+                      if (!rId) {
+                        const reminder = store.getReminders().find(r => primaryRec.reason.includes(r.title));
+                        if (reminder) {
+                          rId = reminder.id;
+                        } else {
+                          const activeRem = store.getTodayReminders().filter(r => !r.completed)[0];
+                          if (activeRem) {
+                            rId = activeRem.id;
+                          }
+                        }
+                      }
+                      if (rId) {
+                        const now = new Date();
+                        now.setMinutes(now.getMinutes() + 15);
+                        const hh = String(now.getHours()).padStart(2, '0');
+                        const mm = String(now.getMinutes()).padStart(2, '0');
+                        const newTime = `${hh}:${mm}`;
+                        await store.updateItem(rId, { time: newTime });
+                        triggerRecalculate();
+                        Alert.alert('Pospuesto', 'El recordatorio se ha pospuesto 15 minutos.');
+                      } else {
+                        Alert.alert('Error', 'No se encontró el recordatorio a posponer.');
+                      }
+                    }}
+                    style={[styles.completeButton, { backgroundColor: '#FF9500', flex: 1, justifyContent: 'center', height: 40, borderRadius: 10 }]}
+                  >
+                    <Ionicons name="timer-outline" size={16} color="#fff" />
+                    <Text style={styles.completeButtonText}>Posponer (15m)</Text>
                   </Pressable>
                 </View>
               </View>
@@ -1551,23 +2036,6 @@ export default function DecisionCenterScreen() {
               <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </Pressable>
 
-            {/* Franjas */}
-            <Pressable 
-              onPress={() => router.push('/slots')} 
-              style={[styles.listGroupItem, { borderBottomWidth: 1, borderBottomColor: colors.backgroundSelected }]}
-            >
-              <View style={styles.listGroupLeft}>
-                <View style={[styles.iconContainer, { backgroundColor: 'rgba(175, 82, 222, 0.1)' }]}>
-                  <Ionicons name="time" size={18} color="#AF52DE" />
-                </View>
-                <View>
-                  <Text style={[styles.listGroupTitle, { color: colors.text }]}>Franjas Horarias</Text>
-                  <Text style={[styles.listGroupSubtitle, { color: colors.textSecondary }]}>Bloques de tiempo recomendados</Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </Pressable>
-
             {/* Planes a Largo Plazo */}
             <Pressable 
               onPress={() => router.push('/plans')} 
@@ -1697,24 +2165,37 @@ export default function DecisionCenterScreen() {
                 </View>
               </Pressable>
 
-              <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
-                Presiona el icono de micrófono del teclado para dictar:
-              </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600', flex: 1 }}>
+                  Presiona el icono de micrófono del teclado para dictar:
+                </Text>
+                <Pressable
+                  onPress={() => setIsVoicePrivate(!isVoicePrivate)}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4 }}
+                >
+                  <Ionicons name={isVoicePrivate ? 'eye-off-outline' : 'eye-outline'} size={16} color={isVoicePrivate ? '#FF9500' : colors.textSecondary} />
+                  <Text style={{ fontSize: 11, color: isVoicePrivate ? '#FF9500' : colors.textSecondary, fontWeight: '600' }}>
+                    {isVoicePrivate ? 'Ocultar' : 'Mostrar'}
+                  </Text>
+                </Pressable>
+              </View>
 
               <TextInput
                 placeholder="Escribe o dicta aquí tu comando..."
                 placeholderTextColor={colors.textSecondary + '80'}
                 value={voiceInputText}
                 onChangeText={setVoiceInputText}
-                multiline={true}
-                numberOfLines={4}
+                multiline={!isVoicePrivate}
+                secureTextEntry={isVoicePrivate}
+                numberOfLines={isVoicePrivate ? 1 : 4}
                 autoFocus={true}
                 style={[
                   styles.voiceTextInput, 
                   { 
                     color: colors.text, 
                     backgroundColor: colors.background, 
-                    borderColor: colors.backgroundSelected 
+                    borderColor: colors.backgroundSelected,
+                    minHeight: isVoicePrivate ? 44 : 100
                   }
                 ]}
               />
@@ -1739,6 +2220,22 @@ export default function DecisionCenterScreen() {
             <Ionicons name="close" size={18} color={colors.textSecondary} />
           </Pressable>
         </View>
+      )}
+
+      {draggingTask && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.floatingDragItem,
+            {
+              transform: dragPosition.getTranslateTransform(),
+              backgroundColor: '#FF2D55',
+            }
+          ]}
+        >
+          <Ionicons name="grid-outline" size={14} color="#fff" />
+          <Text numberOfLines={1} style={styles.floatingDragText}>{draggingTask.title}</Text>
+        </Animated.View>
       )}
     </SafeAreaView>
   );
@@ -2240,5 +2737,165 @@ const styles = StyleSheet.create({
   undoBtnText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  // Calendar Widget Styles
+  calendarWidgetCard: {
+    borderRadius: 20,
+    paddingTop: 16,
+    overflow: 'hidden',
+  },
+  calendarWidgetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  calendarHeaderIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  calendarWidgetTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  calendarHeaderBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tapSelectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 8,
+    marginBottom: 12,
+  },
+  calendarSubTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  calendarEmptySlots: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarConfigBtn: {
+    backgroundColor: '#FF2D55',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 6,
+  },
+  calendarRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  timeColumn: {
+    width: 48,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: 8,
+  },
+  timeLabelText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  timeLabelLine: {
+    width: 2,
+    flex: 1,
+    marginTop: 8,
+    borderRadius: 1,
+  },
+  slotBoxCard: {
+    flex: 1,
+    borderRadius: 14,
+    borderLeftWidth: 4,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 65,
+  },
+  slotNameText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  calendarTaskChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderWidth: 1,
+    gap: 6,
+  },
+  calendarTaskChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  separator: {
+    height: 1,
+    width: '100%',
+  },
+  shelfSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    height: 36,
+    gap: 6,
+    marginBottom: 8,
+  },
+  shelfSearchInput: {
+    fontSize: 12,
+    flex: 1,
+    padding: 0,
+  },
+  shelfTaskCard: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    minHeight: 46,
+    justifyContent: 'center',
+  },
+  shelfTaskText: {
+    fontSize: 13,
+    fontWeight: '600',
+    maxWidth: 130,
+  },
+  floatingDragItem: {
+    position: 'absolute',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    zIndex: 99999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+  },
+  floatingDragText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    maxWidth: 160,
   },
 });

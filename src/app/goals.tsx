@@ -752,6 +752,26 @@ export default function GoalsScreen() {
                           {formatDisplayDate(goal.startDate)} — {formatDisplayDate(goal.endDate)}
                         </Text>
                       </View>
+                      {totalCount > 0 && (
+                        <View style={styles.progressBarWrapper}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={[styles.progressText, { color: colors.textSecondary }]}>
+                              Progreso: {Math.round(progress * 100)}%
+                            </Text>
+                          </View>
+                          <View style={[styles.progressBarBG, { backgroundColor: colors.backgroundSelected }]}>
+                            <View
+                              style={[
+                                styles.progressBarFill,
+                                {
+                                  width: `${progress * 100}%`,
+                                  backgroundColor: '#FF2D55',
+                                },
+                              ]}
+                            />
+                          </View>
+                        </View>
+                      )}
                     </View>
                   </View>
 

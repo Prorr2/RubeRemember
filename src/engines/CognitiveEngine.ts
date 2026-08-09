@@ -1,4 +1,4 @@
-import { Task, Reminder as ReminderV2, Session, UserSettings, HourWeight, Item, ItemType } from '../models/Item';
+import { Task, Reminder as ReminderV2, Session, UserSettings, HourWeight, Item, ItemType, Priority } from '../models/Item';
 import { TimeSlot } from '../models/TimeSlot';
 import { Recommendation } from '../models/Recommendation';
 import { ContextEngine, CognitiveContext } from './ContextEngine';
@@ -30,12 +30,21 @@ export const CognitiveEngine = {
       overrideCurrentTime
     );
 
+    const tasks = items.filter(i => i.type === ItemType.TASK && !i.trash) as Task[];
+    const updatedFocusTasks = FocusEngine.calculateFocusTasks(
+      tasks,
+      hourWeights,
+      userSettings.maxFocusTasks,
+      userSettings.scoreFormula
+    );
+
     // 2. Check for active/critical Reminders
     if (context.activeReminders.length > 0) {
       const primaryReminder = context.activeReminders[0];
       
       const recommendation: Recommendation = {
         id: `rec-rem-${Math.random().toString(36).substring(7)}`,
+        taskId: primaryReminder.id,
         score: 1000, // Top priority score
         reason: `Recordatorio pendiente: "${primaryReminder.title}"`,
         reasonsSecondary: [
@@ -53,17 +62,9 @@ export const CognitiveEngine = {
 
       return {
         recommendation,
-        updatedFocusTasks: context.focusTasks
+        updatedFocusTasks
       };
     }
-
-    // 3. Update Focus Tasks using FocusEngine
-    const tasks = items.filter(i => i.type === ItemType.TASK && !i.trash) as Task[];
-    const updatedFocusTasks = FocusEngine.calculateFocusTasks(
-      tasks,
-      hourWeights,
-      userSettings.maxFocusTasks
-    );
 
     // 4. Select the best recommendation and alternatives using RecommendationEngine
     const lastCompletedTask = context.lastCompletedTaskId 
@@ -122,7 +123,7 @@ export const CognitiveEngine = {
     );
 
     // 7. Calculate adjustments & details for the recommendation object
-    const baseScore = ScoreEngine.calculateScore(selectedTask, hourWeights);
+    const baseScore = ScoreEngine.calculateScore(selectedTask, hourWeights, userSettings.scoreFormula);
     const energyPenalty = EnergyEngine.calculatePenalty(selectedTask.energyType, context.recentEnergyTypes);
     const transitionBonus = TransitionEngine.calculateTransitionBonus(
       selectedTask,
@@ -152,10 +153,12 @@ export const CognitiveEngine = {
     confidence = Math.max(10, Math.min(100, confidence));
 
     // Map priority level
-    let priorityLevel: 'ALTA' | 'MEDIA' | 'BAJA' = 'MEDIA';
-    if (selectedTask.priority === 'high') {
+    let priorityLevel: 'URGENTE' | 'ALTA' | 'MEDIA' | 'BAJA' = 'MEDIA';
+    if (selectedTask.priority === Priority.URGENT) {
+      priorityLevel = 'URGENTE';
+    } else if (selectedTask.priority === Priority.HIGH) {
       priorityLevel = 'ALTA';
-    } else if (selectedTask.priority === 'low') {
+    } else if (selectedTask.priority === Priority.LOW) {
       priorityLevel = 'BAJA';
     }
 

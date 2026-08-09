@@ -14,8 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr, EnergyType, Memo, Plan } from '@/hooks/use-remember-store';
+import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr, EnergyType, Memo, Plan, Task, TaskState } from '@/hooks/use-remember-store';
 import { Colors, Spacing } from '@/constants/theme';
+import { ScoreEngine, getTaskWeightLabel } from '@/engines/ScoreEngine';
 
 export default function ItemEditorScreen() {
   const store = useRememberStore();
@@ -70,6 +71,70 @@ export default function ItemEditorScreen() {
 
   // Calendar State
   const [calendarMonth, setCalendarMonth] = useState(new Date());
+  
+  // Privacy Mode State
+  const [isPrivate, setIsPrivate] = useState(false);
+
+  // Real-time score calculator for the task being created/edited
+  const currentTaskScore = useMemo(() => {
+    if (itemType !== ItemType.TASK) return 0;
+    
+    const hoursNum = parseFloat(estimatedHours.trim().replace(',', '.'));
+    const parsedHours = isNaN(hoursNum) || hoursNum <= 0 ? undefined : hoursNum;
+
+    // Construct a temporary task object from form state
+    const tempTask: Task = {
+      id: params.id || 'temp-id',
+      type: ItemType.TASK,
+      title: title || 'Sin Título',
+      description,
+      priority,
+      estimatedHours: parsedHours,
+      dueDate: taskDueDate || undefined,
+      startDate: taskStartDate || undefined,
+      time: editingItem?.time || undefined,
+      energyType,
+      completed: editingItem?.completed || false,
+      archived: editingItem?.archived || false,
+      trash: editingItem?.trash || false,
+      focusLocked: editingItem?.focusLocked || false,
+      taskState: editingItem?.taskState || TaskState.THINKING,
+      goalId: selectedGoalId || undefined,
+      phaseId: selectedPhaseId || undefined,
+      createdAt: editingItem?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      comments: (editingItem as any)?.comments || [],
+      tags: tagsInput.split(',').map(t => t.trim()).filter(Boolean),
+      favourite: favourite,
+    };
+
+    return ScoreEngine.calculateScore(tempTask, store.hourWeights, store.userSettings?.scoreFormula);
+  }, [itemType, title, description, priority, estimatedHours, taskDueDate, taskStartDate, energyType, selectedGoalId, selectedPhaseId, editingItem, store.hourWeights, store.userSettings?.scoreFormula]);
+
+  // Retrieve the task in the database that has the highest score
+  const highestScoreTaskInfo = useMemo(() => {
+    const tasks = store.getTasks().filter(t => !t.completed && !t.archived && !t.trash && t.id !== params.id);
+    let maxScoreTask: Task | null = null;
+    let maxScore = -Infinity;
+
+    tasks.forEach(t => {
+      const s = ScoreEngine.calculateScore(t, store.hourWeights, store.userSettings?.scoreFormula);
+      if (s > maxScore) {
+        maxScore = s;
+        maxScoreTask = t;
+      }
+    });
+
+    if (!maxScoreTask) return null;
+
+    const weightLabel = getTaskWeightLabel((maxScoreTask as Task).estimatedHours, store.hourWeights);
+    return {
+      title: (maxScoreTask as Task).title,
+      priority: (maxScoreTask as Task).priority,
+      weight: weightLabel,
+      score: maxScore,
+    };
+  }, [store.items, store.hourWeights, params.id, store.userSettings?.scoreFormula]);
 
   // Load editing item if exists
   useEffect(() => {
@@ -514,13 +579,25 @@ export default function ItemEditorScreen() {
 
         {/* Core details card */}
         <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Título</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 0 }]}>Título</Text>
+            <Pressable
+              onPress={() => setIsPrivate(!isPrivate)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4 }}
+            >
+              <Ionicons name={isPrivate ? 'eye-off-outline' : 'eye-outline'} size={18} color={isPrivate ? '#FF9500' : colors.textSecondary} />
+              <Text style={{ fontSize: 12, color: isPrivate ? '#FF9500' : colors.textSecondary, fontWeight: '600' }}>
+                {isPrivate ? 'Oculto' : 'Público'}
+              </Text>
+            </Pressable>
+          </View>
           <TextInput
             placeholder="¿Qué quieres hacer o recordar?"
             placeholderTextColor={colors.textSecondary + '80'}
             value={title}
             onChangeText={setTitle}
-            multiline={true}
+            multiline={!isPrivate}
+            secureTextEntry={isPrivate}
             style={[styles.textInput, { color: colors.text, textAlignVertical: 'top' }]}
           />
 
@@ -532,11 +609,58 @@ export default function ItemEditorScreen() {
             placeholderTextColor={colors.textSecondary + '80'}
             value={description}
             onChangeText={setDescription}
-            multiline
-            numberOfLines={3}
-            style={[styles.textInput, { color: colors.text, minHeight: 60, textAlignVertical: 'top' }]}
+            multiline={!isPrivate}
+            secureTextEntry={isPrivate}
+            numberOfLines={isPrivate ? 1 : 3}
+            style={[styles.textInput, { color: colors.text, minHeight: isPrivate ? 40 : 60, textAlignVertical: 'top' }]}
           />
         </View>
+
+        {/* Score Calculator Card */}
+        {itemType === ItemType.TASK && (
+          <View style={[styles.card, { backgroundColor: colors.backgroundElement, borderLeftWidth: 4, borderLeftColor: '#FFD700' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={{ fontSize: 13, color: colors.textSecondary, fontWeight: '600' }}>Score en tiempo real</Text>
+                <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text, marginTop: 4 }}>
+                  ⭐ {currentTaskScore}
+                </Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ fontSize: 11, color: colors.textSecondary, fontStyle: 'italic' }}>
+                  {isEditing ? 'Puntuación Editada' : 'Puntuación Inicial'}
+                </Text>
+              </View>
+            </View>
+
+            {highestScoreTaskInfo && (
+              <>
+                <View style={[styles.separator, { backgroundColor: colors.backgroundSelected, marginVertical: 10 }]} />
+                <View>
+                  <Text style={{ fontSize: 12, color: colors.textSecondary, fontWeight: '700' }}>
+                    🏆 Tarea actual con mayor score en la lista:
+                  </Text>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#FF9500', marginTop: 4 }}>
+                    {highestScoreTaskInfo.title}
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <View style={{ backgroundColor: 'rgba(255, 149, 0, 0.15)', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 4 }}>
+                      <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '700' }}>
+                        ⭐ Score: {highestScoreTaskInfo.score}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                      Prioridad: <Text style={{ fontWeight: '700', color: colors.text }}>{highestScoreTaskInfo.priority.toUpperCase()}</Text>
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                      Peso: <Text style={{ fontWeight: '700', color: colors.text }}>{highestScoreTaskInfo.weight.toUpperCase()}</Text>
+                    </Text>
+                  </View>
+                </View>
+              </>
+            )}
+          </View>
+        )}
 
         {/* Task details */}
         {itemType === ItemType.TASK && (
@@ -547,20 +671,20 @@ export default function ItemEditorScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Prioridad</Text>
                   <View style={styles.priorityRow}>
-                    {([Priority.LOW, Priority.MEDIUM, Priority.HIGH] as Priority[]).map((p) => (
+                    {([Priority.LOW, Priority.MEDIUM, Priority.HIGH, Priority.URGENT] as Priority[]).map((p) => (
                       <Pressable
                         key={p}
                         onPress={() => setPriority(p)}
                         style={[
                           styles.priorityButton,
                           priority === p && {
-                            backgroundColor: p === Priority.HIGH ? '#FF3B30' : p === Priority.MEDIUM ? '#FF9500' : '#34C759',
+                            backgroundColor: p === Priority.URGENT ? '#C20000' : p === Priority.HIGH ? '#FF3B30' : p === Priority.MEDIUM ? '#FF9500' : '#34C759',
                           },
                           priority !== p && { backgroundColor: colors.backgroundSelected },
                         ]}
                       >
                         <Text style={[styles.priorityText, { color: priority === p ? '#fff' : colors.text }]}>
-                          {p === Priority.HIGH ? 'Alta' : p === Priority.MEDIUM ? 'Media' : 'Baja'}
+                          {p === Priority.URGENT ? 'Urgente' : p === Priority.HIGH ? 'Alta' : p === Priority.MEDIUM ? 'Media' : 'Baja'}
                         </Text>
                       </Pressable>
                     ))}

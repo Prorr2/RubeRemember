@@ -5,9 +5,10 @@ export const FocusEngine = {
   calculateFocusTasks(
     tasks: Task[],
     hourWeights: HourWeight[],
-    maxFocus: number
+    maxFocus: number,
+    scoreFormula?: string
   ): Task[] {
-    // 1. Filter out invalid tasks
+    // 1. Filter out eligible tasks for scoring
     const eligibleTasks = tasks.filter(t => 
       !t.completed && 
       !t.archived && 
@@ -16,33 +17,31 @@ export const FocusEngine = {
       t.taskState !== 'WAITING'
     );
 
-    // 2. Identify already focused tasks (manually locked or pre-existing focus)
-    const currentFocused = eligibleTasks.filter(t => t.focusLocked);
-
-    // 3. If we have already reached or exceeded the limit, return current focused
-    if (currentFocused.length >= maxFocus) {
-      return currentFocused.slice(0, maxFocus);
-    }
-
-    // 4. Otherwise, fill the remaining slots from the highest scoring eligible tasks
-    const remainingSlots = maxFocus - currentFocused.length;
-    const nonFocusedEligible = eligibleTasks.filter(t => !t.focusLocked);
-
-    // Score them (temporarily, without adding the focus bonus since they are not focused yet)
-    const scoredNonFocused = nonFocusedEligible.map(t => ({
+    // 2. Score eligible tasks based on their current focus status
+    const scoredTasks = eligibleTasks.map(t => ({
       task: t,
-      score: ScoreEngine.calculateScore({ ...t, focusLocked: false }, hourWeights)
+      score: ScoreEngine.calculateScore(t, hourWeights, scoreFormula)
     }));
 
-    // Sort descending by score, then by creation date to break ties
-    scoredNonFocused.sort((a, b) => b.score - a.score || b.task.createdAt.localeCompare(a.task.createdAt));
+    // 3. Sort descending by score, then by creation date to break ties
+    scoredTasks.sort((a, b) => b.score - a.score || b.task.createdAt.localeCompare(a.task.createdAt));
 
-    // Select top candidates to fill slots and mark them as focusLocked
-    const promoted = scoredNonFocused.slice(0, remainingSlots).map(item => ({
-      ...item.task,
-      focusLocked: true
-    }));
+    // 4. Map over ALL tasks to assign the correct focusLocked value (self-healing)
+    const updatedTasks = tasks.map(t => {
+      const isEligible = !t.completed && !t.archived && !t.trash && t.taskState !== 'BLOCKED' && t.taskState !== 'WAITING';
+      if (!isEligible) {
+        return { ...t, focusLocked: false };
+      }
+      
+      const eligibleRank = scoredTasks.findIndex(item => item.task.id === t.id);
+      const shouldBeFocused = eligibleRank !== -1 && eligibleRank < maxFocus;
+      
+      return {
+        ...t,
+        focusLocked: shouldBeFocused
+      };
+    });
 
-    return [...currentFocused, ...promoted];
+    return updatedTasks;
   }
 };

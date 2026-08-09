@@ -8,4 +8,6 @@ export interface Session {
   completed: boolean;
   notes?: string;
   createdAt: string; // ISO date string
+  nextStep?: string;
+  progress?: number;
 }

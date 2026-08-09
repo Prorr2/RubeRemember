@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { NotificationService } from '@/services/notification-service';
 
-import { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
+import { Item, ItemType, Priority, Task, TaskState, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
 import { Goal, Phase } from '@/models/Goal';
 import { TimeSlot } from '@/models/TimeSlot';
 import { ReminderList, ListItem } from '@/models/ReminderList';
@@ -16,7 +16,7 @@ export { Comment } from '@/models/Comment';
 export { Goal, Phase } from '@/models/Goal';
 export { TimeSlot } from '@/models/TimeSlot';
 export { ReminderList, ListItem } from '@/models/ReminderList';
-export { Item, ItemType, Priority, Task, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
+export { Item, ItemType, Priority, Task, TaskState, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
 
 
 
@@ -505,7 +505,10 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         setRecommendations(newRecs);
       }
       if (JSON.stringify(newSettings) !== JSON.stringify(userSettings)) {
+        console.log('[Store] Updating userSettings state from:', JSON.stringify(userSettings), 'to:', JSON.stringify(newSettings));
         setUserSettings(newSettings);
+      } else {
+        console.log('[Store] saveDatabaseState userSettings check skipped (equal stringified settings)');
       }
       if (JSON.stringify(newStats) !== JSON.stringify(statistics)) {
         setStatistics(newStats);
@@ -1965,6 +1968,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     }
 
     const endTime = new Date().toISOString();
+    console.log('[Store] endSession params:', { sessionId, realDuration, completed, notes, taskUpdates });
 
     nextSessions = nextSessions.map((s) => {
       if (s.id === sessionId) {
@@ -1974,6 +1978,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           realDuration,
           completed,
           notes: notes !== undefined ? notes : s.notes,
+          nextStep: taskUpdates?.nextStep || s.nextStep,
+          progress: taskUpdates?.progress !== undefined ? taskUpdates.progress : s.progress,
         };
       }
       return s;

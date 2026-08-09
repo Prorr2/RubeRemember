@@ -7,11 +7,13 @@ import {
   Alert,
   TextInput,
   useColorScheme,
-  ActivityIndicator
+  ActivityIndicator,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 
 import { useRememberStore, Task, TaskState } from '@/hooks/use-remember-store';
 import { useSessionService } from '@/services/SessionService';
@@ -54,9 +56,85 @@ export default function SessionScreen() {
   const [terraProgressPercentage, setTerraProgressPercentage] = useState('');
   const [solNextStep, setSolNextStep] = useState('');
   const [notes, setNotes] = useState('');
+  const [isTaskCompleted, setIsTaskCompleted] = useState(false);
 
   // Timer Ref
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const targetTimeRef = useRef<number | null>(null);
+  const appStateRef = useRef(AppState.currentState);
+  const sessionNotificationIdRef = useRef<string | null>(null);
+
+  const cancelSessionNotification = async () => {
+    if (sessionNotificationIdRef.current) {
+      await Notifications.cancelScheduledNotificationAsync(sessionNotificationIdRef.current).catch(() => {});
+      sessionNotificationIdRef.current = null;
+    }
+  };
+
+  const scheduleSessionNotification = async (seconds: number) => {
+    await cancelSessionNotification();
+    if (seconds > 0) {
+      try {
+        const id = await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '⏱️ ¡Sesión de Enfoque Terminada!',
+            body: `Has completado tu sesión de enfoque en "${task?.title || 'tu tarea'}". ¡Buen trabajo!`,
+            sound: true,
+            vibrate: [0, 500, 250, 500],
+          },
+          trigger: {
+            seconds,
+          },
+        });
+        sessionNotificationIdRef.current = id;
+      } catch (err) {
+        console.warn('Failed to schedule focus session notification:', err);
+      }
+    }
+  };
+
+  const taskWeight = task ? getTaskWeightLabel(task.estimatedHours, store.hourWeights).toLowerCase() : 'luna';
+
+  // Initialize completed state and input fields based on task
+  useEffect(() => {
+    if (task) {
+      setIsTaskCompleted(task.completed || false);
+      
+      if (task.nextStep) {
+        setSolNextStep(task.nextStep);
+      } else {
+        setSolNextStep('');
+      }
+
+      const computedProgress = task.progress !== undefined && task.progress !== null
+        ? task.progress 
+        : (task.estimatedHours && task.estimatedHours > 0
+           ? Math.min(100, Math.round(((task.workedTime || 0) / (task.estimatedHours * 60)) * 100))
+           : 0);
+      setTerraProgressPercentage(String(computedProgress));
+    }
+  }, [task]);
+
+  const handleProgressChange = (text: string) => {
+    setTerraProgressPercentage(text);
+    const newProgress = parseInt(text, 10);
+    if (!isNaN(newProgress)) {
+      if (newProgress === 100) {
+        setIsTaskCompleted(true);
+      } else {
+        setIsTaskCompleted(false);
+      }
+    }
+  };
+
+  const handleToggleCompleted = (completed: boolean) => {
+    setIsTaskCompleted(completed);
+    if (completed) {
+      setTerraProgressPercentage('100');
+    } else if (!completed && terraProgressPercentage === '100') {
+      setTerraProgressPercentage('90');
+    }
+  };
 
   // Initialize Session in DB
   useEffect(() => {
@@ -78,20 +156,61 @@ export default function SessionScreen() {
     initSession();
   }, [task]);
 
-  // Countdown timer logic
+  // AppState foreground listener to recalculate time elapsed in background
   useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (
+        appStateRef.current.match(/inactive|background/) &&
+        nextAppState === 'active'
+      ) {
+        if (isRunning && targetTimeRef.current) {
+          const remaining = Math.max(0, Math.ceil((targetTimeRef.current - Date.now()) / 1000));
+          setTimeLeft(remaining);
+          if (remaining <= 0) {
+            handleTimerComplete();
+          }
+        }
+      }
+      appStateRef.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isRunning]);
+
+  // Countdown timer logic using absolute system clock and notifications
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+
     if (isRunning && timeLeft > 0 && !isInitializing && completedState === 'working') {
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
-      }, 1000);
-    } else if (timeLeft === 0 && completedState === 'working') {
-      handleTimerComplete();
+      // Set absolute target end time
+      targetTimeRef.current = Date.now() + timeLeft * 1000;
+
+      // Schedule background notification
+      scheduleSessionNotification(timeLeft);
+
+      // Start tick loop
+      interval = setInterval(() => {
+        if (targetTimeRef.current) {
+          const remaining = Math.max(0, Math.ceil((targetTimeRef.current - Date.now()) / 1000));
+          setTimeLeft(remaining);
+          if (remaining <= 0) {
+            if (interval) clearInterval(interval);
+            handleTimerComplete();
+          }
+        }
+      }, 500);
+    } else {
+      // Paused or finished, cancel notification
+      cancelSessionNotification();
+      targetTimeRef.current = null;
     }
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (interval) clearInterval(interval);
     };
-  }, [isRunning, timeLeft, isInitializing, completedState]);
+  }, [isRunning, isInitializing, completedState]);
 
   const handleTimerComplete = () => {
     setIsRunning(false);
@@ -115,6 +234,7 @@ export default function SessionScreen() {
             if (sessionId) {
               await sessionService.cancelSession(sessionId);
             }
+            await cancelSessionNotification();
             router.back();
           }
         }
@@ -124,6 +244,7 @@ export default function SessionScreen() {
 
   const handleForceComplete = () => {
     setIsRunning(false);
+    cancelSessionNotification();
     setCompletedState('questions');
   };
 
@@ -131,32 +252,27 @@ export default function SessionScreen() {
     if (!sessionId || !task) return;
 
     const actualDurationMinutes = Math.max(1, Math.round((initialDurationSeconds - timeLeft) / 60));
-    const weightLabel = getTaskWeightLabel(task.estimatedHours, store.hourWeights).toLowerCase();
 
     try {
       // 1. Process questionnaire responses
       let taskUpdates: Partial<Task> = {};
-      let isTaskFullyCompleted = false;
+      let isTaskFullyCompleted = isTaskCompleted;
 
-      if (weightLabel === 'terra') {
-        const newProgress = parseInt(terraProgressPercentage, 10);
-        if (!isNaN(newProgress) && newProgress >= 0 && newProgress <= 100) {
-          taskUpdates.progress = newProgress;
-          if (newProgress === 100) {
-            isTaskFullyCompleted = true;
-          }
+      const newProgress = parseInt(terraProgressPercentage, 10);
+      if (!isNaN(newProgress) && newProgress >= 0 && newProgress <= 100) {
+        taskUpdates.progress = newProgress;
+        if (newProgress === 100) {
+          isTaskFullyCompleted = true;
         }
-        taskUpdates.lastProgress = new Date().toISOString();
-      } else if (weightLabel === 'sol') {
-        if (solNextStep.trim()) {
-          taskUpdates.nextStep = solNextStep.trim();
-        }
-        taskUpdates.lastProgress = new Date().toISOString();
-      } else if (weightLabel === 'luna') {
-        isTaskFullyCompleted = true; // Luna tasks are intended to be completed
-      } else if (weightLabel === 'astra') {
-        // Astra updates streaks, not percentage
-        taskUpdates.lastSession = new Date().toISOString();
+      }
+      taskUpdates.lastProgress = new Date().toISOString();
+
+      if (solNextStep.trim()) {
+        taskUpdates.nextStep = solNextStep.trim();
+      }
+
+      if (isTaskFullyCompleted) {
+        taskUpdates.progress = 100;
       }
 
       // 2. End session and apply task updates in a single atomic transaction
@@ -182,8 +298,6 @@ export default function SessionScreen() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const taskWeight = task ? getTaskWeightLabel(task.estimatedHours, store.hourWeights).toLowerCase() : 'luna';
-
   if (isInitializing || !task) {
     return (
       <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -201,6 +315,17 @@ export default function SessionScreen() {
             SESIÓN DE ENFOQUE • {taskWeight.toUpperCase()}
           </Text>
           <Text style={[styles.title, { color: colors.text }]}>{task.title}</Text>
+
+          {task.nextStep ? (
+            <View style={[styles.nextStepCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
+              <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>
+                🎯 Próximo Hito Planificado:
+              </Text>
+              <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600', textAlign: 'center' }}>
+                "{task.nextStep}"
+              </Text>
+            </View>
+          ) : null}
 
           <View style={styles.timerCircle}>
             <Text style={[styles.timerText, { color: colors.text }]}>{formatTime(timeLeft)}</Text>
@@ -232,32 +357,55 @@ export default function SessionScreen() {
             Registra los resultados de esta sesión para entrenar tu motor cognitivo.
           </Text>
 
-          {taskWeight === 'terra' && (
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Progreso de la Tarea (%)</Text>
-              <TextInput
-                placeholder="Ej: 50"
-                placeholderTextColor={colors.textSecondary + '70'}
-                keyboardType="number-pad"
-                value={terraProgressPercentage}
-                onChangeText={setTerraProgressPercentage}
-                style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
-              />
-            </View>
-          )}
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>Progreso de la Tarea (%)</Text>
+            <TextInput
+              placeholder="Ej: 50"
+              placeholderTextColor={colors.textSecondary + '70'}
+              keyboardType="number-pad"
+              value={terraProgressPercentage}
+              onChangeText={handleProgressChange}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
+            />
+          </View>
 
-          {taskWeight === 'sol' && (
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Próximo Hito / Paso concreto</Text>
-              <TextInput
-                placeholder="Ej: Programar módulo de facturación"
-                placeholderTextColor={colors.textSecondary + '70'}
-                value={solNextStep}
-                onChangeText={setSolNextStep}
-                style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
-              />
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>Próximo Hito / Paso concreto</Text>
+            <TextInput
+              placeholder="Ej: Programar módulo de facturación"
+              placeholderTextColor={colors.textSecondary + '70'}
+              value={solNextStep}
+              onChangeText={setSolNextStep}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
+            />
+          </View>
+
+          {/* Completion Status Selector */}
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>¿Has completado la tarea?</Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
+              <Pressable
+                onPress={() => handleToggleCompleted(true)}
+                style={[
+                  styles.optionBtn,
+                  { borderColor: colors.backgroundSelected, backgroundColor: isTaskCompleted ? '#34C759' : colors.backgroundElement }
+                ]}
+              >
+                <Ionicons name="checkmark-circle-outline" size={16} color={isTaskCompleted ? '#fff' : colors.textSecondary} />
+                <Text style={[styles.optionBtnText, { color: isTaskCompleted ? '#fff' : colors.text }]}>Sí, terminada</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => handleToggleCompleted(false)}
+                style={[
+                  styles.optionBtn,
+                  { borderColor: colors.backgroundSelected, backgroundColor: !isTaskCompleted ? '#FF9500' : colors.backgroundElement }
+                ]}
+              >
+                <Ionicons name="time-outline" size={16} color={!isTaskCompleted ? '#fff' : colors.textSecondary} />
+                <Text style={[styles.optionBtnText, { color: !isTaskCompleted ? '#fff' : colors.text }]}>No, seguiré luego</Text>
+              </Pressable>
             </View>
-          )}
+          </View>
 
           <View style={styles.inputGroup}>
             <Text style={[styles.label, { color: colors.text }]}>Notas de la sesión (Opcional)</Text>
@@ -392,5 +540,28 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  optionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 12,
+  },
+  optionBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  nextStepCard: {
+    marginVertical: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
