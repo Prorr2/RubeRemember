@@ -1224,19 +1224,25 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   // Backup and Restore
   const exportBackupData = useCallback(async (): Promise<string> => {
-    const db: DatabaseV2 = {
-      version: 2,
+    const db: DatabaseV3 = {
+      version: 3,
       items,
       goals,
       lists,
       timeSlots,
+      activityCategories,
+      hourWeights,
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
       settings: {
         proximityDays,
         slotSeparationMinutes,
       },
     };
     return JSON.stringify(db, null, 2);
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes]);
+  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
 
   const importBackupData = useCallback(async (jsonString: string): Promise<{
     success: boolean;
@@ -1266,7 +1272,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     }
 
     try {
-      let importedDb: DatabaseV2;
+      let importedDb: DatabaseV3;
       
       // If it contains legacy keys, migrate it!
       if (parsed['rube_remember_reminders_v1'] !== undefined) {
@@ -1288,8 +1294,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
         AsyncStorage.getItem = originalGetItem; // restore original
       } else {
-        // V2 backup
-        importedDb = parsed as DatabaseV2;
+        // V2/V3 backup
+        importedDb = parsed as DatabaseV3;
       }
 
       if (importedDb.items) {
@@ -1316,14 +1322,44 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         setSlotSeparationMinutesState(importedDb.settings.slotSeparationMinutes);
         importedKeys.push('Separación de Franjas');
       }
+      if (importedDb.activityCategories) {
+        setActivityCategories(importedDb.activityCategories);
+        importedKeys.push('Categorías de Actividades');
+      }
+      if (importedDb.hourWeights) {
+        setHourWeights(importedDb.hourWeights);
+        importedKeys.push('Pesos de Bloques');
+      }
+      if (importedDb.sessions) {
+        setSessions(importedDb.sessions);
+        importedKeys.push('Sesiones de Enfoque');
+      }
+      if (importedDb.recommendations) {
+        setRecommendations(importedDb.recommendations);
+        importedKeys.push('Recomendaciones');
+      }
+      if (importedDb.userSettings) {
+        setUserSettings(importedDb.userSettings);
+        importedKeys.push('Ajustes de Usuario');
+      }
+      if (importedDb.statistics) {
+        setStatistics(importedDb.statistics);
+        importedKeys.push('Estadísticas');
+      }
 
       // Persist the imported data
-      const mergedDb: DatabaseV2 = {
-        version: 2,
+      const mergedDb: DatabaseV3 = {
+        version: 3,
         items: importedDb.items || items,
         goals: importedDb.goals || goals,
         lists: importedDb.lists || lists,
         timeSlots: importedDb.timeSlots || timeSlots,
+        activityCategories: importedDb.activityCategories || activityCategories,
+        hourWeights: importedDb.hourWeights || hourWeights,
+        sessions: importedDb.sessions || sessions,
+        recommendations: importedDb.recommendations || recommendations,
+        userSettings: importedDb.userSettings || userSettings,
+        statistics: importedDb.statistics || statistics,
         settings: {
           proximityDays: importedDb.settings?.proximityDays ?? proximityDays,
           slotSeparationMinutes: importedDb.settings?.slotSeparationMinutes ?? slotSeparationMinutes,
@@ -1343,7 +1379,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         importedKeys: [],
       };
     }
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes]);
+  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
 
   const setProximityDays = useCallback(async (days: number) => {
     setProximityDaysState(days);

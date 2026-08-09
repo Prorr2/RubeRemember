@@ -1220,14 +1220,17 @@ export default function DecisionCenterScreen() {
           <Text style={[styles.title, { color: colors.text }]}>RubeRemember</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable onPress={() => router.push('/backup')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
+            <Ionicons name="arrow-up-circle-outline" size={20} color={colors.text} />
+          </Pressable>
           <Pressable onPress={() => router.push('/search')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
-            <Ionicons name="search-outline" size={22} color={colors.text} />
+            <Ionicons name="search-outline" size={20} color={colors.text} />
           </Pressable>
           <Pressable onPress={() => router.push('/statistics')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
-            <Ionicons name="bar-chart-outline" size={22} color={colors.text} />
+            <Ionicons name="bar-chart-outline" size={20} color={colors.text} />
           </Pressable>
           <Pressable onPress={() => router.push('/settings')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
-            <Ionicons name="settings-outline" size={22} color={colors.text} />
+            <Ionicons name="settings-outline" size={20} color={colors.text} />
           </Pressable>
         </View>
       </View>
@@ -2717,19 +2720,19 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   greeting: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   title: {
-    fontSize: 26,
+    fontSize: 20,
     fontWeight: '900',
   },
   iconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
   },

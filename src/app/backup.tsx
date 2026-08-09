@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
   Text,
+  TextInput,
+  ScrollView,
   Pressable,
   Alert,
   useColorScheme,
@@ -11,12 +13,24 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
-import * as DocumentPicker from 'expo-document-picker';
+import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { useRememberStore } from '@/hooks/use-remember-store';
+import { useRememberStore, Task } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+
+const getDefaultServerUrl = (): string => {
+  try {
+    const hostUri = Constants.expoConfig?.hostUri || '';
+    if (hostUri && /^\d+\.\d+\.\d+\.\d+/.test(hostUri)) {
+      const host = hostUri.split(':')[0];
+      if (host) return `http://${host}:3001`;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return 'http://192.168.1.100:3001';
+};
 
 export default function BackupScreen() {
   const store = useRememberStore();
@@ -25,98 +39,303 @@ export default function BackupScreen() {
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
   const colors = Colors[scheme];
 
-  const [loading, setLoading] = useState(false);
+  const [serverUrl, setServerUrl] = useState(getDefaultServerUrl);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [previousIps, setPreviousIps] = useState<string[]>([]);
 
-  const handleExportBackup = async () => {
-    setLoading(true);
-    try {
-      const backupStr = await store.exportBackupData();
-      const fileUri = FileSystem.cacheDirectory + 'rube_remember_backup.json';
-      
-      await FileSystem.writeAsStringAsync(fileUri, backupStr, {
-        encoding: 'utf8',
-      });
+  // Connection state (mobile stays connected so the computer can request data)
+  const [connected, setConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const storeRef = useRef(store);
+  storeRef.current = store;
 
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/json',
-          dialogTitle: 'Exportar Copia de Seguridad a Google Drive',
-          UTI: 'public.json',
-        });
-      } else {
-        Alert.alert('Error', 'El servicio de compartir no está disponible.');
+  // Load saved serverUrl and history on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const savedUrl = await AsyncStorage.getItem('rube_sync_server_url');
+        if (savedUrl) {
+          setServerUrl(savedUrl);
+        }
+        const savedIps = await AsyncStorage.getItem('rube_sync_previous_ips');
+        if (savedIps) {
+          setPreviousIps(JSON.parse(savedIps));
+        }
+      } catch (e) {
+        // ignore
       }
+    })();
+  }, []);
+
+  const saveIpToHistory = async (ip: string) => {
+    try {
+      const saved = await AsyncStorage.getItem('rube_sync_previous_ips');
+      let list: string[] = saved ? JSON.parse(saved) : [];
+      const cleanIp = ip.trim();
+      if (!cleanIp) return;
+      // Remove if exists to move to top
+      list = list.filter(item => item !== cleanIp);
+      list.unshift(cleanIp);
+      list = list.slice(0, 5); // Max 5 history items
+      setPreviousIps(list);
+      await AsyncStorage.setItem('rube_sync_previous_ips', JSON.stringify(list));
     } catch (e) {
-      console.error(e);
-      Alert.alert('Error', 'No se pudo exportar la copia de seguridad.');
-    } finally {
-      setLoading(false);
+      console.warn('Error saving IP to history:', e);
     }
   };
 
-  const handleImportBackup = async () => {
+  // While connected, poll the server:
+  // 1. Check if the computer asks for data.
+  // 2. Check if the computer has sent outgoing data to load.
+  useEffect(() => {
+    if (!connected) return;
+    const baseUrl = serverUrl.trim().replace(/\/+$/, '');
+    if (!baseUrl) return;
+
+    let alertReqShown = false;
+    let alertOutShown = false;
+    let isPolling = false;
+
+    const checkRequests = async () => {
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        // 1. Check if PC wants to receive mobile data
+        if (!alertReqShown && !alertOutShown) {
+          const res = await fetch(`${baseUrl}/api/request`);
+          const data = await res.json().catch(() => ({}));
+          if (data.request) {
+            alertReqShown = true;
+            Alert.alert(
+              'Solicitud del ordenador',
+              'El ordenador quiere recibir tus datos de RubeRemember. ¿Permitir el envío?',
+              [
+                {
+                  text: 'Rechazar',
+                  style: 'cancel',
+                  onPress: () => {
+                    alertReqShown = false;
+                  },
+                },
+                {
+                  text: 'Permitir y Enviar',
+                  onPress: async () => {
+                    try {
+                      const json = await storeRef.current.exportBackupData();
+                      await fetch(`${baseUrl}/api/backup`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: json,
+                      });
+                    } catch (e) {
+                      console.error(e);
+                      Alert.alert('Error', 'No se pudieron enviar los datos al ordenador.');
+                    } finally {
+                      alertReqShown = false;
+                    }
+                  },
+                },
+              ],
+              { cancelable: false }
+            );
+          }
+        }
+
+        // 2. Check if PC sent data for mobile
+        if (!alertOutShown && !alertReqShown) {
+          const res = await fetch(`${baseUrl}/api/outgoing`);
+          const data = await res.json().catch(() => ({}));
+          if (data && data.data) {
+            alertOutShown = true;
+            const incomingDb = data.data;
+            const itemCount = Array.isArray(incomingDb.items) ? incomingDb.items.length : 0;
+
+            Alert.alert(
+              'Confirmar Recepción',
+              `Se han recibido datos del ordenador (${itemCount} elementos). ¿Aceptar e importarlos directamente?`,
+              [
+                {
+                  text: 'Rechazar',
+                  style: 'cancel',
+                  onPress: () => {
+                    alertOutShown = false;
+                  },
+                },
+                {
+                  text: 'Recibir y Sobrescribir',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setSyncLoading(true);
+                    try {
+                      // Compare tasks before overwriting
+                      const currentTasks = storeRef.current.items.filter(item => item.type === 'TASK') as Task[];
+                      const incomingTasks = (incomingDb.items || []).filter((item: any) => item.type === 'TASK') as Task[];
+
+                      const modifiedTitles: string[] = [];
+
+                      // Additions and edits
+                      for (const incomingTask of incomingTasks) {
+                        const localTask = currentTasks.find(t => t.id === incomingTask.id);
+                        if (!localTask) {
+                          modifiedTitles.push(`➕ ${incomingTask.title} (Nueva)`);
+                        } else {
+                          const isDifferent =
+                            localTask.title !== incomingTask.title ||
+                            localTask.completed !== incomingTask.completed ||
+                            localTask.progress !== incomingTask.progress ||
+                            localTask.priority !== incomingTask.priority ||
+                            localTask.description !== incomingTask.description ||
+                            localTask.dueDate !== incomingTask.dueDate ||
+                            localTask.startDate !== incomingTask.startDate;
+
+                          if (isDifferent) {
+                            let changes = [];
+                            if (localTask.completed !== incomingTask.completed) {
+                              changes.push(incomingTask.completed ? 'Completada' : 'Reabierta');
+                            }
+                            if (localTask.title !== incomingTask.title) {
+                              changes.push('Título editado');
+                            }
+                            if (localTask.progress !== incomingTask.progress) {
+                              changes.push(`Progreso: ${incomingTask.progress || 0}%`);
+                            }
+                            const changeStr = changes.length > 0 ? ` (${changes.join(', ')})` : ' (Editada)';
+                            modifiedTitles.push(`✏️ ${incomingTask.title}${changeStr}`);
+                          }
+                        }
+                      }
+
+                      // Deletions
+                      for (const localTask of currentTasks) {
+                        const incomingTask = incomingTasks.find(t => t.id === localTask.id);
+                        if (!incomingTask) {
+                          modifiedTitles.push(`🗑️ ${localTask.title} (Eliminada)`);
+                        }
+                      }
+
+                      const result = await storeRef.current.importBackupData(JSON.stringify(incomingDb));
+                      if (result.success) {
+                        const message = modifiedTitles.length > 0
+                          ? `Datos del ordenador importados correctamente.\n\nTareas modificadas:\n${modifiedTitles.join('\n')}`
+                          : 'Datos del ordenador importados correctamente (sin cambios detectados en tareas).';
+                        Alert.alert('Sincronización Completada', message);
+                      } else {
+                        Alert.alert('Error', 'No se pudieron importar los datos: ' + result.errors.join(', '));
+                      }
+                    } catch (err) {
+                      console.error(err);
+                      Alert.alert('Error', 'Error al procesar la importación.');
+                    } finally {
+                      setSyncLoading(false);
+                      alertOutShown = false;
+                    }
+                  },
+                },
+              ],
+              { cancelable: false }
+            );
+          }
+        }
+      } catch (e) {
+        // Keep checking silently
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    checkRequests();
+    const id = setInterval(checkRequests, 3000);
+    return () => clearInterval(id);
+  }, [connected, serverUrl]);
+
+  const handleConnect = async () => {
+    const baseUrl = serverUrl.trim().replace(/\/+$/, '');
+    if (!baseUrl) {
+      Alert.alert('Error', 'Introduce la dirección del ordenador (ej: http://192.168.1.10:3001).');
+      return;
+    }
+    setIsConnecting(true);
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        copyToCacheDirectory: true,
+      // Save manually configured server URL
+      await AsyncStorage.setItem('rube_sync_server_url', baseUrl);
+      await saveIpToHistory(baseUrl);
+
+      const res = await fetch(baseUrl + '/api/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       });
-
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        return;
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        setConnected(true);
+        Alert.alert('Conectado', 'Conectado al servidor del ordenador. Ya puedes recibir peticiones de datos.');
+      } else {
+        Alert.alert('Error', 'El servidor no aceptó la conexión.');
       }
-
-      setLoading(true);
-      const fileUri = result.assets[0].uri;
-      
-      // Basic extension check to guide the user if they select the wrong file
-      if (result.assets[0].name && !result.assets[0].name.toLowerCase().endsWith('.json')) {
-        setLoading(false);
-        Alert.alert('Error', 'Por favor selecciona un archivo con extensión .json');
-        return;
-      }
-
-      const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: 'utf8',
-      });
-
-      setLoading(false);
-      Alert.alert(
-        'Confirmar Restauración',
-        '¿Desea restaurar esta copia de seguridad? Esto sobrescribirá todos tus recordatorios y comentarios actuales.',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Restaurar y Sobrescribir',
-            style: 'destructive',
-            onPress: async () => {
-              setLoading(true);
-              const result = await store.importBackupData(fileContent);
-              setLoading(false);
-              if (result.success) {
-                if (result.errors.length > 0) {
-                  Alert.alert(
-                    'Restauración Parcial',
-                    `Se importaron con éxito: ${result.importedKeys.join(', ')}.\n\nSin embargo, ocurrieron algunos errores:\n- ${result.errors.join('\n- ')}`,
-                    [{ text: 'OK', onPress: () => router.back() }]
-                  );
-                } else {
-                  Alert.alert('Éxito', 'La copia de seguridad se ha restaurado con éxito.', [
-                    { text: 'OK', onPress: () => router.back() }
-                  ]);
-                }
-              } else {
-                const errorStr = result.errors.length > 0 ? `\n\nDetalles:\n- ${result.errors.join('\n- ')}` : '';
-                Alert.alert('Error', 'El archivo JSON seleccionado no es válido o no contiene datos que se puedan restaurar.' + errorStr);
-              }
-            },
-          },
-        ]
-      );
     } catch (e) {
-      setLoading(false);
       console.error(e);
-      const errMsg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Error', `No se pudo importar la copia de seguridad. Detalle: ${errMsg}`);
+      Alert.alert('Error', 'No se pudo conectar con el ordenador. Comprueba la dirección y la red Wi-Fi.');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      const baseUrl = serverUrl.trim().replace(/\/+$/, '');
+      if (baseUrl) {
+        await fetch(baseUrl + '/api/disconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+    setConnected(false);
+  };
+
+  const handleSendToComputer = async () => {
+    try {
+      setSyncLoading(true);
+      const baseUrl = serverUrl.trim().replace(/\/+$/, '');
+      if (!baseUrl) {
+        setSyncLoading(false);
+        Alert.alert('Error', 'Introduce la dirección del ordenador (ej: http://192.168.1.10:3001).');
+        return;
+      }
+
+      // Save manually configured server URL
+      await AsyncStorage.setItem('rube_sync_server_url', baseUrl);
+      await saveIpToHistory(baseUrl);
+
+      const json = await store.exportBackupData();
+      const res = await fetch(baseUrl + '/api/backup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json,
+      });
+      const data = await res.json().catch(() => ({}));
+      setSyncLoading(false);
+
+      if (data.ok) {
+        Alert.alert(
+          'Enviado',
+          `Base de datos enviada a ${baseUrl}.`
+        );
+      } else {
+        Alert.alert('Error', 'El servidor no confirmó la recepción: ' + (data.error || ''));
+      }
+    } catch (e) {
+      setSyncLoading(false);
+      console.error(e);
+      Alert.alert(
+        'Error',
+        'No se pudo conectar con el ordenador. Comprueba que ambos estén en la misma red Wi-Fi y que la app web esté abierta.'
+      );
     }
   };
 
@@ -132,42 +351,103 @@ export default function BackupScreen() {
       </View>
 
       {/* Main Content */}
-      <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
-          <View style={styles.iconContainer}>
-            <Ionicons name="cloud-upload-outline" size={80} color="#FF9500" />
-          </View>
-          
-          <Text style={[styles.title, { color: colors.text }]}>Resguardar tus Datos</Text>
-          <Text style={[styles.description, { color: colors.textSecondary }]}>
-            Exporta tus recordatorios y comentarios en un archivo JSON. Puedes guardarlo en Google Drive, enviarlo por chat o guardarlo localmente.
-          </Text>
-
-          {loading ? (
-            <ActivityIndicator size="large" color="#FF9500" style={styles.loader} />
-          ) : (
-            <View style={styles.btnGroup}>
-              {/* Export */}
-              <Pressable
-                onPress={handleExportBackup}
-                style={[styles.actionBtn, { backgroundColor: '#FF9500' }]}
-              >
-                <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
-                <Text style={styles.actionBtnText}>Exportar a Google Drive / JSON</Text>
-              </Pressable>
-
-              {/* Import */}
-              <Pressable
-                onPress={handleImportBackup}
-                style={[styles.actionBtn, { backgroundColor: colors.backgroundSelected, borderWidth: 1, borderColor: '#FF9500' }]}
-              >
-                <Ionicons name="cloud-download-outline" size={20} color="#FF9500" />
-                <Text style={[styles.actionBtnText, { color: '#FF9500' }]}>Importar desde JSON</Text>
-              </Pressable>
+          {/* Local network sync */}
+          <View style={styles.syncSection}>
+            <View style={styles.syncHeader}>
+              <Ionicons name="swap-horizontal" size={22} color="#34C759" />
+              <Text style={[styles.syncTitle, { color: colors.text }]}>Sincronización por Red Local</Text>
             </View>
-          )}
+            <Text style={[styles.syncDescription, { color: colors.textSecondary }]}>
+              Envía o recibe el JSON completo entre el móvil y el ordenador usando el servidor localhost de la app web.
+            </Text>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Dirección del ordenador</Text>
+            <TextInput
+              style={[styles.serverInput, { backgroundColor: colors.background, borderColor: colors.backgroundSelected, color: colors.text }]}
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              placeholder="http://192.168.1.10:3001"
+              placeholderTextColor={colors.textSecondary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+
+            {previousIps.length > 0 && (
+              <View style={styles.previousIpsContainer}>
+                <Text style={[styles.previousIpsLabel, { color: colors.textSecondary }]}>IPs conectadas anteriormente (toca para seleccionar):</Text>
+                <View style={styles.ipsRow}>
+                  {previousIps.map((ip, idx) => (
+                    <Pressable
+                      key={idx}
+                      style={[styles.ipPill, { backgroundColor: colors.backgroundSelected, borderColor: colors.backgroundSelected }]}
+                      onPress={() => setServerUrl(ip)}
+                    >
+                      <Text style={[styles.ipPillText, { color: colors.text }]}>{ip.replace(/^https?:\/\//, '')}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Connection status: mobile stays connected so the computer can request data */}
+            <View
+              style={[
+                styles.connectionBox,
+                {
+                  backgroundColor: connected ? 'rgba(52,199,89,0.12)' : colors.background,
+                  borderColor: connected ? '#34C759' : colors.backgroundSelected,
+                },
+              ]}
+            >
+              <View style={styles.connectionRow}>
+                <View style={[styles.connectionDot, { backgroundColor: connected ? '#34C759' : colors.textSecondary }]} />
+                <Text style={[styles.connectionText, { color: connected ? '#34C759' : colors.textSecondary }]}>
+                  {connected ? 'Conectado al servidor del ordenador' : 'Desconectado'}
+                </Text>
+              </View>
+              <Text style={[styles.connectionHint, { color: colors.textSecondary }]}>
+                {connected
+                  ? 'El ordenador ya puede solicitar tus datos con el botón "Solicitar datos" de la app web. Se te pedirá confirmación antes de enviarlos.'
+                  : 'Conéctate para que el ordenador pueda solicitar tu información.'}
+              </Text>
+              {isConnecting ? (
+                <ActivityIndicator size="small" color="#34C759" style={styles.loader} />
+              ) : connected ? (
+                <Pressable
+                  onPress={handleDisconnect}
+                  style={[styles.actionBtn, { backgroundColor: colors.backgroundSelected, borderWidth: 1, borderColor: '#FF3B30' }]}
+                >
+                  <Ionicons name="link-outline" size={20} color="#FF3B30" />
+                  <Text style={[styles.actionBtnText, { color: '#FF3B30' }]}>Desconectar</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={handleConnect}
+                  style={[styles.actionBtn, { backgroundColor: '#0A84FF' }]}
+                >
+                  <Ionicons name="link-outline" size={20} color="#FFFFFF" />
+                  <Text style={styles.actionBtnText}>Conectar al servidor</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {syncLoading ? (
+              <ActivityIndicator size="small" color="#34C759" style={styles.loader} />
+            ) : (
+              <Pressable
+                onPress={handleSendToComputer}
+                style={[styles.actionBtn, { backgroundColor: '#34C759', width: '100%' }]}
+              >
+                <Ionicons name="arrow-up-circle-outline" size={20} color="#FFFFFF" />
+                <Text style={styles.actionBtnText}>Enviar al Ordenador</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -206,27 +486,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 4,
   },
-  iconContainer: {
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  description: {
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginBottom: 30,
-  },
   loader: {
     marginVertical: 20,
-  },
-  btnGroup: {
-    width: '100%',
-    gap: 16,
   },
   actionBtn: {
     flexDirection: 'row',
@@ -241,5 +502,94 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  syncSection: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  syncHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  syncTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+  },
+  syncDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+  },
+  serverInput: {
+    width: '100%',
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    marginBottom: 16,
+  },
+  previousIpsContainer: {
+    width: '100%',
+    marginBottom: 16,
+    alignItems: 'flex-start',
+  },
+  previousIpsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  ipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  ipPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ipPillText: {
+    fontSize: 13,
+  },
+  connectionBox: {
+    width: '100%',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  connectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  connectionDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  connectionText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  connectionHint: {
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
   },
 });
