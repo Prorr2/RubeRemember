@@ -176,13 +176,14 @@ interface RememberStore {
 
   // Lists
   lists: ReminderList[];
-  addList: (name: string) => Promise<void>;
+  addList: (name: string, parentId?: string) => Promise<string>;
   updateList: (id: string, name: string) => Promise<void>;
   deleteList: (id: string) => Promise<void>;
   toggleListCollapse: (id: string) => Promise<void>;
   addListItem: (listId: string, text: string, imageUri?: string) => Promise<string>;
   updateListItem: (listId: string, itemId: string, text: string, imageUri?: string) => Promise<void>;
   deleteListItem: (listId: string, itemId: string) => Promise<void>;
+  toggleListItemCompleted: (listId: string, itemId: string) => Promise<void>;
   setListAlarm: (listId: string, time: string | null) => Promise<void>;
   setListItemAlarm: (listId: string, itemId: string, time: string | null) => Promise<void>;
 
@@ -1613,15 +1614,34 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await MigrationEngine.saveDatabase(db);
   }, [items, goals, timeSlots, proximityDays, slotSeparationMinutes]);
 
-  const addList = useCallback(async (name: string) => {
+  const addList = useCallback(async (name: string, parentId?: string) => {
+    const newId = `list-${Math.random().toString(36).substring(7)}`;
     const newList: ReminderList = {
-      id: `list-${Math.random().toString(36).substring(7)}`,
+      id: newId,
       name: name.trim(),
       items: [],
       collapsed: false,
       createdAt: new Date().toISOString(),
+      parentId,
     };
     await saveLists([...lists, newList]);
+    return newId;
+  }, [lists, saveLists]);
+
+  const toggleListItemCompleted = useCallback(async (listId: string, itemId: string) => {
+    const updated = lists.map((l) => {
+      if (l.id === listId) {
+        const updatedItems = l.items.map((it) => {
+          if (it.id === itemId) {
+            return { ...it, completed: !it.completed };
+          }
+          return it;
+        });
+        return { ...l, items: updatedItems };
+      }
+      return l;
+    });
+    await saveLists(updated);
   }, [lists, saveLists]);
 
   const updateList = useCallback(async (id: string, name: string) => {
@@ -1978,7 +1998,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           realDuration,
           completed,
           notes: notes !== undefined ? notes : s.notes,
-          nextStep: taskUpdates?.nextStep || s.nextStep,
+          nextStep: taskUpdates?.nextStep !== undefined ? taskUpdates.nextStep : s.nextStep,
           progress: taskUpdates?.progress !== undefined ? taskUpdates.progress : s.progress,
         };
       }
@@ -2160,6 +2180,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         addListItem,
         updateListItem,
         deleteListItem,
+        toggleListItemCompleted,
         setListAlarm,
         setListItemAlarm,
         activityCategories,

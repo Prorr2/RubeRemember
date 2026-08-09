@@ -85,11 +85,40 @@ export default function ListsScreen() {
   };
 
   const handleCreateList = async () => {
-    if (!newListName.trim()) {
+    const trimmed = newListName.trim();
+    if (!trimmed) {
       Alert.alert('Nombre vacío', 'Por favor escribe un nombre para la lista.');
       return;
     }
-    await store.addList(newListName);
+
+    if (trimmed.includes('::')) {
+      const parts = trimmed.split('::').map(p => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const parentName = parts[0];
+        const childName = parts[1];
+
+        // Find existing parent list that doesn't have a parent itself
+        let parentList = store.lists.find(
+          (l) => l.name.toLowerCase() === parentName.toLowerCase() && !l.parentId
+        );
+
+        let parentId: string;
+        if (parentList) {
+          parentId = parentList.id;
+        } else {
+          // Create parent list
+          parentId = await store.addList(parentName);
+        }
+
+        // Create child list
+        await store.addList(childName, parentId);
+        setNewListName('');
+        return;
+      }
+    }
+
+    // Normal list creation
+    await store.addList(trimmed);
     setNewListName('');
   };
 
@@ -242,15 +271,21 @@ export default function ListsScreen() {
           </View>
 
           {/* List display backlog */}
-          {store.lists.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="list" size={64} color={colors.textSecondary} style={{ opacity: 0.5 }} />
-              <Text style={{ color: colors.textSecondary, marginTop: 8 }}>No tienes listas creadas.</Text>
-            </View>
-          ) : (
-            store.lists.map((list) => {
+          {(() => {
+            const rootLists = store.lists.filter(list => !list.parentId);
+            if (rootLists.length === 0) {
+              return (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="list" size={64} color={colors.textSecondary} style={{ opacity: 0.5 }} />
+                  <Text style={{ color: colors.textSecondary, marginTop: 8 }}>No tienes listas creadas.</Text>
+                </View>
+              );
+            }
+
+            return rootLists.map((list) => {
               const isCollapsed = list.collapsed;
               const isEditingThisList = editingListId === list.id;
+              const childLists = store.lists.filter(l => l.parentId === list.id);
 
               return (
                 <View key={list.id} style={[styles.listCard, { backgroundColor: colors.backgroundElement }]}>
@@ -335,6 +370,7 @@ export default function ListsScreen() {
                           >
                             {!isEditingThisItem && (
                               <Pressable
+                                // Click checklist checkbox (keeps existing logic/styling)
                                 onPress={() => toggleSelectItem(item.id)}
                                 style={{ marginRight: 6, padding: 4 }}
                               >
@@ -355,7 +391,24 @@ export default function ListsScreen() {
                                 style={[styles.editItemInput, { color: colors.text, textAlignVertical: 'top' }]}
                               />
                             ) : (
-                              <Text style={[styles.itemText, { color: colors.text }]}>{item.text}</Text>
+                              // Press item to mark with green check icon (persistent Completed toggling)
+                              <Pressable
+                                onPress={() => store.toggleListItemCompleted(list.id, item.id)}
+                                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                              >
+                                {item.completed && (
+                                  <Ionicons name="checkmark-circle" size={18} color="#34C759" />
+                                )}
+                                <Text 
+                                  style={[
+                                    styles.itemText, 
+                                    { color: colors.text },
+                                    item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
+                                  ]}
+                                >
+                                  {item.text}
+                                </Text>
+                              </Pressable>
                             )}
 
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -410,6 +463,234 @@ export default function ListsScreen() {
                         );
                       })}
 
+                      {/* Nested Sublists inside Root List Card */}
+                      {childLists.length > 0 && (
+                        <View style={{ gap: 12, marginTop: 8, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: colors.backgroundSelected }}>
+                          {childLists.map((sublist) => {
+                            const isSublistCollapsed = sublist.collapsed;
+                            const isEditingThisSublist = editingListId === sublist.id;
+
+                            return (
+                              <View 
+                                key={sublist.id} 
+                                style={{ 
+                                  backgroundColor: colors.background, 
+                                  borderRadius: 12, 
+                                  padding: 12, 
+                                  borderWidth: 1,
+                                  borderColor: colors.backgroundSelected,
+                                  gap: 8
+                                }}
+                              >
+                                {/* Sublist Header */}
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <Pressable
+                                    onPress={() => store.toggleListCollapse(sublist.id)}
+                                    style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 6 }}
+                                  >
+                                    <Ionicons
+                                      name={isSublistCollapsed ? 'chevron-forward' : 'chevron-down'}
+                                      size={16}
+                                      color={colors.textSecondary}
+                                    />
+                                    {isEditingThisSublist ? (
+                                      <TextInput
+                                        value={editingListName}
+                                        onChangeText={setEditingListName}
+                                        autoFocus
+                                        multiline
+                                        style={[styles.editListInput, { color: colors.text, fontSize: 14, textAlignVertical: 'top' }]}
+                                      />
+                                    ) : (
+                                      <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text, flex: 1 }}>
+                                        {sublist.name}
+                                      </Text>
+                                    )}
+                                  </Pressable>
+
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    {/* Sublist Alarm Icon */}
+                                    {sublist.alarmTime ? (
+                                      <Pressable
+                                        onPress={() => openAlarmModal(sublist.id, undefined, sublist.alarmTime)}
+                                        style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 2 }}
+                                      >
+                                        <Ionicons name="notifications" size={14} color="#FF9500" />
+                                        <Text style={{ fontSize: 10, color: '#FF9500', fontWeight: 'bold' }}>{sublist.alarmTime}</Text>
+                                      </Pressable>
+                                    ) : (
+                                      <Pressable
+                                        onPress={() => openAlarmModal(sublist.id, undefined, undefined)}
+                                        style={{ padding: 2, opacity: 0.5 }}
+                                      >
+                                        <Ionicons name="notifications-outline" size={14} color={colors.textSecondary} />
+                                      </Pressable>
+                                    )}
+
+                                    {isEditingThisSublist ? (
+                                      <Pressable onPress={handleSaveListName} style={{ padding: 2 }}>
+                                        <Ionicons name="checkmark-circle" size={18} color="#34C759" />
+                                      </Pressable>
+                                    ) : (
+                                      <Pressable
+                                        onPress={() => {
+                                          setEditingListId(sublist.id);
+                                          setEditingListName(sublist.name);
+                                        }}
+                                        style={{ padding: 2 }}
+                                      >
+                                        <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
+                                      </Pressable>
+                                    )}
+
+                                    <Pressable onPress={() => handleDeleteListPress(sublist.id, sublist.name)} style={{ padding: 2 }}>
+                                      <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+                                    </Pressable>
+                                  </View>
+                                </View>
+
+                                {/* Sublist Items */}
+                                {!isSublistCollapsed && (
+                                  <View style={{ gap: 6 }}>
+                                    {sublist.items.map((item) => {
+                                      const isEditingThisItem =
+                                        editingItemId?.listId === sublist.id && editingItemId?.itemId === item.id;
+                                      const isItemSelected = !!selectedItems[item.id];
+
+                                      return (
+                                        <View
+                                          key={item.id}
+                                          style={[styles.itemRow, { borderBottomColor: colors.backgroundSelected }]}
+                                        >
+                                          {!isEditingThisItem && (
+                                            <Pressable
+                                              onPress={() => toggleSelectItem(item.id)}
+                                              style={{ marginRight: 6, padding: 4 }}
+                                            >
+                                              <Ionicons
+                                                name={isItemSelected ? 'checkbox' : 'square-outline'}
+                                                size={20}
+                                                color={isItemSelected ? '#34C759' : colors.textSecondary}
+                                              />
+                                            </Pressable>
+                                          )}
+
+                                          {isEditingThisItem ? (
+                                            <TextInput
+                                              value={editingItemText}
+                                              onChangeText={setEditingItemText}
+                                              autoFocus
+                                              multiline
+                                              style={[styles.editItemInput, { color: colors.text, fontSize: 13, textAlignVertical: 'top' }]}
+                                            />
+                                          ) : (
+                                            <Pressable
+                                              onPress={() => store.toggleListItemCompleted(sublist.id, item.id)}
+                                              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                                            >
+                                              {item.completed && (
+                                                <Ionicons name="checkmark-circle" size={16} color="#34C759" />
+                                              )}
+                                              <Text 
+                                                style={[
+                                                  styles.itemText, 
+                                                  { color: colors.text, fontSize: 13 },
+                                                  item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
+                                                ]}
+                                              >
+                                                {item.text}
+                                              </Text>
+                                            </Pressable>
+                                          )}
+
+                                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            {/* Item Alarm Icon */}
+                                            {item.alarmTime ? (
+                                              <Pressable
+                                                onPress={() => openAlarmModal(sublist.id, item.id, item.alarmTime)}
+                                                style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 2 }}
+                                              >
+                                                <Ionicons name="notifications" size={12} color="#FF9500" />
+                                                <Text style={{ fontSize: 9, color: '#FF9500', fontWeight: 'bold' }}>{item.alarmTime}</Text>
+                                              </Pressable>
+                                            ) : (
+                                              <Pressable
+                                                onPress={() => openAlarmModal(sublist.id, item.id, undefined)}
+                                                style={{ padding: 2, opacity: 0.5 }}
+                                              >
+                                                <Ionicons name="notifications-outline" size={12} color={colors.textSecondary} />
+                                              </Pressable>
+                                            )}
+
+                                            {!isEditingThisItem && (
+                                              <Pressable
+                                                onPress={() => handleCopyItemText(item.text)}
+                                                style={{ padding: 2 }}
+                                              >
+                                                <Ionicons name="copy-outline" size={14} color={colors.textSecondary} />
+                                              </Pressable>
+                                            )}
+
+                                            {isEditingThisItem ? (
+                                              <Pressable onPress={handleSaveListItemText} style={{ padding: 2 }}>
+                                                <Ionicons name="checkmark-circle" size={16} color="#34C759" />
+                                              </Pressable>
+                                            ) : (
+                                              <Pressable
+                                                onPress={() => {
+                                                  setEditingItemId({ listId: sublist.id, itemId: item.id });
+                                                  setEditingItemText(item.text);
+                                                }}
+                                                style={{ padding: 2 }}
+                                              >
+                                                <Ionicons name="create-outline" size={14} color={colors.textSecondary} />
+                                              </Pressable>
+                                            )}
+
+                                            <Pressable onPress={() => store.deleteListItem(sublist.id, item.id)} style={{ padding: 2 }}>
+                                              <Ionicons name="close-circle-outline" size={14} color="#FF3B30" />
+                                            </Pressable>
+                                          </View>
+                                        </View>
+                                      );
+                                    })}
+
+                                    {/* Add sublist item input */}
+                                    <View style={styles.addItemRow}>
+                                      <TextInput
+                                        placeholder="Añadir elemento..."
+                                        placeholderTextColor={colors.textSecondary + '80'}
+                                        value={newItemTexts[sublist.id] || ''}
+                                        onChangeText={(txt) =>
+                                          setNewItemTexts((prev) => ({ ...prev, [sublist.id]: txt }))
+                                        }
+                                        multiline
+                                        style={[
+                                          styles.itemInput,
+                                          { 
+                                            color: colors.text, 
+                                            backgroundColor: colors.backgroundSelected, 
+                                            textAlignVertical: 'top',
+                                            fontSize: 12,
+                                            minHeight: 32
+                                          }
+                                        ]}
+                                      />
+                                      <Pressable
+                                        onPress={() => handleAddListItem(sublist.id)}
+                                        style={[styles.addItemButton, { backgroundColor: '#34C759', width: 32, height: 32 }]}
+                                      >
+                                        <Ionicons name="add" size={18} color="#fff" />
+                                      </Pressable>
+                                    </View>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+
                       {/* Add item input inside list */}
                       <View style={styles.addItemRow}>
                         <TextInput
@@ -433,8 +714,8 @@ export default function ListsScreen() {
                   )}
                 </View>
               );
-            })
-          )}
+            });
+          })()}
         </ScrollView>
       </KeyboardAvoidingView>
 

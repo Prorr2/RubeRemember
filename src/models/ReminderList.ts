@@ -3,6 +3,7 @@ export interface ListItem {
   text: string;
   imageUri?: string;
   alarmTime?: string;
+  completed?: boolean;
 }
 
 export interface ReminderList {
@@ -12,4 +13,5 @@ export interface ReminderList {
   collapsed?: boolean;
   createdAt: string;
   alarmTime?: string;
+  parentId?: string;
 }

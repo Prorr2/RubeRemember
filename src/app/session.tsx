@@ -9,23 +9,21 @@ import {
   useColorScheme,
   ActivityIndicator,
   AppState,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 
-import { useRememberStore, Task, TaskState } from '@/hooks/use-remember-store';
+import { useRememberStore, Task } from '@/hooks/use-remember-store';
 import { useSessionService } from '@/services/SessionService';
-import { useTaskService } from '@/services/TaskService';
 import { Colors } from '@/constants/theme';
-import { getTaskWeightLabel } from '@/engines/ScoreEngine';
 
 export default function SessionScreen() {
   const router = useRouter();
   const store = useRememberStore();
   const sessionService = useSessionService();
-  const taskService = useTaskService();
 
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
@@ -53,16 +51,16 @@ export default function SessionScreen() {
   const [completedState, setCompletedState] = useState<'working' | 'questions' | 'done'>('working');
 
   // Question states
-  const [terraProgressPercentage, setTerraProgressPercentage] = useState('');
-  const [solNextStep, setSolNextStep] = useState('');
-  const [notes, setNotes] = useState('');
+  const [whatDone, setWhatDone] = useState('');
+  const [whatNext, setWhatNext] = useState('');
   const [isTaskCompleted, setIsTaskCompleted] = useState(false);
+  const [progress, setProgress] = useState('0');
 
   // Timer Ref
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const targetTimeRef = useRef<number | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const sessionNotificationIdRef = useRef<string | null>(null);
+  const didInitRef = useRef(false);
 
   const cancelSessionNotification = async () => {
     if (sessionNotificationIdRef.current) {
@@ -93,59 +91,28 @@ export default function SessionScreen() {
     }
   };
 
-  const taskWeight = task ? getTaskWeightLabel(task.estimatedHours, store.hourWeights).toLowerCase() : 'luna';
-
-  // Initialize completed state and input fields based on task
+  // Initialize completed state and input fields exactly once per task load
   useEffect(() => {
     if (task) {
       setIsTaskCompleted(task.completed || false);
-      
-      if (task.nextStep) {
-        setSolNextStep(task.nextStep);
-      } else {
-        setSolNextStep('');
-      }
-
-      const computedProgress = task.progress !== undefined && task.progress !== null
-        ? task.progress 
-        : (task.estimatedHours && task.estimatedHours > 0
-           ? Math.min(100, Math.round(((task.workedTime || 0) / (task.estimatedHours * 60)) * 100))
-           : 0);
-      setTerraProgressPercentage(String(computedProgress));
+      setWhatNext(task.nextStep || '');
+      setProgress(String(task.progress || 0));
     }
-  }, [task]);
+  }, [task?.id]);
 
-  const handleProgressChange = (text: string) => {
-    setTerraProgressPercentage(text);
-    const newProgress = parseInt(text, 10);
-    if (!isNaN(newProgress)) {
-      if (newProgress === 100) {
-        setIsTaskCompleted(true);
-      } else {
-        setIsTaskCompleted(false);
-      }
-    }
-  };
-
-  const handleToggleCompleted = (completed: boolean) => {
-    setIsTaskCompleted(completed);
-    if (completed) {
-      setTerraProgressPercentage('100');
-    } else if (!completed && terraProgressPercentage === '100') {
-      setTerraProgressPercentage('90');
-    }
-  };
-
-  // Initialize Session in DB
+  // Initialize Session in DB exactly ONCE on mount
   useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+
     const initSession = async () => {
-      if (!task) {
+      if (!taskId) {
         Alert.alert('Error', 'No se encontró la tarea especificada.');
         router.back();
         return;
       }
       try {
-        const id = await sessionService.createSession(task.id, parseInt(duration || '30', 10), 'Iniciada desde Home');
+        const id = await sessionService.createSession(taskId, parseInt(duration || '30', 10), 'Iniciada desde Home');
         setSessionId(id);
       } catch (err) {
         console.error('Error starting session:', err);
@@ -154,7 +121,7 @@ export default function SessionScreen() {
       }
     };
     initSession();
-  }, [task]);
+  }, [taskId]);
 
   // AppState foreground listener to recalculate time elapsed in background
   useEffect(() => {
@@ -184,13 +151,9 @@ export default function SessionScreen() {
     let interval: NodeJS.Timeout | null = null;
 
     if (isRunning && timeLeft > 0 && !isInitializing && completedState === 'working') {
-      // Set absolute target end time
       targetTimeRef.current = Date.now() + timeLeft * 1000;
-
-      // Schedule background notification
       scheduleSessionNotification(timeLeft);
 
-      // Start tick loop
       interval = setInterval(() => {
         if (targetTimeRef.current) {
           const remaining = Math.max(0, Math.ceil((targetTimeRef.current - Date.now()) / 1000));
@@ -202,7 +165,6 @@ export default function SessionScreen() {
         }
       }, 500);
     } else {
-      // Paused or finished, cancel notification
       cancelSessionNotification();
       targetTimeRef.current = null;
     }
@@ -258,25 +220,21 @@ export default function SessionScreen() {
       let taskUpdates: Partial<Task> = {};
       let isTaskFullyCompleted = isTaskCompleted;
 
-      const newProgress = parseInt(terraProgressPercentage, 10);
-      if (!isNaN(newProgress) && newProgress >= 0 && newProgress <= 100) {
-        taskUpdates.progress = newProgress;
-        if (newProgress === 100) {
-          isTaskFullyCompleted = true;
-        }
-      }
       taskUpdates.lastProgress = new Date().toISOString();
+      taskUpdates.nextStep = whatNext.trim();
 
-      if (solNextStep.trim()) {
-        taskUpdates.nextStep = solNextStep.trim();
-      }
+      const parsedProgress = parseInt(progress, 10);
+      taskUpdates.progress = isTaskFullyCompleted ? 100 : (isNaN(parsedProgress) ? 0 : parsedProgress);
 
       if (isTaskFullyCompleted) {
         taskUpdates.progress = 100;
+      } else if (taskUpdates.progress === 100) {
+        taskUpdates.progress = 99;
       }
 
       // 2. End session and apply task updates in a single atomic transaction
-      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, notes, taskUpdates);
+      // whatDone is saved in the notes field, whatNext in nextStep
+      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, whatDone.trim(), taskUpdates);
 
       setCompletedState('done');
       setTimeout(() => {
@@ -291,7 +249,6 @@ export default function SessionScreen() {
     }
   };
 
-  // Helpers
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -312,7 +269,7 @@ export default function SessionScreen() {
       {completedState === 'working' && (
         <View style={styles.content}>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            SESIÓN DE ENFOQUE • {taskWeight.toUpperCase()}
+            SESIÓN DE ENFOQUE
           </Text>
           <Text style={[styles.title, { color: colors.text }]}>{task.title}</Text>
 
@@ -351,41 +308,64 @@ export default function SessionScreen() {
       )}
 
       {completedState === 'questions' && (
-        <View style={styles.questionsContainer}>
+        <ScrollView contentContainerStyle={{ paddingVertical: 20 }} style={styles.questionsScrollView} showsVerticalScrollIndicator={false}>
           <Text style={[styles.questionsHeader, { color: colors.text }]}>¿Cómo te fue?</Text>
           <Text style={[styles.questionsDesc, { color: colors.textSecondary }]}>
-            Registra los resultados de esta sesión para entrenar tu motor cognitivo.
+            Registra los resultados de esta sesión para tu roadmap y progreso.
           </Text>
 
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.text }]}>Progreso de la Tarea (%)</Text>
+            <Text style={[styles.label, { color: colors.text }]}>¿Qué has hecho durante esta sesión? (Opcional)</Text>
             <TextInput
-              placeholder="Ej: 50"
+              placeholder="Ej: Programé la autenticación de usuarios y diseño del login"
               placeholderTextColor={colors.textSecondary + '70'}
+              value={whatDone}
+              onChangeText={setWhatDone}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement, minHeight: 80, textAlignVertical: 'top' }]}
+              multiline
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>¿Qué deberías hacer en la siguiente? (Opcional)</Text>
+            <TextInput
+              placeholder="Ej: Conectar el login con el backend"
+              placeholderTextColor={colors.textSecondary + '70'}
+              value={whatNext}
+              onChangeText={setWhatNext}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>Progreso actual de la tarea (%)</Text>
+            <TextInput
               keyboardType="number-pad"
-              value={terraProgressPercentage}
-              onChangeText={handleProgressChange}
-              style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.text }]}>Próximo Hito / Paso concreto</Text>
-            <TextInput
-              placeholder="Ej: Programar módulo de facturación"
+              maxLength={3}
+              placeholder="0"
               placeholderTextColor={colors.textSecondary + '70'}
-              value={solNextStep}
-              onChangeText={setSolNextStep}
+              value={progress}
+              onChangeText={(val) => {
+                const cleaned = val.replace(/[^0-9]/g, '');
+                if (cleaned === '') {
+                  setProgress('');
+                } else {
+                  const num = parseInt(cleaned, 10);
+                  setProgress(String(Math.min(100, Math.max(0, num))));
+                }
+              }}
               style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
             />
           </View>
 
-          {/* Completion Status Selector */}
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.text }]}>¿Has completado la tarea?</Text>
+            <Text style={[styles.label, { color: colors.text }]}>¿Has terminado la tarea?</Text>
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
               <Pressable
-                onPress={() => handleToggleCompleted(true)}
+                onPress={() => {
+                  setIsTaskCompleted(true);
+                  setProgress('100');
+                }}
                 style={[
                   styles.optionBtn,
                   { borderColor: colors.backgroundSelected, backgroundColor: isTaskCompleted ? '#34C759' : colors.backgroundElement }
@@ -395,7 +375,12 @@ export default function SessionScreen() {
                 <Text style={[styles.optionBtnText, { color: isTaskCompleted ? '#fff' : colors.text }]}>Sí, terminada</Text>
               </Pressable>
               <Pressable
-                onPress={() => handleToggleCompleted(false)}
+                onPress={() => {
+                  setIsTaskCompleted(false);
+                  if (progress === '100') {
+                    setProgress(String(task.progress || 0));
+                  }
+                }}
                 style={[
                   styles.optionBtn,
                   { borderColor: colors.backgroundSelected, backgroundColor: !isTaskCompleted ? '#FF9500' : colors.backgroundElement }
@@ -407,22 +392,10 @@ export default function SessionScreen() {
             </View>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.text }]}>Notas de la sesión (Opcional)</Text>
-            <TextInput
-              placeholder="¿Hubo alguna complicación o descubrimiento?"
-              placeholderTextColor={colors.textSecondary + '70'}
-              value={notes}
-              onChangeText={setNotes}
-              style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement, minHeight: 60 }]}
-              multiline
-            />
-          </View>
-
           <Pressable onPress={handleFinishQuestions} style={styles.btnSubmit}>
             <Text style={styles.btnSubmitText}>Finalizar y Guardar Sesión</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       )}
 
       {completedState === 'done' && (
@@ -501,6 +474,9 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
   },
+  questionsScrollView: {
+    flex: 1,
+  },
   questionsContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -517,6 +493,7 @@ const styles = StyleSheet.create({
   },
   inputGroup: {
     gap: 8,
+    marginBottom: 16,
   },
   label: {
     fontSize: 14,

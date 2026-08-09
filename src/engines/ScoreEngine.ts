@@ -8,10 +8,11 @@ export function getTaskWeightLabel(estimatedHours: number | undefined, hourWeigh
   for (const w of sorted) {
     if (estimatedHours >= w.minHours) {
       const lowerId = w.id.toLowerCase();
-      if (lowerId.includes('luna')) return 'luna';
-      if (lowerId.includes('terra')) return 'terra';
-      if (lowerId.includes('sol')) return 'sol';
-      if (lowerId.includes('astra')) return 'astra';
+      const lowerName = (w.name || '').toLowerCase();
+      if (lowerId.includes('luna') || lowerName.includes('luna')) return 'luna';
+      if (lowerId.includes('terra') || lowerName.includes('terra')) return 'terra';
+      if (lowerId.includes('sol') || lowerName.includes('sol')) return 'sol';
+      if (lowerId.includes('astra') || lowerName.includes('astra')) return 'astra';
       return lowerId;
     }
   }

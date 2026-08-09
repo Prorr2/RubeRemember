@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -12,15 +12,32 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useStatisticsService } from '@/services/StatisticsService';
+import { useRememberStore } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 
 export default function StatisticsScreen() {
   const router = useRouter();
+  const store = useRememberStore();
   const { getComputedStats } = useStatisticsService();
 
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
   const colors = Colors[scheme];
+
+  // Collapsible States
+  const [showBlockDist, setShowBlockDist] = useState(true);
+  const [showEnergyDist, setShowEnergyDist] = useState(true);
+
+  // Expanded state for task details inside days
+  const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
+
+  const toggleTaskExpanded = (dateStr: string, taskId: string) => {
+    const key = `${dateStr}_${taskId}`;
+    setExpandedTasks(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
 
   // Dynamically calculate computed stats
   const stats = useMemo(() => getComputedStats(), [getComputedStats]);
@@ -51,22 +68,54 @@ export default function StatisticsScreen() {
     return list;
   }, [stats.dailyMinutes]);
 
-  // 2. Monthly active days (Last 30 days)
-  const last30DaysStats = useMemo(() => {
-    let activeDays = 0;
-    let totalMins = 0;
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const mins = stats.dailyMinutes[dateStr] || 0;
-      if (mins > 0) {
-        activeDays++;
-        totalMins += mins;
+  // Group sessions by day
+  const sessionsByDay = useMemo(() => {
+    const groups: Record<string, typeof store.sessions> = {};
+    const sessions = store.sessions || [];
+    
+    // Sort sessions descending (newest first)
+    const sortedSessions = [...sessions].sort((a, b) => {
+      const timeA = new Date(a.endTime || a.startTime || a.createdAt).getTime();
+      const timeB = new Date(b.endTime || b.startTime || b.createdAt).getTime();
+      return timeB - timeA;
+    });
+
+    sortedSessions.forEach(session => {
+      const sessionDate = session.endTime || session.startTime || session.createdAt;
+      if (!sessionDate) return;
+      const dateStr = sessionDate.split('T')[0]; // YYYY-MM-DD
+      if (!groups[dateStr]) {
+        groups[dateStr] = [];
       }
+      groups[dateStr].push(session);
+    });
+
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0])); // Newer dates first
+  }, [store.sessions]);
+
+  // Friendly date label
+  const getDayLabel = (dateStr: string) => {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    if (dateStr === todayStr) {
+      return 'Hoy';
+    } else if (dateStr === yesterdayStr) {
+      return 'Ayer';
+    } else {
+      const d = new Date(dateStr + 'T00:00:00'); // Prevent timezone offset shift
+      return d.toLocaleDateString('es-ES', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
     }
-    return { activeDays, totalMins };
-  }, [stats.dailyMinutes]);
+  };
 
   // Render helper for progress bars
   const renderProgressBar = (label: string, value: number, max: number, barColor: string) => {
@@ -149,46 +198,200 @@ export default function StatisticsScreen() {
           </View>
         </View>
 
-        {/* Weights Distribution */}
+        {/* Collapsible: Weights/Blocks Distribution */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DISTRIBUCIÓN POR BLOQUES</Text>
-          <View style={[styles.card, { backgroundColor: colors.backgroundElement, gap: 14 }]}>
-            {renderProgressBar('🌙 Luna (Completar)', stats.weightCounts.LUNA || 0, maxWeightCount, '#AF52DE')}
-            {renderProgressBar('🌍 Terra (Avanzar)', stats.weightCounts.TERRA || 0, maxWeightCount, '#34C759')}
-            {renderProgressBar('☀️ Sol (Hito)', stats.weightCounts.SOL || 0, maxWeightCount, '#FF9500')}
-            {renderProgressBar('⭐ Astra (Hábito)', stats.weightCounts.ASTRA || 0, maxWeightCount, '#007AFF')}
-          </View>
+          <Pressable 
+            onPress={() => setShowBlockDist(!showBlockDist)}
+            style={styles.collapsibleHeader}
+          >
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DISTRIBUCIÓN POR BLOQUES</Text>
+            <Ionicons 
+              name={showBlockDist ? "chevron-up" : "chevron-down"} 
+              size={18} 
+              color={colors.textSecondary} 
+            />
+          </Pressable>
+          {showBlockDist && (
+            <View style={[styles.card, { backgroundColor: colors.backgroundElement, gap: 14 }]}>
+              {renderProgressBar('🌙 Luna (Completar)', stats.weightCounts.LUNA || 0, maxWeightCount, '#AF52DE')}
+              {renderProgressBar('🌍 Terra (Avanzar)', stats.weightCounts.TERRA || 0, maxWeightCount, '#34C759')}
+              {renderProgressBar('☀️ Sol (Hito)', stats.weightCounts.SOL || 0, maxWeightCount, '#FF9500')}
+              {renderProgressBar('⭐ Astra (Hábito)', stats.weightCounts.ASTRA || 0, maxWeightCount, '#007AFF')}
+            </View>
+          )}
         </View>
 
-        {/* Energy Types Distribution */}
+        {/* Collapsible: Energy Types Distribution */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DISTRIBUCIÓN POR ENERGÍAS</Text>
-          <View style={[styles.card, { backgroundColor: colors.backgroundElement, gap: 14 }]}>
-            {Object.keys(stats.energyCounts).length === 0 ? (
-              <Text style={{ color: colors.textSecondary, fontStyle: 'italic', textAlign: 'center', py: 8 }}>
-                No hay suficientes sesiones con energías configuradas.
+          <Pressable 
+            onPress={() => setShowEnergyDist(!showEnergyDist)}
+            style={styles.collapsibleHeader}
+          >
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DISTRIBUCIÓN POR ENERGÍAS</Text>
+            <Ionicons 
+              name={showEnergyDist ? "chevron-up" : "chevron-down"} 
+              size={18} 
+              color={colors.textSecondary} 
+            />
+          </Pressable>
+          {showEnergyDist && (
+            <View style={[styles.card, { backgroundColor: colors.backgroundElement, gap: 14 }]}>
+              {Object.keys(stats.energyCounts).length === 0 ? (
+                <Text style={{ color: colors.textSecondary, fontStyle: 'italic', textAlign: 'center', paddingVertical: 8 }}>
+                  No hay suficientes sesiones con energías configuradas.
+                </Text>
+              ) : (
+                Object.entries(stats.energyCounts).map(([energy, count]) =>
+                  renderProgressBar(energy, count, maxEnergyCount, '#5856D6')
+                )
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* History of Focus Tasks Grouped by Day */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>TAREAS ENFOCADAS POR DÍA</Text>
+          {sessionsByDay.length === 0 ? (
+            <View style={[styles.card, { backgroundColor: colors.backgroundElement, alignItems: 'center', padding: 24 }]}>
+              <Ionicons name="calendar-outline" size={48} color={colors.textSecondary} style={{ opacity: 0.5, marginBottom: 12 }} />
+              <Text style={{ color: colors.textSecondary, fontSize: 14, textAlign: 'center', lineHeight: 20 }}>
+                Aún no has registrado ninguna sesión de enfoque.
               </Text>
-            ) : (
-              Object.entries(stats.energyCounts).map(([energy, count]) =>
-                renderProgressBar(energy, count, maxEnergyCount, '#5856D6')
-              )
-            )}
-          </View>
-        </View>
+            </View>
+          ) : (
+            sessionsByDay.map(([dateStr, daySessions]) => {
+              // Group sessions of this day by task
+              const taskGroups: Record<string, { taskTitle: string, totalMinutes: number, sessions: typeof daySessions }> = {};
+              
+              daySessions.forEach(session => {
+                const taskId = session.taskId;
+                const task = store.getTasks().find(t => t.id === taskId);
+                const taskTitle = task ? task.title : 'Tarea eliminada';
+                
+                if (!taskGroups[taskId]) {
+                  taskGroups[taskId] = {
+                    taskTitle,
+                    totalMinutes: 0,
+                    sessions: []
+                  };
+                }
+                
+                taskGroups[taskId].totalMinutes += session.realDuration || session.plannedDuration || 0;
+                taskGroups[taskId].sessions.push(session);
+              });
 
-        {/* Monthly Activity Summary */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>ACTIVIDAD MENSUAL (ÚLTIMOS 30 DÍAS)</Text>
-          <View style={[styles.card, { backgroundColor: colors.backgroundElement, flexDirection: 'row', justifyContent: 'space-between', padding: 20 }]}>
-            <View style={{ gap: 6 }}>
-              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Días con enfoque</Text>
-              <Text style={[styles.summaryVal, { color: colors.text }]}>{last30DaysStats.activeDays} / 30</Text>
-            </View>
-            <View style={{ gap: 6, alignItems: 'flex-end' }}>
-              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Total trabajado</Text>
-              <Text style={[styles.summaryVal, { color: '#FF9500' }]}>{formatTime(last30DaysStats.totalMins)}</Text>
-            </View>
-          </View>
+              return (
+                <View 
+                  key={dateStr} 
+                  style={[
+                    styles.card, 
+                    { 
+                      backgroundColor: colors.backgroundElement, 
+                      borderWidth: 1, 
+                      borderColor: colors.backgroundSelected,
+                      gap: 12,
+                      marginBottom: 16
+                    }
+                  ]}
+                >
+                  {/* Day Title Header */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.backgroundSelected, paddingBottom: 8 }}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800', textTransform: 'capitalize' }}>
+                      📅 {getDayLabel(dateStr)}
+                    </Text>
+                    <View style={{ backgroundColor: 'rgba(52, 199, 89, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                      <Text style={{ color: '#34C759', fontSize: 10, fontWeight: '800' }}>
+                        {daySessions.length} {daySessions.length === 1 ? 'sesión' : 'sesiones'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Tasks within this day */}
+                  <View style={{ gap: 12 }}>
+                    {Object.entries(taskGroups).map(([taskId, group]) => {
+                      const isExpanded = expandedTasks[`${dateStr}_${taskId}`] || false;
+                      return (
+                        <View 
+                          key={taskId} 
+                          style={{ 
+                            backgroundColor: colors.background, 
+                            borderRadius: 12, 
+                            borderWidth: 1, 
+                            borderColor: colors.backgroundSelected,
+                            overflow: 'hidden'
+                          }}
+                        >
+                          <Pressable 
+                            onPress={() => toggleTaskExpanded(dateStr, taskId)}
+                            style={{ 
+                              flexDirection: 'row', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center',
+                              padding: 12
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
+                              <Ionicons 
+                                name={isExpanded ? "chevron-down" : "chevron-forward"} 
+                                size={16} 
+                                color={colors.textSecondary} 
+                              />
+                              <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', flex: 1 }}>
+                                📋 {group.taskTitle}
+                              </Text>
+                            </View>
+                            <Text style={{ color: '#FF9500', fontSize: 12, fontWeight: '800' }}>
+                              ⏱️ {group.totalMinutes} min
+                            </Text>
+                          </Pressable>
+
+                          {/* Sessions details - only visible if expanded */}
+                          {isExpanded && (
+                            <View style={{ gap: 6, paddingHorizontal: 12, paddingBottom: 12 }}>
+                              {group.sessions.map((session, index) => {
+                                const sessionTime = session.endTime || session.startTime || session.createdAt;
+                                const timeLabel = sessionTime 
+                                  ? new Date(sessionTime).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) 
+                                  : '';
+                                return (
+                                  <View 
+                                    key={session.id} 
+                                    style={{ 
+                                      backgroundColor: colors.backgroundSelected, 
+                                      borderRadius: 8, 
+                                      padding: 8,
+                                      gap: 4
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>
+                                        Sesión {group.sessions.length - index} {timeLabel ? `a las ${timeLabel}` : ''}
+                                      </Text>
+                                      {session.progress !== undefined && (
+                                        <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '700' }}>
+                                          📈 {session.progress}%
+                                        </Text>
+                                      )}
+                                    </View>
+                                    {session.notes && (
+                                      <Text style={{ color: colors.text, fontSize: 12, fontStyle: 'italic', lineHeight: 16 }}>
+                                        "{session.notes}"
+                                      </Text>
+                                    )}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -246,6 +449,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1,
+  },
+  collapsibleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
   },
   card: {
     borderRadius: 18,
@@ -311,9 +520,5 @@ const styles = StyleSheet.create({
   },
   chartDateText: {
     fontSize: 9,
-  },
-  summaryVal: {
-    fontSize: 22,
-    fontWeight: '900',
   },
 });
