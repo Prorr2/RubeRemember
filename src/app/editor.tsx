@@ -527,17 +527,6 @@ export default function ItemEditorScreen() {
               <Text style={[styles.typeText, { color: itemType === ItemType.TASK ? '#FF9500' : colors.textSecondary }]}>Tarea</Text>
             </Pressable>
 
-            <Pressable
-              onPress={() => setItemType(ItemType.REMINDER)}
-              style={[
-                styles.typeTab,
-                { backgroundColor: colors.backgroundElement },
-                itemType === ItemType.REMINDER && { backgroundColor: 'rgba(0, 122, 255, 0.15)', borderColor: '#007AFF', borderWidth: 1.5 },
-              ]}
-            >
-              <Ionicons name="notifications-outline" size={20} color={itemType === ItemType.REMINDER ? '#007AFF' : colors.textSecondary} />
-              <Text style={[styles.typeText, { color: itemType === ItemType.REMINDER ? '#007AFF' : colors.textSecondary }]}>Alarma</Text>
-            </Pressable>
 
             <Pressable
               onPress={() => setItemType(ItemType.MEMO)}

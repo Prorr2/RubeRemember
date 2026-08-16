@@ -144,6 +144,7 @@ interface RememberStore {
   // Other legacy functions
   scheduleSystemAlarm: (reminder: any) => Promise<void>;
   scheduleAllAlarms: () => Promise<void>;
+  scheduleTodayMemosAlarms: () => Promise<void>;
   clearAll: () => Promise<void>;
   addComment: (taskId: string, text: string) => Promise<void>;
   updateComment: (taskId: string, commentId: string, text: string) => Promise<void>;
@@ -875,9 +876,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
     await saveItems(updated);
 
-    // If updated item is a reminder, reschedule alerts
+    // If updated item is a reminder or memo, reschedule alerts
     const found = updated.find((i) => i.id === id);
-    if (found && found.type === ItemType.REMINDER) {
+    if (found && (found.type === ItemType.REMINDER || found.type === ItemType.MEMO)) {
       await syncCalendarAndAlarms(found);
     }
   }, [items, saveItems, syncCalendarAndAlarms]);
@@ -899,7 +900,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     // If any updated item is a reminder, reschedule alerts
     for (const id of ids) {
       const found = updated.find((i) => i.id === id);
-      if (found && found.type === ItemType.REMINDER) {
+      if (found && (found.type === ItemType.REMINDER || found.type === ItemType.MEMO)) {
         await syncCalendarAndAlarms(found);
       }
     }
@@ -912,9 +913,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       deletedAt: new Date().toISOString(),
     });
     
-    // Cancel alarms if it was a reminder
+    // Cancel alarms if it was a reminder or memo
     const found = items.find((i) => i.id === id);
-    if (found && found.type === ItemType.REMINDER) {
+    if (found && (found.type === ItemType.REMINDER || found.type === ItemType.MEMO)) {
       await syncCalendarAndAlarms(found, true);
     }
   }, [items, updateItem, syncCalendarAndAlarms]);
@@ -943,6 +944,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       nextCompleted = !(found as Task).completed;
     } else if (found.type === ItemType.REMINDER) {
       nextCompleted = !(found as ReminderV2).completed;
+    } else if (found.type === ItemType.MEMO) {
+      nextCompleted = !(found as Memo).completed;
     } else {
       return; // Activities can't be "completed", only registered as "done"
     }
@@ -988,19 +991,15 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         priority: Priority.MEDIUM,
         comments: [],
       } as Task;
-    } else if (targetType === ItemType.REMINDER) {
+    } else if (targetType === ItemType.MEMO) {
       converted = {
         ...common,
-        type: ItemType.REMINDER,
+        type: ItemType.MEMO,
         completed: false,
-        autoArchive: true,
-        remindAt: {
-          type: ReminderTriggerType.DATE,
-          date: getLocalDateStr(),
-          dates: [getLocalDateStr()],
-          time: '12:00',
-        },
-      } as ReminderV2;
+        hasAlarm: false,
+        startDate: getLocalDateStr(),
+        endDate: getLocalDateStr(),
+      } as Memo;
     } else {
       converted = {
         ...common,
@@ -1014,12 +1013,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     const updated = items.map((i) => (i.id === id ? converted : i));
     await saveItems(updated);
 
-    // Cancel old reminder alarm if we converted AWAY from reminder
-    if (found.type === ItemType.REMINDER) {
+    // Cancel old reminder alarm if we converted AWAY from reminder or memo
+    if (found.type === ItemType.REMINDER || found.type === ItemType.MEMO) {
       await syncCalendarAndAlarms(found, true);
     }
-    // Schedule new reminder alarm if we converted TO reminder
-    if (targetType === ItemType.REMINDER) {
+    // Schedule new reminder alarm if we converted TO reminder or memo
+    if (targetType === ItemType.REMINDER || targetType === ItemType.MEMO) {
       await syncCalendarAndAlarms(converted);
     }
   }, [items, saveItems, syncCalendarAndAlarms]);
@@ -1102,7 +1101,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   const deleteCompleted = useCallback(async () => {
     // In legacy, deleteCompleted permanently deletes. Let's send them to trash instead!
     const completedTasks = items.filter((i) => i.type === ItemType.TASK && (i as Task).completed && !i.trash);
-    const completedReminders = items.filter((i) => i.type === ItemType.REMINDER && (i as ReminderV2).completed && !i.trash);
+    const completedReminders = items.filter((i) => (i.type === ItemType.REMINDER || i.type === ItemType.MEMO) && (i as any).completed && !i.trash);
     
     const idsToTrash = [...completedTasks, ...completedReminders].map((i) => i.id);
 
@@ -1169,6 +1168,82 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     }
     Alert.alert('Éxito', 'Se sincronizaron todos los recordatorios futuros.');
   }, [getReminders, syncCalendarAndAlarms]);
+
+  const scheduleTodayMemosAlarms = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('No soportado', 'La programación de alarmas del sistema no está soportada en la web.');
+      return;
+    }
+    const todayStr = getLocalDateStr(new Date());
+    const memos = getMemos().filter(memo => {
+      if (memo.completed || memo.trash || memo.archived) return false;
+      if (!memo.hasAlarm) return false;
+      
+      const start = memo.startDate || '';
+      const end = memo.endDate || '';
+      const effectiveEnd = end ? end : (start ? start : '');
+      
+      if (start && effectiveEnd) {
+        return todayStr >= start && todayStr <= effectiveEnd;
+      }
+      if (effectiveEnd) {
+        return todayStr <= effectiveEnd;
+      }
+      return true;
+    });
+
+    if (memos.length === 0) {
+      Alert.alert('Programar Recordatorios', 'No hay recordatorios de acción programados para hoy.');
+      return;
+    }
+
+    let scheduledCount = 0;
+    let pastCount = 0;
+    let errorMessages: string[] = [];
+
+    for (const memo of memos) {
+      const timeStr = memo.alarmTime || '12:00';
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      
+      const now = new Date();
+      const alarmDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+      const isPast = alarmDate.getTime() <= now.getTime();
+
+      if (isPast) {
+        pastCount++;
+        continue;
+      }
+
+      if (Platform.OS === 'android') {
+        try {
+          const IntentLauncher = require('expo-intent-launcher');
+          await IntentLauncher.startActivityAsync('android.intent.action.SET_ALARM', {
+            extra: {
+              'android.intent.extra.alarm.HOUR': hours,
+              'android.intent.extra.alarm.MINUTES': minutes,
+              'android.intent.extra.alarm.MESSAGE': memo.title,
+              'android.intent.extra.alarm.SKIP_UI': true,
+            },
+          });
+          scheduledCount++;
+        } catch (err: any) {
+          console.warn('Failed to start system alarm intent:', err);
+          errorMessages.push(`${memo.title}: ${err?.message || String(err)}`);
+        }
+      } else {
+        errorMessages.push(`${memo.title}: Las alarmas del sistema solo están soportadas en Android.`);
+      }
+    }
+
+    let resultMsg = `Se han programado ${scheduledCount} alarma(s) del sistema.`;
+    if (pastCount > 0) {
+      resultMsg += `\n\n⚠️ ${pastCount} recordatorio(s) tienen una hora que ya ha pasado hoy, por lo que no se programaron.`;
+    }
+    if (errorMessages.length > 0) {
+      resultMsg += `\n\n❌ Detalles de errores:\n${errorMessages.join('\n')}`;
+    }
+    Alert.alert('Programación de Alarmas', resultMsg);
+  }, [getMemos]);
 
   const clearAll = useCallback(async () => {
     await saveDatabaseState([], [], [], [], [], [], DEFAULT_USER_SETTINGS, DEFAULT_STATISTICS);
@@ -2184,6 +2259,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         toggleReminderCompleted,
         scheduleSystemAlarm,
         scheduleAllAlarms,
+        scheduleTodayMemosAlarms,
         clearAll,
         addComment,
         updateComment,

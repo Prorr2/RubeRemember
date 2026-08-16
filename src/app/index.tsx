@@ -10,8 +10,6 @@ import {
   useColorScheme,
   Modal,
   Keyboard,
-  PanResponder,
-  Animated,
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -530,10 +528,10 @@ export default function DecisionCenterScreen() {
   const [voiceInputText, setVoiceInputText] = useState('');
   const [isVoicePrivate, setIsVoicePrivate] = useState(false);
 
-  // Calendar Widget State
-  const [isCalendarExpanded, setIsCalendarExpanded] = useState(true);
-  const [calendarSearchQuery, setCalendarSearchQuery] = useState('');
-  const [selectedTaskForSlot, setSelectedTaskForSlot] = useState<Task | null>(null);
+  // Alarm Modal States
+  const [alarmTask, setAlarmTask] = useState<Task | null>(null);
+  const [alarmHour, setAlarmHour] = useState(new Date().getHours());
+  const [alarmMinute, setAlarmMinute] = useState(new Date().getMinutes());
 
   // Task options and roadmap modal state
   const [selectedTaskOptions, setSelectedTaskOptions] = useState<Task | null>(null);
@@ -542,98 +540,38 @@ export default function DecisionCenterScreen() {
   const [editNotes, setEditNotes] = useState('');
   const [editNextStep, setEditNextStep] = useState('');
   const [editProgress, setEditProgress] = useState('');
-  const [showSlotAssociationTask, setShowSlotAssociationTask] = useState<Task | null>(null);
-
-  // Local state for dragging tasks
-  const [draggingTask, setDraggingTask] = useState<Task | null>(null);
-  const dragPosition = React.useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const [slotLayouts, setSlotLayouts] = useState<Record<string, { y: number, height: number }>>({});
-  const slotsContainerRef = React.useRef<View>(null);
-  const [slotsContainerY, setSlotsContainerY] = useState(0);
+  const [showAddNote, setShowAddNote] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
 
   const todayStr = getLocalDateStr();
 
-  const handleToggleSlotReminders = () => {
-    const isEnabled = store.userSettings.notificationsEnabled;
-    Alert.alert(
-      'Configuración de Recordatorios',
-      `Las notificaciones para tus bloques de trabajo hoy están actualmente ${isEnabled ? 'ACTIVADAS' : 'DESACTIVADAS'}.\n\n¿Quieres cambiar esta configuración?`,
-      [
-        {
-          text: isEnabled ? 'Desactivar recordatorios' : 'Activar recordatorios',
-          onPress: async () => {
-            await store.updateUserSettings({ notificationsEnabled: !isEnabled });
-            Alert.alert('Guardado', `Recordatorios ${!isEnabled ? 'activados' : 'desactivadas'} para hoy.`);
-          }
-        },
-        { text: 'Cancelar', style: 'cancel' }
-      ]
-    );
-  };
-
-  const handleAssignToSlot = async (taskId: string, slotId: string) => {
-    await store.updateItem(taskId, { timeSlotId: slotId, dueDate: todayStr });
-    triggerRecalculate();
-  };
-
-  const handleUnassignFromSlot = async (taskId: string) => {
-    await store.updateItem(taskId, { timeSlotId: undefined });
-    triggerRecalculate();
-  };
-
-  // Filter tasks for available unassigned shelf
-  const unassignedTasks = useMemo(() => {
-    return store.getTasks().filter(t => !t.completed && !t.archived && !t.trash && !t.timeSlotId);
-  }, [store.items]);
-
-  const filteredUnassignedTasks = useMemo(() => {
-    return unassignedTasks.filter(t => t.title.toLowerCase().includes(calendarSearchQuery.toLowerCase()));
-  }, [unassignedTasks, calendarSearchQuery]);
-
-  // Setup PanResponder for dragging a task from the shelf
-  const createPanResponder = (task: Task) => {
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt, gestureState) => {
-        setDraggingTask(task);
-        dragPosition.setValue({
-          x: gestureState.x0 - 75,
-          y: gestureState.y0 - 25
+  const handleScheduleSystemAlarm = async (taskTitle: string, hours: number, minutes: number) => {
+    if (Platform.OS === 'android') {
+      try {
+        const IntentLauncher = require('expo-intent-launcher');
+        await IntentLauncher.startActivityAsync('android.intent.action.SET_ALARM', {
+          extra: {
+            'android.intent.extra.alarm.HOUR': hours,
+            'android.intent.extra.alarm.MINUTES': minutes,
+            'android.intent.extra.alarm.MESSAGE': taskTitle,
+            'android.intent.extra.alarm.SKIP_UI': true,
+          },
         });
-        // Measure absolute slot container position on layout when drag begins
-        slotsContainerRef.current?.measureInWindow((x, y) => {
-          setSlotsContainerY(y);
-        });
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        dragPosition.setValue({
-          x: gestureState.moveX - 75,
-          y: gestureState.moveY - 25
-        });
-      },
-      onPanResponderRelease: async (evt, gestureState) => {
-        const relativeY = gestureState.moveY - 15 - slotsContainerY;
-        let matchedSlotId: string | null = null;
-        
-        for (const [slotId, layout] of Object.entries(slotLayouts)) {
-          if (relativeY >= layout.y && relativeY <= layout.y + layout.height) {
-            matchedSlotId = slotId;
-            break;
-          }
-        }
-        
-        if (matchedSlotId) {
-          await handleAssignToSlot(task.id, matchedSlotId);
-          speak(`Tarea asignada a la franja horaria.`);
-        }
-        
-        setDraggingTask(null);
-      },
-      onPanResponderTerminate: () => {
-        setDraggingTask(null);
+        Alert.alert('Alarma Programada', `Se programó la alarma para hoy a las ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')} para "${taskTitle}".`);
+      } catch (err: any) {
+        console.warn('Failed to start system alarm intent:', err);
+        Alert.alert('Error', `No se pudo programar la alarma: ${err?.message || String(err)}`);
       }
-    });
+    } else {
+      Alert.alert('No soportado', 'La programación de alarmas del sistema con esta hora solo está soportada en Android.');
+    }
+  };
+
+  const handleOpenAlarmDialog = (task: Task) => {
+    const now = new Date();
+    setAlarmHour(now.getHours());
+    setAlarmMinute(now.getMinutes());
+    setAlarmTask(task);
   };
 
   // Clear voice input when modal is closed
@@ -1144,9 +1082,22 @@ export default function DecisionCenterScreen() {
     triggerRecalculate();
   }, [store.items, store.sessions]);
 
-  // 3. Today's Alarms
-  const todayReminders = useMemo(() => {
-    return store.getTodayReminders().filter((r) => !r.completed).slice(0, 3);
+  // 3. Today's Recordatorios (Memos active today)
+  const todayMemos = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    return store.getMemos().filter((memo) => {
+      if (memo.completed || memo.trash || memo.archived) return false;
+      const start = memo.startDate || '';
+      const end = memo.endDate || '';
+      const effectiveEnd = end ? end : (start ? start : '');
+      if (start && effectiveEnd) {
+        return todayStr >= start && todayStr <= effectiveEnd;
+      }
+      if (effectiveEnd) {
+        return todayStr <= effectiveEnd;
+      }
+      return true;
+    }).slice(0, 3);
   }, [store.items]);
 
   // 4. Activity Suggestion
@@ -1164,7 +1115,6 @@ export default function DecisionCenterScreen() {
 
   // Helper stats
   const pendingTasksCount = useMemo(() => store.getTasks().filter((t) => !t.completed).length, [store.items]);
-  const activeAlarmsCount = useMemo(() => store.getReminders().filter((r) => !r.completed).length, [store.items]);
   const activeMemosCount = useMemo(() => store.getMemos().filter((m) => !m.completed).length, [store.items]);
   const pendingPlansCount = useMemo(() => store.getPlans().filter((p) => !p.completed).length, [store.items]);
   const trashCount = useMemo(() => store.getTrashItems().length, [store.items]);
@@ -1220,7 +1170,7 @@ export default function DecisionCenterScreen() {
           <Text style={[styles.title, { color: colors.text }]}>RubeRemember</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Pressable onPress={() => router.push('/backup')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
+          <Pressable onPress={() => router.push('/sync')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
             <Ionicons name="arrow-up-circle-outline" size={20} color={colors.text} />
           </Pressable>
           <Pressable onPress={() => router.push('/search')} style={[styles.iconButton, { backgroundColor: colors.backgroundElement }]}>
@@ -1242,11 +1192,6 @@ export default function DecisionCenterScreen() {
           <Pressable onPress={() => router.push('/tasks')} style={styles.statBox}>
             <Text style={[styles.statValue, { color: '#FF9500' }]}>{pendingTasksCount}</Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Tareas</Text>
-          </Pressable>
-          <View style={[styles.statDivider, { backgroundColor: colors.backgroundSelected }]} />
-          <Pressable onPress={() => router.push('/reminders')} style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#007AFF' }]}>{activeAlarmsCount}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Alarmas</Text>
           </Pressable>
           <View style={[styles.statDivider, { backgroundColor: colors.backgroundSelected }]} />
           <Pressable onPress={() => router.push('/memos')} style={styles.statBox}>
@@ -1305,249 +1250,6 @@ export default function DecisionCenterScreen() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
         </Pressable>
-
-        {/* WIDGET CALENDARIO DE HOY (TIPO GOOGLE CALENDAR) */}
-        <View style={[styles.calendarWidgetCard, { backgroundColor: colors.backgroundElement }]}>
-          <View style={styles.calendarWidgetHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={[styles.calendarHeaderIcon, { backgroundColor: 'rgba(255, 45, 85, 0.15)' }]}>
-                <Ionicons name="calendar" size={18} color="#FF2D55" />
-              </View>
-              <View>
-                <Text style={[styles.calendarWidgetTitle, { color: colors.text }]}>Horario de Hoy</Text>
-                <Text style={{ fontSize: 11, color: colors.textSecondary }}>Organiza tus bloques de trabajo</Text>
-              </View>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Pressable 
-                onPress={() => router.push('/slots')} 
-                style={[styles.calendarHeaderBtn, { backgroundColor: colors.backgroundSelected }]}
-                android_ripple={{ color: colors.backgroundSelected }}
-              >
-                <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
-              </Pressable>
-              <Pressable 
-                onPress={handleToggleSlotReminders} 
-                style={[styles.calendarHeaderBtn, { backgroundColor: colors.backgroundSelected }]}
-                android_ripple={{ color: colors.backgroundSelected }}
-              >
-                <Ionicons 
-                  name={store.userSettings.notificationsEnabled ? "notifications" : "notifications-off-outline"} 
-                  size={16} 
-                  color={store.userSettings.notificationsEnabled ? "#FF9500" : colors.textSecondary} 
-                />
-              </Pressable>
-              <Pressable 
-                onPress={() => setIsCalendarExpanded(!isCalendarExpanded)} 
-                style={[styles.calendarHeaderBtn, { backgroundColor: colors.backgroundSelected }]}
-                android_ripple={{ color: colors.backgroundSelected }}
-              >
-                <Ionicons name={isCalendarExpanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
-              </Pressable>
-            </View>
-          </View>
-
-          {isCalendarExpanded && (
-            <View style={{ paddingHorizontal: 14, paddingBottom: 16 }}>
-              {/* Info banner if task is selected for tap assignment */}
-              {selectedTaskForSlot && (
-                <View style={[styles.tapSelectionBanner, { backgroundColor: 'rgba(255, 149, 0, 0.15)', borderColor: '#FF9500' }]}>
-                  <Ionicons name="information-circle-outline" size={16} color="#FF9500" />
-                  <Text style={{ color: colors.text, fontSize: 12, flex: 1, fontWeight: '500' }}>
-                    Seleccionado: <Text style={{ fontWeight: 'bold' }}>"{selectedTaskForSlot.title}"</Text>. Toca un bloque para asignarla.
-                  </Text>
-                  <Pressable onPress={() => setSelectedTaskForSlot(null)} style={{ padding: 2 }}>
-                    <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
-                  </Pressable>
-                </View>
-              )}
-
-              {/* Time Slots Grid */}
-              <Text style={[styles.calendarSubTitle, { color: colors.textSecondary }]}>BLOQUES DE TRABAJO</Text>
-              {store.timeSlots.length === 0 ? (
-                <View style={styles.calendarEmptySlots}>
-                  <Ionicons name="hourglass-outline" size={32} color={colors.textSecondary} style={{ opacity: 0.4 }} />
-                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginVertical: 6 }}>
-                    No tienes franjas horarias configuradas. Configúralas desde la sección "Mis Tareas".
-                  </Text>
-                </View>
-              ) : (
-                <View ref={slotsContainerRef} style={{ gap: 12, marginVertical: 8 }}>
-                  {store.timeSlots.map((slot, index) => {
-                    const slotTasks = store.getTasks().filter(t => !t.archived && !t.trash && t.timeSlotId === slot.id);
-                    const colorsPalette = ['#007AFF', '#34C759', '#FF9500', '#5856D6', '#FF2D55', '#AF52DE'];
-                    const slotColor = colorsPalette[index % colorsPalette.length];
-
-                    return (
-                      <View 
-                        key={slot.id} 
-                        style={styles.calendarRow}
-                        onLayout={(e) => {
-                          const { y, height } = e.nativeEvent.layout;
-                          setSlotLayouts(prev => ({ ...prev, [slot.id]: { y, height } }));
-                        }}
-                      >
-                        {/* Time label column */}
-                        <View style={styles.timeColumn}>
-                          <Text style={[styles.timeLabelText, { color: colors.textSecondary }]}>{slot.startTime}</Text>
-                          <View style={[styles.timeLabelLine, { backgroundColor: colors.backgroundSelected }]} />
-                        </View>
-
-                        {/* Slot block column */}
-                        <Pressable
-                          onPress={async () => {
-                            if (selectedTaskForSlot) {
-                              await handleAssignToSlot(selectedTaskForSlot.id, slot.id);
-                              setSelectedTaskForSlot(null);
-                            }
-                          }}
-                          style={[
-                            styles.slotBoxCard,
-                            { 
-                              backgroundColor: colors.background, 
-                              borderColor: selectedTaskForSlot ? '#FF9500' : colors.backgroundSelected,
-                              borderLeftColor: slotColor,
-                            },
-                            selectedTaskForSlot && { borderStyle: 'dashed', borderWidth: 1.5 }
-                          ]}
-                        >
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={[styles.slotNameText, { color: colors.text }]}>{slot.name}</Text>
-                            <Text style={{ fontSize: 11, color: slotColor, fontWeight: '700' }}>
-                              {slot.startTime} - {slot.endTime}
-                            </Text>
-                          </View>
-
-                          {/* Task List Inside Slot */}
-                          <View style={{ marginTop: 6, gap: 6 }}>
-                            {slotTasks.length === 0 ? (
-                              <Text style={{ fontSize: 11, color: colors.textSecondary, fontStyle: 'italic' }}>
-                                {selectedTaskForSlot ? '+ Toca para asignar aquí' : 'Sin tareas asignadas'}
-                              </Text>
-                            ) : (
-                              slotTasks.map(task => (
-                                <View 
-                                  key={task.id} 
-                                  style={[styles.calendarTaskChip, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}
-                                >
-                                  <Pressable 
-                                    onPress={() => store.toggleItemCompleted(task.id)}
-                                    style={{ padding: 2 }}
-                                  >
-                                    <Ionicons 
-                                      name={task.completed ? "checkmark-circle" : "ellipse-outline"} 
-                                      size={14} 
-                                      color={task.completed ? "#34C759" : colors.textSecondary} 
-                                    />
-                                  </Pressable>
-                                  <Pressable
-                                    onPress={() => setSelectedTaskOptions(task)}
-                                    style={{ flex: 1, paddingVertical: 2 }}
-                                  >
-                                    <Text 
-                                      numberOfLines={1}
-                                      style={[
-                                        styles.calendarTaskChipText, 
-                                        { color: colors.text },
-                                        task.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
-                                      ]}
-                                    >
-                                      {task.title}
-                                    </Text>
-                                  </Pressable>
-                                  <Pressable 
-                                    onPress={() => handleUnassignFromSlot(task.id)}
-                                    style={{ padding: 4, marginLeft: 'auto' }}
-                                  >
-                                    <Ionicons name="close-circle-outline" size={14} color="#FF3B30" />
-                                  </Pressable>
-                                </View>
-                              ))
-                            )}
-                          </View>
-                        </Pressable>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-
-              {/* Tasks Shelf / Drawer for Scheduling */}
-              <View style={[styles.separator, { backgroundColor: colors.backgroundSelected, marginVertical: 12 }]} />
-              
-              <Text style={[styles.calendarSubTitle, { color: colors.textSecondary, marginBottom: 6 }]}>
-                TAREAS DISPONIBLES ({unassignedTasks.length})
-              </Text>
-              
-              <View style={[styles.shelfSearchContainer, { backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}>
-                <Ionicons name="search-outline" size={14} color={colors.textSecondary} />
-                <TextInput
-                  placeholder="Buscar tarea para programar..."
-                  placeholderTextColor={colors.textSecondary + '70'}
-                  value={calendarSearchQuery}
-                  onChangeText={setCalendarSearchQuery}
-                  style={[styles.shelfSearchInput, { color: colors.text }]}
-                />
-              </View>
-
-              {filteredUnassignedTasks.length === 0 ? (
-                <View style={{ paddingVertical: 12, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 12, color: colors.textSecondary, fontStyle: 'italic' }}>
-                    {unassignedTasks.length === 0 ? 'No hay tareas sin asignar.' : 'Ninguna coincide con la búsqueda.'}
-                  </Text>
-                </View>
-              ) : (
-                <ScrollView 
-                  nestedScrollEnabled={true}
-                  style={{ maxHeight: 185 }}
-                  contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 8 }}
-                >
-                  {filteredUnassignedTasks.map(task => {
-                    const isSelected = selectedTaskForSlot?.id === task.id;
-                    const responder = createPanResponder(task);
-                    
-                    return (
-                      <Animated.View
-                        key={task.id}
-                        {...responder.panHandlers}
-                        style={[
-                          styles.shelfTaskCard,
-                          { 
-                            backgroundColor: colors.background,
-                            borderColor: isSelected ? '#FF9500' : colors.backgroundSelected 
-                          },
-                          isSelected && { borderWidth: 1.5 }
-                        ]}
-                      >
-                        <Pressable
-                          onPress={() => {
-                            if (isSelected) {
-                              setSelectedTaskForSlot(null);
-                            } else {
-                              setSelectedTaskForSlot(task);
-                            }
-                          }}
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                        >
-                          <Ionicons name="grid-outline" size={12} color={colors.textSecondary} style={{ opacity: 0.7 }} />
-                          <Text numberOfLines={1} style={[styles.shelfTaskText, { color: colors.text }]}>
-                            {task.title}
-                          </Text>
-                          <Pressable
-                            onPress={() => setSelectedTaskOptions(task)}
-                            style={{ padding: 2, marginLeft: 2 }}
-                          >
-                            <Ionicons name="ellipsis-vertical" size={12} color={colors.textSecondary} />
-                          </Pressable>
-                        </Pressable>
-                      </Animated.View>
-                    );
-                  })}
-                </ScrollView>
-              )}
-            </View>
-          )}
-        </View>
 
         {/* 1. RECOMMENDATION CARD */}
         <View style={[styles.sectionContainer]}>
@@ -1662,12 +1364,19 @@ export default function DecisionCenterScreen() {
                         await store.toggleItemCompleted(primaryRec.taskId);
                         triggerRecalculate();
                       } else {
-                        const reminder = store.getReminders().find(r => primaryRec.reason.includes(r.title));
+                        const reminder = store.getMemos().find(r => primaryRec.reason.includes(r.title));
                         if (reminder) {
                           await store.toggleItemCompleted(reminder.id);
                           triggerRecalculate();
                         } else {
-                          const activeRem = store.getTodayReminders().filter(r => !r.completed)[0];
+                          const todayStr = new Date().toISOString().split('T')[0];
+                          const activeRem = store.getMemos().find(m => {
+                            if (m.completed || !m.hasAlarm) return false;
+                            const start = m.startDate || '';
+                            const end = m.endDate || '';
+                            const effEnd = end ? end : (start ? start : '');
+                            return (!start || start <= todayStr) && (!effEnd || effEnd >= todayStr);
+                          });
                           if (activeRem) {
                             await store.toggleItemCompleted(activeRem.id);
                             triggerRecalculate();
@@ -1685,11 +1394,18 @@ export default function DecisionCenterScreen() {
                     onPress={async () => {
                       let rId: string | undefined = primaryRec.taskId;
                       if (!rId) {
-                        const reminder = store.getReminders().find(r => primaryRec.reason.includes(r.title));
+                        const reminder = store.getMemos().find(r => primaryRec.reason.includes(r.title));
                         if (reminder) {
                           rId = reminder.id;
                         } else {
-                          const activeRem = store.getTodayReminders().filter(r => !r.completed)[0];
+                          const todayStr = new Date().toISOString().split('T')[0];
+                          const activeRem = store.getMemos().find(m => {
+                            if (m.completed || !m.hasAlarm) return false;
+                            const start = m.startDate || '';
+                            const end = m.endDate || '';
+                            const effEnd = end ? end : (start ? start : '');
+                            return (!start || start <= todayStr) && (!effEnd || effEnd >= todayStr);
+                          });
                           if (activeRem) {
                             rId = activeRem.id;
                           }
@@ -1701,7 +1417,7 @@ export default function DecisionCenterScreen() {
                         const hh = String(now.getHours()).padStart(2, '0');
                         const mm = String(now.getMinutes()).padStart(2, '0');
                         const newTime = `${hh}:${mm}`;
-                        await store.updateItem(rId, { time: newTime });
+                        await store.updateItem(rId, { alarmTime: newTime });
                         triggerRecalculate();
                         Alert.alert('Pospuesto', 'El recordatorio se ha pospuesto 15 minutos.');
                       } else {
@@ -1758,6 +1474,15 @@ export default function DecisionCenterScreen() {
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleOpenAlarmDialog(task);
+                      }}
+                      style={{ padding: 4 }}
+                    >
+                      <Ionicons name="alarm-outline" size={22} color={colors.textSecondary} />
+                    </Pressable>
                     <Pressable
                       onPress={(e) => {
                         e.stopPropagation();
@@ -1835,31 +1560,33 @@ export default function DecisionCenterScreen() {
           </View>
         )}
 
-        {/* 2. TODAY'S REMINDERS */}
+        {/* 2. TODAY'S RECORDATORIOS (MEMOS) */}
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>🔔 Alarmas de Hoy</Text>
-            <Pressable onPress={() => router.push('/reminders')}>
-              <Text style={{ color: '#007AFF', fontWeight: '600', fontSize: 13 }}>Ver todas</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>🔖 Recordatorios de Hoy</Text>
+            <Pressable onPress={() => router.push('/memos')}>
+              <Text style={{ color: '#00C7BE', fontWeight: '600', fontSize: 13 }}>Ver todos</Text>
             </Pressable>
           </View>
 
-          {todayReminders.length > 0 ? (
+          {todayMemos.length > 0 ? (
             <View style={styles.remindersList}>
-              {todayReminders.map((rem) => (
-                <View key={rem.id} style={[styles.reminderItem, { backgroundColor: colors.backgroundElement }]}>
+              {todayMemos.map((memo) => (
+                <View key={memo.id} style={[styles.reminderItem, { backgroundColor: colors.backgroundElement }]}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={[styles.reminderTitle, { color: colors.text }]} numberOfLines={1}>
-                      {rem.title}
+                      {memo.title}
                     </Text>
                     <View style={styles.reminderMetaRow}>
-                      <Ionicons name="time-outline" size={12} color="#007AFF" />
-                      <Text style={[styles.reminderTimeText, { color: '#007AFF' }]}>{rem.remindAt.time || '12:00'}</Text>
+                      <Ionicons name={memo.hasAlarm ? "alarm-outline" : "bookmark-outline"} size={12} color="#00C7BE" />
+                      <Text style={[styles.reminderTimeText, { color: '#00C7BE' }]}>
+                        {memo.hasAlarm ? `Acción: ${memo.alarmTime || '12:00'}` : 'Nota'}
+                      </Text>
                     </View>
                   </View>
                   <Pressable
                     onPress={async () => {
-                      await store.toggleItemCompleted(rem.id);
+                      await store.toggleItemCompleted(memo.id);
                     }}
                     style={styles.reminderCheckBtn}
                   >
@@ -1870,9 +1597,9 @@ export default function DecisionCenterScreen() {
             </View>
           ) : (
             <View style={[styles.emptyCard, { backgroundColor: colors.backgroundElement }]}>
-              <Ionicons name="notifications-off-outline" size={32} color={colors.textSecondary} />
+              <Ionicons name="bookmark-outline" size={32} color={colors.textSecondary} />
               <Text style={[styles.emptyCardText, { color: colors.textSecondary }]}>
-                No hay alarmas programadas para hoy.
+                No hay recordatorios activos para hoy.
               </Text>
             </View>
           )}
@@ -2144,22 +1871,6 @@ export default function DecisionCenterScreen() {
           </Pressable>
         </View>
       )}
-
-      {draggingTask && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.floatingDragItem,
-            {
-              transform: dragPosition.getTranslateTransform(),
-              backgroundColor: '#FF2D55',
-            }
-          ]}
-        >
-          <Ionicons name="grid-outline" size={14} color="#fff" />
-          <Text numberOfLines={1} style={styles.floatingDragText}>{draggingTask.title}</Text>
-        </Animated.View>
-      )}
       {/* TASK OPTIONS MODAL */}
       <Modal
         visible={selectedTaskOptions !== null}
@@ -2268,17 +1979,17 @@ export default function DecisionCenterScreen() {
                   const t = selectedTaskOptions;
                   setSelectedTaskOptions(null);
                   if (t) {
-                    setShowSlotAssociationTask(t);
+                    handleOpenAlarmDialog(t);
                   }
                 }}
                 style={[styles.bottomModalOptionBtn, { backgroundColor: colors.background }]}
               >
-                <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                  <Ionicons name="calendar-outline" size={22} color="#FF9500" />
+                <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 59, 48, 0.15)' }]}>
+                  <Ionicons name="alarm-outline" size={22} color="#FF3B30" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.bottomModalOptionTitle, { color: colors.text }]}>Asociar a bloque de trabajo</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Asigna esta tarea a una franja horaria de hoy</Text>
+                  <Text style={[styles.bottomModalOptionTitle, { color: colors.text }]}>Fijar Alarma</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Programa una alarma del sistema para esta tarea hoy</Text>
                 </View>
               </Pressable>
             </View>
@@ -2293,16 +2004,16 @@ export default function DecisionCenterScreen() {
         </Pressable>
       </Modal>
 
-      {/* SLOT ASSOCIATION MODAL */}
+      {/* ALARM PROGRAMMING MODAL */}
       <Modal
-        visible={showSlotAssociationTask !== null}
+        visible={alarmTask !== null}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setShowSlotAssociationTask(null)}
+        onRequestClose={() => setAlarmTask(null)}
       >
         <Pressable 
           style={styles.bottomModalOverlay}
-          onPress={() => setShowSlotAssociationTask(null)}
+          onPress={() => setAlarmTask(null)}
         >
           <View 
             style={[styles.optionsModalContent, { backgroundColor: colors.backgroundElement }]}
@@ -2311,90 +2022,110 @@ export default function DecisionCenterScreen() {
           >
             <View style={styles.bottomModalHeaderLine} />
             <Text style={[styles.bottomModalTitle, { color: colors.text, marginBottom: 8 }]}>
-              Asociar a Bloque de Trabajo
+              Programar Alarma del Sistema
             </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 20 }}>
-              Selecciona un bloque de trabajo de hoy para "{showSlotAssociationTask?.title}"
+            <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 24 }}>
+              Fijar para hoy para: "{alarmTask?.title}"
             </Text>
 
-            <ScrollView style={{ maxHeight: 300, width: '100%' }} showsVerticalScrollIndicator={false}>
-              {showSlotAssociationTask?.timeSlotId ? (
+            {/* Time Pickers (Increment/Decrement style) */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24, marginBottom: 30 }}>
+              {/* Hour control */}
+              <View style={{ alignItems: 'center' }}>
                 <Pressable
-                  onPress={async () => {
-                    if (showSlotAssociationTask) {
-                      await handleUnassignFromSlot(showSlotAssociationTask.id);
-                      setShowSlotAssociationTask(null);
-                    }
+                  onPress={() => setAlarmHour((h) => (h + 1) % 24)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 8
                   }}
-                  style={({ pressed }) => [
-                    styles.bottomModalOptionBtn,
-                    { 
-                      backgroundColor: pressed ? colors.backgroundSelected : colors.background,
-                      marginBottom: 12,
-                      borderColor: '#FF3B30',
-                      borderWidth: 1 
-                    }
-                  ]}
                 >
-                  <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 59, 48, 0.15)' }]}>
-                    <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.bottomModalOptionTitle, { color: '#FF3B30' }]}>Desvincular del bloque actual</Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Eliminar la asignación a bloques de trabajo</Text>
-                  </View>
+                  <Ionicons name="chevron-up" size={24} color={colors.text} />
                 </Pressable>
-              ) : null}
-
-              {store.timeSlots.map((slot) => {
-                const isSelected = showSlotAssociationTask?.timeSlotId === slot.id;
-                return (
-                  <Pressable
-                    key={slot.id}
-                    onPress={async () => {
-                      if (showSlotAssociationTask) {
-                        await handleAssignToSlot(showSlotAssociationTask.id, slot.id);
-                        setShowSlotAssociationTask(null);
-                      }
-                    }}
-                    style={({ pressed }) => [
-                      styles.bottomModalOptionBtn,
-                      { 
-                        backgroundColor: pressed ? colors.backgroundSelected : colors.background,
-                        marginBottom: 12,
-                        borderWidth: isSelected ? 2 : 0,
-                        borderColor: '#FF9500'
-                      }
-                    ]}
-                  >
-                    <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                      <Ionicons name="calendar-outline" size={20} color="#FF9500" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.bottomModalOptionTitle, { color: colors.text, fontWeight: isSelected ? '800' : '600' }]}>
-                        {slot.name} {isSelected ? '✓' : ''}
-                      </Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                        ⏱️ {slot.startTime} - {slot.endTime}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-              
-              {store.timeSlots.length === 0 && (
-                <Text style={{ color: colors.textSecondary, textAlign: 'center', marginVertical: 20 }}>
-                  No hay bloques de trabajo creados para hoy.
+                <Text style={{ fontSize: 32, fontWeight: '700', color: colors.text }}>
+                  {alarmHour.toString().padStart(2, '0')}
                 </Text>
-              )}
-            </ScrollView>
+                <Pressable
+                  onPress={() => setAlarmHour((h) => (h - 1 + 24) % 24)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginTop: 8
+                  }}
+                >
+                  <Ionicons name="chevron-down" size={24} color={colors.text} />
+                </Pressable>
+              </View>
 
-            <Pressable 
-              onPress={() => setShowSlotAssociationTask(null)}
-              style={[styles.bottomModalCloseBtn, { backgroundColor: colors.backgroundSelected, marginTop: 8 }]}
-            >
-              <Text style={{ color: colors.text, fontWeight: '700' }}>Cancelar</Text>
-            </Pressable>
+              <Text style={{ fontSize: 32, fontWeight: '700', color: colors.text, marginBottom: 8 }}>:</Text>
+
+              {/* Minute control */}
+              <View style={{ alignItems: 'center' }}>
+                <Pressable
+                  onPress={() => setAlarmMinute((m) => (m + 5) % 60)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 8
+                  }}
+                >
+                  <Ionicons name="chevron-up" size={24} color={colors.text} />
+                </Pressable>
+                <Text style={{ fontSize: 32, fontWeight: '700', color: colors.text }}>
+                  {alarmMinute.toString().padStart(2, '0')}
+                </Text>
+                <Pressable
+                  onPress={() => setAlarmMinute((m) => (m - 5 + 60) % 60)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginTop: 8
+                  }}
+                >
+                  <Ionicons name="chevron-down" size={24} color={colors.text} />
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={{ gap: 12, width: '100%' }}>
+              <Pressable
+                onPress={async () => {
+                  if (alarmTask) {
+                    await handleScheduleSystemAlarm(alarmTask.title, alarmHour, alarmMinute);
+                    setAlarmTask(null);
+                  }
+                }}
+                style={[styles.bottomModalOptionBtn, { backgroundColor: '#FF3B30', justifyContent: 'center', height: 50 }]}
+              >
+                <Ionicons name="alarm" size={20} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16, marginLeft: 8 }}>
+                  Programar Alarma
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setAlarmTask(null)}
+                style={[styles.bottomModalCloseBtn, { backgroundColor: colors.backgroundSelected }]}
+              >
+                <Text style={{ color: colors.text, fontWeight: '700' }}>Cancelar</Text>
+              </Pressable>
+            </View>
           </View>
         </Pressable>
       </Modal>
@@ -2428,6 +2159,76 @@ export default function DecisionCenterScreen() {
                 contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}
                 showsVerticalScrollIndicator={false}
               >
+                <View style={{ gap: 10, marginBottom: 12 }}>
+                  {showAddNote ? (
+                    <>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>📝 Nueva Nota</Text>
+                      <TextInput
+                        value={newNoteText}
+                        onChangeText={setNewNoteText}
+                        placeholder="Escribe una nota sobre esta tarea..."
+                        placeholderTextColor={colors.textSecondary + '70'}
+                        autoFocus
+                        multiline
+                        style={{
+                          color: colors.text,
+                          backgroundColor: colors.background,
+                          borderColor: colors.backgroundSelected,
+                          borderWidth: 1,
+                          borderRadius: 12,
+                          padding: 10,
+                          fontSize: 13,
+                          minHeight: 60,
+                          textAlignVertical: 'top'
+                        }}
+                      />
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable
+                          onPress={async () => {
+                            const text = newNoteText.trim();
+                            if (text && showProgressRoadmap) {
+                              await store.createSession(showProgressRoadmap.id, 0, text);
+                            }
+                            setNewNoteText('');
+                            setShowAddNote(false);
+                          }}
+                          style={{ flex: 1, backgroundColor: '#FF9500', padding: 12, borderRadius: 10, alignItems: 'center' }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>Guardar Nota</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            setNewNoteText('');
+                            setShowAddNote(false);
+                          }}
+                          style={{ flex: 1, backgroundColor: colors.backgroundSelected, padding: 12, borderRadius: 10, alignItems: 'center' }}
+                        >
+                          <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Cancelar</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  ) : (
+                    <Pressable
+                      onPress={() => setShowAddNote(true)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        backgroundColor: 'rgba(255, 149, 0, 0.12)',
+                        borderWidth: 1,
+                        borderColor: 'rgba(255, 149, 0, 0.4)',
+                        borderStyle: 'dashed',
+                        borderRadius: 12,
+                        paddingVertical: 12
+                      }}
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color="#FF9500" />
+                      <Text style={{ color: '#FF9500', fontSize: 13, fontWeight: '700' }}>Añadir Nota</Text>
+                    </Pressable>
+                  )}
+                </View>
+
                 {(() => {
                   const taskSessions = store.sessions
                     .filter(s => String(s.taskId) === String(showProgressRoadmap.id))
@@ -2441,7 +2242,7 @@ export default function DecisionCenterScreen() {
                           Aún no hay sesiones registradas en el roadmap de esta tarea.
                         </Text>
                         <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center', paddingHorizontal: 24, marginTop: 8, opacity: 0.7 }}>
-                          Completa una sesión de enfoque para comenzar a construir el roadmap.
+                          Completa una sesión de enfoque o añade una nota para comenzar a construir el roadmap.
                         </Text>
                       </View>
                     );
@@ -2462,6 +2263,7 @@ export default function DecisionCenterScreen() {
                           : 'Fecha desconocida';
 
                         const isEditing = editingSessionId === session.id;
+                        const isNoteOnly = !session.realDuration && !session.plannedDuration;
 
                         return (
                           <View 
@@ -2480,11 +2282,19 @@ export default function DecisionCenterScreen() {
                               <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>
                                 📅 {dateStr}
                               </Text>
-                              <View style={{ backgroundColor: 'rgba(255, 149, 0, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                                <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '800' }}>
-                                  ⏱️ {session.realDuration || session.plannedDuration} min
-                                </Text>
-                              </View>
+                              {isNoteOnly ? (
+                                <View style={{ backgroundColor: 'rgba(0, 122, 255, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                  <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '800' }}>
+                                    📝 Nota
+                                  </Text>
+                                </View>
+                              ) : (
+                                <View style={{ backgroundColor: 'rgba(255, 149, 0, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                  <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '800' }}>
+                                    ⏱️ {session.realDuration || session.plannedDuration} min
+                                  </Text>
+                                </View>
+                              )}
                             </View>
 
                             {isEditing ? (
@@ -2607,7 +2417,7 @@ export default function DecisionCenterScreen() {
                                 {/* What was done */}
                                 <View style={{ gap: 4 }}>
                                   <Text style={{ color: '#34C759', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
-                                    ✅ ¿Qué se hizo?
+                                    {isNoteOnly ? '📝 Nota' : '✅ ¿Qué se hizo?'}
                                   </Text>
                                   {session.notes ? (
                                     <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
@@ -2621,30 +2431,34 @@ export default function DecisionCenterScreen() {
                                 </View>
 
                                 {/* What to do next */}
-                                <View style={{ gap: 4 }}>
-                                  <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
-                                    🎯 Siguiente paso planificado:
-                                  </Text>
-                                  {session.nextStep ? (
-                                    <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
-                                      {session.nextStep}
+                                {!isNoteOnly && (
+                                  <View style={{ gap: 4 }}>
+                                    <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                                      🎯 Siguiente paso planificado:
                                     </Text>
-                                  ) : (
-                                    <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic' }}>
-                                      No especificado
-                                    </Text>
-                                  )}
-                                </View>
+                                    {session.nextStep ? (
+                                      <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
+                                        {session.nextStep}
+                                      </Text>
+                                    ) : (
+                                      <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic' }}>
+                                        No especificado
+                                      </Text>
+                                    )}
+                                  </View>
+                                )}
 
                                 {/* Progress Percentage */}
-                                <View style={{ gap: 4 }}>
-                                  <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
-                                    📈 Progreso de la tarea:
-                                  </Text>
-                                  <Text style={{ color: colors.text, fontSize: 13 }}>
-                                    {session.progress !== undefined ? `${session.progress}%` : '0%'}
-                                  </Text>
-                                </View>
+                                {!isNoteOnly && (
+                                  <View style={{ gap: 4 }}>
+                                    <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                                      📈 Progreso de la tarea:
+                                    </Text>
+                                    <Text style={{ color: colors.text, fontSize: 13 }}>
+                                      {session.progress !== undefined ? `${session.progress}%` : '0%'}
+                                    </Text>
+                                  </View>
+                                )}
 
                                 {/* Actions row */}
                                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16, borderTopWidth: 1, borderTopColor: colors.backgroundSelected, paddingTop: 10, marginTop: 4 }}>

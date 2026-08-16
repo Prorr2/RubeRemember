@@ -106,7 +106,7 @@ export default function PlansScreen() {
     });
 
     if (texts.length === 0) return;
-    Clipboard.setString(texts.join('\n'));
+    Clipboard.setString(texts.join('\n\n'));
     setSelectedIds([]);
   };
 

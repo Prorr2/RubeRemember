@@ -10,6 +10,7 @@ import {
   FlatList,
   Modal,
   TextInput,
+  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +29,7 @@ export default function ActivitiesScreen() {
 
   // Tab: 'SUGGESTIONS' or 'ALL'
   const [activeTab, setActiveTab] = useState<'SUGGESTIONS' | 'ALL'>('SUGGESTIONS');
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -60,6 +61,24 @@ export default function ActivitiesScreen() {
     );
   };
 
+  const handleBulkCopy = () => {
+    const texts: string[] = [];
+    store.items.forEach((item) => {
+      if (selectedIds.includes(item.id) && item.type === ItemType.ACTIVITY) {
+        const activity = item as Activity;
+        texts.push(activity.title + (activity.description ? ` - ${activity.description}` : ''));
+      }
+    });
+
+    if (texts.length === 0) return;
+    Clipboard.setString(texts.join('\n\n'));
+    setSelectedIds([]);
+  };
+
+  const handleCopyItemText = (activity: Activity) => {
+    Clipboard.setString(activity.title + (activity.description ? ` - ${activity.description}` : ''));
+  };
+
   // Category Manager Modal States
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -80,8 +99,8 @@ export default function ActivitiesScreen() {
 
   const filteredAllList = useMemo(() => {
     let list = store.getActivities();
-    if (selectedCategory !== 'ALL') {
-      list = list.filter((a) => a.category === selectedCategory);
+    if (selectedCategories.length > 0) {
+      list = list.filter((a) => selectedCategories.includes(a.category));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -93,7 +112,7 @@ export default function ActivitiesScreen() {
       if (!a.favourite && b.favourite) return 1;
       return a.title.localeCompare(b.title);
     });
-  }, [store.items, selectedCategory, searchQuery]);
+  }, [store.items, selectedCategories, searchQuery]);
 
   const handleRegisterDone = async (activity: Activity) => {
     await store.registerActivityDone(activity.id);
@@ -143,9 +162,14 @@ export default function ActivitiesScreen() {
             <Ionicons name="close" size={24} color={colors.text} />
           </Pressable>
           <Text style={[styles.headerTitle, { color: colors.text }]}>{selectedIds.length} seleccionadas</Text>
-          <Pressable onPress={handleBulkDelete} style={styles.headerButton}>
-            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable onPress={handleBulkCopy} style={styles.headerButton}>
+              <Ionicons name="copy-outline" size={24} color="#5856D6" />
+            </Pressable>
+            <Pressable onPress={handleBulkDelete} style={styles.headerButton}>
+              <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+            </Pressable>
+          </View>
         </View>
       ) : (
         <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
@@ -258,13 +282,23 @@ export default function ActivitiesScreen() {
                         Realizada: {activity.doneCount || 0} {activity.doneCount === 1 ? 'vez' : 'veces'}
                       </Text>
                       
-                      <Pressable
-                        onPress={() => handleRegisterDone(activity)}
-                        style={[styles.actionBadgeBtn, { backgroundColor: '#5856D6' }]}
-                      >
-                        <Ionicons name="checkmark" size={14} color="#fff" />
-                        <Text style={styles.actionBadgeBtnText}>¡Hecho!</Text>
-                      </Pressable>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {selectedIds.length === 0 && (
+                          <Pressable
+                            onPress={() => handleCopyItemText(activity)}
+                            style={{ padding: 6 }}
+                          >
+                            <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
+                          </Pressable>
+                        )}
+                        <Pressable
+                          onPress={() => handleRegisterDone(activity)}
+                          style={[styles.actionBadgeBtn, { backgroundColor: '#5856D6' }]}
+                        >
+                          <Ionicons name="checkmark" size={14} color="#fff" />
+                          <Text style={styles.actionBadgeBtnText}>¡Hecho!</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   </Pressable>
                 );
@@ -299,27 +333,31 @@ export default function ActivitiesScreen() {
             </Pressable>
 
             <Pressable
-              onPress={() => setSelectedCategory('ALL')}
+              onPress={() => setSelectedCategories([])}
               style={[
                 styles.filterChip,
-                selectedCategory === 'ALL' && { backgroundColor: '#5856D6' },
-                selectedCategory !== 'ALL' && { backgroundColor: colors.backgroundElement },
+                selectedCategories.length === 0 && { backgroundColor: '#5856D6' },
+                selectedCategories.length > 0 && { backgroundColor: colors.backgroundElement },
               ]}
             >
-              <Text style={[styles.filterChipText, { color: selectedCategory === 'ALL' ? '#fff' : colors.text }]}>Todas</Text>
+              <Text style={[styles.filterChipText, { color: selectedCategories.length === 0 ? '#fff' : colors.text }]}>Todas</Text>
             </Pressable>
 
             {store.activityCategories.map((cat) => (
               <Pressable
                 key={cat.id}
-                onPress={() => setSelectedCategory(cat.id)}
+                onPress={() => {
+                  setSelectedCategories((prev) =>
+                    prev.includes(cat.id) ? prev.filter((c) => c !== cat.id) : [...prev, cat.id]
+                  );
+                }}
                 style={[
                   styles.filterChip,
-                  selectedCategory === cat.id && { backgroundColor: '#5856D6' },
-                  selectedCategory !== cat.id && { backgroundColor: colors.backgroundElement },
+                  selectedCategories.includes(cat.id) && { backgroundColor: '#5856D6' },
+                  !selectedCategories.includes(cat.id) && { backgroundColor: colors.backgroundElement },
                 ]}
               >
-                <Text style={[styles.filterChipText, { color: selectedCategory === cat.id ? '#fff' : colors.text }]}>
+                <Text style={[styles.filterChipText, { color: selectedCategories.includes(cat.id) ? '#fff' : colors.text }]}>
                   {cat.name}
                 </Text>
               </Pressable>
@@ -366,6 +404,15 @@ export default function ActivitiesScreen() {
                   </View>
 
                   <View style={styles.rowActions}>
+                    {selectedIds.length === 0 && (
+                      <Pressable
+                        onPress={() => handleCopyItemText(item)}
+                        style={styles.actionBtn}
+                      >
+                        <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
+                      </Pressable>
+                    )}
+
                     <Pressable
                       onPress={() => store.updateItem(item.id, { favourite: !item.favourite })}
                       style={styles.actionBtn}
@@ -509,9 +556,7 @@ export default function ActivitiesScreen() {
                                     style: 'destructive',
                                     onPress: async () => {
                                       await store.deleteActivityCategory(cat.id);
-                                      if (selectedCategory === cat.id) {
-                                        setSelectedCategory('ALL');
-                                      }
+                                      setSelectedCategories((prev) => prev.filter((c) => c !== cat.id));
                                     },
                                   },
                                 ]

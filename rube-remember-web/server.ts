@@ -1,5 +1,9 @@
 import type { Plugin } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'http';
+import os from 'os';
+// @ts-ignore
+import qrcode from 'qrcode-terminal';
+
 
 interface SyncPayload {
   data: any;
@@ -178,10 +182,46 @@ function apiMiddleware(req: IncomingMessage, res: ServerResponse): Promise<void>
   return undefined;
 }
 
+function printQrCodes(server: any) {
+  const address = server.httpServer?.address();
+  if (!address || typeof address !== 'object') return;
+  const port = address.port;
+
+  const interfaces = os.networkInterfaces();
+  const networkIps: string[] = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        networkIps.push(iface.address);
+      }
+    }
+  }
+
+  if (networkIps.length === 0) return;
+
+  console.log('\n  ➜  Escanea el código QR para conectar el móvil (Sincronización Local):');
+  for (const ip of networkIps) {
+    const url = `http://${ip}:${port}`;
+    console.log(`\n     Red: ${url}`);
+    qrcode.generate(url, { small: true });
+  }
+  console.log('');
+}
+
 export function localSyncPlugin(): Plugin {
   return {
     name: 'local-sync',
     configureServer(server) {
+      if (server.httpServer?.listening) {
+        printQrCodes(server);
+      } else {
+        server.httpServer?.once('listening', () => {
+          setTimeout(() => {
+            printQrCodes(server);
+          }, 100);
+        });
+      }
+
       server.middlewares.use((req, res, next) => {
         const handled = apiMiddleware(req, res);
         if (!handled) {
@@ -192,6 +232,16 @@ export function localSyncPlugin(): Plugin {
       });
     },
     configurePreviewServer(server) {
+      if (server.httpServer?.listening) {
+        printQrCodes(server);
+      } else {
+        server.httpServer?.once('listening', () => {
+          setTimeout(() => {
+            printQrCodes(server);
+          }, 100);
+        });
+      }
+
       server.middlewares.use((req, res, next) => {
         const handled = apiMiddleware(req, res);
         if (!handled) {

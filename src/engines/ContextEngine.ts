@@ -1,5 +1,5 @@
 import { TimeSlot } from '../models/TimeSlot';
-import { Task, Reminder as ReminderV2, UserSettings, EnergyType, Session, Item, ItemType } from '../models/Item';
+import { Task, Reminder as ReminderV2, Memo, UserSettings, EnergyType, Session, Item, ItemType } from '../models/Item';
 
 export interface CognitiveContext {
   currentTime: string; // "HH:MM"
@@ -8,7 +8,7 @@ export interface CognitiveContext {
   activeTimeSlot: TimeSlot | undefined;
   lastCompletedTaskId: string | undefined;
   recentEnergyTypes: EnergyType[];
-  activeReminders: ReminderV2[];
+  activeReminders: (ReminderV2 | Memo)[];
   userSettings: UserSettings;
   focusTasks: Task[];
 }
@@ -47,34 +47,58 @@ export const ContextEngine = {
       }
     }
 
-    // 3. Active Reminders (Reminder items scheduled for today or earlier that are not completed)
+    // 3. Active Reminders (Memos with alarm or legacy reminders scheduled for today or earlier that are not completed)
     const todayStr = now.toISOString().split('T')[0];
     const activeReminders = items.filter(i => {
-      if (i.type !== ItemType.REMINDER || i.completed || i.archived || i.trash) return false;
-      const rem = i as ReminderV2;
+      if (i.completed || i.archived || i.trash) return false;
       
-      // Check if remindAt exists and includes today or is past due
-      if (!rem.remindAt) return false;
+      if (i.type === ItemType.REMINDER) {
+        const rem = i as ReminderV2;
+        if (!rem.remindAt) return false;
+        
+        const hasTodayOrPastDate = rem.remindAt.dates.some(dateStr => {
+          return dateStr <= todayStr;
+        });
+
+        if (!hasTodayOrPastDate) return false;
+
+        // Check time
+        if (rem.remindAt.time) {
+          const [remH, remM] = rem.remindAt.time.split(':').map(Number);
+          const remTotal = remH * 60 + remM;
+          const isPastOrEqualTime = rem.remindAt.dates.includes(todayStr) 
+            ? currentTotalMinutes >= remTotal 
+            : true;
+          return isPastOrEqualTime;
+        }
+        return true;
+      }
       
-      const hasTodayOrPastDate = rem.remindAt.dates.some(dateStr => {
-        return dateStr <= todayStr;
-      });
+      if (i.type === ItemType.MEMO) {
+        const memo = i as Memo;
+        if (!memo.hasAlarm) return false;
+        
+        const start = memo.startDate || '';
+        const end = memo.endDate || '';
+        
+        const includesTodayOrPast = (
+          (!start || start <= todayStr) &&
+          (!end || end >= todayStr)
+        );
 
-      if (!hasTodayOrPastDate) return false;
+        if (!includesTodayOrPast) return false;
 
-      // Check time
-      if (rem.remindAt.time) {
-        const [remH, remM] = rem.remindAt.time.split(':').map(Number);
-        const remTotal = remH * 60 + remM;
-        // If it's today, it must be <= current time
-        const isPastOrEqualTime = rem.remindAt.dates.includes(todayStr) 
-          ? currentTotalMinutes >= remTotal 
-          : true; // If it's from a past date, it's always past due
-        return isPastOrEqualTime;
+        // Check time
+        if (memo.alarmTime) {
+          const [remH, remM] = memo.alarmTime.split(':').map(Number);
+          const remTotal = remH * 60 + remM;
+          return currentTotalMinutes >= remTotal;
+        }
+        return true;
       }
 
-      return true;
-    }) as ReminderV2[];
+      return false;
+    }) as (ReminderV2 | Memo)[];
 
     // 4. Focus Tasks
     const focusTasks = items.filter(i => 

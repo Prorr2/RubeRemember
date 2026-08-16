@@ -51,8 +51,7 @@ export default function SessionScreen() {
   const [completedState, setCompletedState] = useState<'working' | 'questions' | 'done'>('working');
 
   // Question states
-  const [whatDone, setWhatDone] = useState('');
-  const [whatNext, setWhatNext] = useState('');
+  const [note, setNote] = useState('');
   const [isTaskCompleted, setIsTaskCompleted] = useState(false);
   const [progress, setProgress] = useState('0');
 
@@ -95,7 +94,6 @@ export default function SessionScreen() {
   useEffect(() => {
     if (task) {
       setIsTaskCompleted(task.completed || false);
-      setWhatNext(task.nextStep || '');
       setProgress(String(task.progress || 0));
     }
   }, [task?.id]);
@@ -221,7 +219,6 @@ export default function SessionScreen() {
       let isTaskFullyCompleted = isTaskCompleted;
 
       taskUpdates.lastProgress = new Date().toISOString();
-      taskUpdates.nextStep = whatNext.trim();
 
       const parsedProgress = parseInt(progress, 10);
       taskUpdates.progress = isTaskFullyCompleted ? 100 : (isNaN(parsedProgress) ? 0 : parsedProgress);
@@ -233,8 +230,8 @@ export default function SessionScreen() {
       }
 
       // 2. End session and apply task updates in a single atomic transaction
-      // whatDone is saved in the notes field, whatNext in nextStep
-      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, whatDone.trim(), taskUpdates);
+      // note is saved in the notes field
+      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, note.trim(), taskUpdates);
 
       setCompletedState('done');
       setTimeout(() => {
@@ -315,25 +312,14 @@ export default function SessionScreen() {
           </Text>
 
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.text }]}>¿Qué has hecho durante esta sesión? (Opcional)</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Nota</Text>
             <TextInput
-              placeholder="Ej: Programé la autenticación de usuarios y diseño del login"
+              placeholder="Escribe una nota sobre esta sesión"
               placeholderTextColor={colors.textSecondary + '70'}
-              value={whatDone}
-              onChangeText={setWhatDone}
+              value={note}
+              onChangeText={setNote}
               style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement, minHeight: 80, textAlignVertical: 'top' }]}
               multiline
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.text }]}>¿Qué deberías hacer en la siguiente? (Opcional)</Text>
-            <TextInput
-              placeholder="Ej: Conectar el login con el backend"
-              placeholderTextColor={colors.textSecondary + '70'}
-              value={whatNext}
-              onChangeText={setWhatNext}
-              style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
             />
           </View>
 

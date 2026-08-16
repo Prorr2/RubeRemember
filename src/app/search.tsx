@@ -10,6 +10,7 @@ import {
   useColorScheme,
   Modal,
   Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -24,23 +25,48 @@ export default function SearchScreen() {
 
   // Universal Modal States
   const [selectedTaskOptions, setSelectedTaskOptions] = useState<Task | null>(null);
-  const [showSlotAssociationTask, setShowSlotAssociationTask] = useState<Task | null>(null);
   const [showProgressRoadmap, setShowProgressRoadmap] = useState<Task | null>(null);
+  
+  // Alarm Modal States
+  const [alarmTask, setAlarmTask] = useState<Task | null>(null);
+  const [alarmHour, setAlarmHour] = useState(new Date().getHours());
+  const [alarmMinute, setAlarmMinute] = useState(new Date().getMinutes());
 
   // Roadmap Edit States
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editNotes, setEditNotes] = useState('');
   const [editNextStep, setEditNextStep] = useState('');
   const [editProgress, setEditProgress] = useState('0');
+  const [showAddNote, setShowAddNote] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
 
-  const todayStr = new Date().toISOString().split('T')[0];
-
-  const handleAssignToSlot = async (taskId: string, slotId: string) => {
-    await store.updateItem(taskId, { timeSlotId: slotId, dueDate: todayStr });
+  const handleScheduleSystemAlarm = async (taskTitle: string, hours: number, minutes: number) => {
+    if (Platform.OS === 'android') {
+      try {
+        const IntentLauncher = require('expo-intent-launcher');
+        await IntentLauncher.startActivityAsync('android.intent.action.SET_ALARM', {
+          extra: {
+            'android.intent.extra.alarm.HOUR': hours,
+            'android.intent.extra.alarm.MINUTES': minutes,
+            'android.intent.extra.alarm.MESSAGE': taskTitle,
+            'android.intent.extra.alarm.SKIP_UI': true,
+          },
+        });
+        Alert.alert('Alarma Programada', `Se programó la alarma para hoy a las ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')} para "${taskTitle}".`);
+      } catch (err: any) {
+        console.warn('Failed to start system alarm intent:', err);
+        Alert.alert('Error', `No se pudo programar la alarma: ${err?.message || String(err)}`);
+      }
+    } else {
+      Alert.alert('No soportado', 'La programación de alarmas del sistema con esta hora solo está soportada en Android.');
+    }
   };
 
-  const handleUnassignFromSlot = async (taskId: string) => {
-    await store.updateItem(taskId, { timeSlotId: undefined });
+  const handleOpenAlarmDialog = (task: Task) => {
+    const now = new Date();
+    setAlarmHour(now.getHours());
+    setAlarmMinute(now.getMinutes());
+    setAlarmTask(task);
   };
 
   const colorScheme = useColorScheme();
@@ -48,14 +74,14 @@ export default function SearchScreen() {
   const colors = Colors[scheme];
 
   const [query, setQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'todo' | 'tasks' | 'reminders' | 'memos' | 'plans' | 'activities' | 'goals' | 'lists'>('todo');
+  const [activeFilter, setActiveFilter] = useState<'todo' | 'tasks' | 'memos' | 'plans' | 'activities' | 'goals' | 'lists'>('todo');
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
 
   // Group search results
   const results = useMemo(() => {
     const q = query.toLowerCase().trim();
-    if (!q) return { tasks: [], reminders: [], activities: [], memos: [], plans: [], goals: [], lists: [] };
+    if (!q) return { tasks: [], activities: [], memos: [], plans: [], goals: [], lists: [] };
 
     const matchesText = (title: string = '', desc: string = '', tags: string[] = []) => {
       const titleMatch = title.toLowerCase().includes(q);
@@ -73,7 +99,6 @@ export default function SearchScreen() {
     });
 
     const tasks = filteredItems.filter((i) => i.type === ItemType.TASK);
-    const reminders = filteredItems.filter((i) => i.type === ItemType.REMINDER);
     const activities = filteredItems.filter((i) => i.type === ItemType.ACTIVITY);
     const memos = filteredItems.filter((i) => i.type === ItemType.MEMO);
     const plans = filteredItems.filter((i) => i.type === ItemType.PLAN);
@@ -92,12 +117,11 @@ export default function SearchScreen() {
       return listNameMatch || itemMatch;
     });
 
-    return { tasks, reminders, activities, memos, plans, goals, lists };
+    return { tasks, activities, memos, plans, goals, lists };
   }, [query, store.items, store.goals, store.lists, onlyFavorites, includeArchived]);
 
   const hasResults =
     results.tasks.length > 0 ||
-    results.reminders.length > 0 ||
     results.activities.length > 0 ||
     results.memos.length > 0 ||
     results.plans.length > 0 ||
@@ -146,7 +170,6 @@ export default function SearchScreen() {
           {[
             { id: 'todo', label: 'Todo', icon: 'apps-outline' },
             { id: 'tasks', label: 'Tareas', icon: 'checkbox-outline' },
-            { id: 'reminders', label: 'Alarmas', icon: 'notifications-outline' },
             { id: 'memos', label: 'Recordatorios', icon: 'bookmark-outline' },
             { id: 'plans', label: 'Planes', icon: 'compass-outline' },
             { id: 'activities', label: 'Ocio', icon: 'sparkles-outline' },
@@ -236,34 +259,6 @@ export default function SearchScreen() {
                     >
                       <View style={styles.resultHeader}>
                         <Ionicons name="checkbox" size={20} color="#FF9500" />
-                        <Text style={[styles.resultTitle, { color: colors.text }]} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                      </View>
-                      {item.description ? (
-                        <Text style={[styles.resultDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      ) : null}
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {/* REMINDERS */}
-            {(activeFilter === 'todo' || activeFilter === 'reminders') && results.reminders.length > 0 && (
-              <View style={styles.group}>
-                <Text style={[styles.groupTitle, { color: colors.textSecondary }]}>ALARMAS ({results.reminders.length})</Text>
-                <View style={styles.groupContent}>
-                  {results.reminders.map((item) => (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => navigateToItem(item)}
-                      style={[styles.resultCard, { backgroundColor: colors.backgroundElement }]}
-                    >
-                      <View style={styles.resultHeader}>
-                        <Ionicons name="notifications" size={20} color="#007AFF" />
                         <Text style={[styles.resultTitle, { color: colors.text }]} numberOfLines={1}>
                           {item.title}
                         </Text>
@@ -522,17 +517,17 @@ export default function SearchScreen() {
                   const t = selectedTaskOptions;
                   setSelectedTaskOptions(null);
                   if (t) {
-                    setShowSlotAssociationTask(t);
+                    handleOpenAlarmDialog(t);
                   }
                 }}
                 style={[styles.bottomModalOptionBtn, { backgroundColor: colors.background }]}
               >
-                <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                  <Ionicons name="calendar-outline" size={22} color="#FF9500" />
+                <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 59, 48, 0.15)' }]}>
+                  <Ionicons name="alarm-outline" size={22} color="#FF3B30" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.bottomModalOptionTitle, { color: colors.text }]}>Asociar a bloque de trabajo</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Asigna esta tarea a una franja horaria de hoy</Text>
+                  <Text style={[styles.bottomModalOptionTitle, { color: colors.text }]}>Fijar Alarma</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Programa una alarma del sistema para esta tarea hoy</Text>
                 </View>
               </Pressable>
             </View>
@@ -547,16 +542,16 @@ export default function SearchScreen() {
         </Pressable>
       </Modal>
 
-      {/* SLOT ASSOCIATION MODAL */}
+      {/* ALARM PROGRAMMING MODAL */}
       <Modal
-        visible={showSlotAssociationTask !== null}
+        visible={alarmTask !== null}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setShowSlotAssociationTask(null)}
+        onRequestClose={() => setAlarmTask(null)}
       >
         <Pressable 
           style={styles.bottomModalOverlay}
-          onPress={() => setShowSlotAssociationTask(null)}
+          onPress={() => setAlarmTask(null)}
         >
           <View 
             style={[styles.optionsModalContent, { backgroundColor: colors.backgroundElement }]}
@@ -565,90 +560,110 @@ export default function SearchScreen() {
           >
             <View style={styles.bottomModalHeaderLine} />
             <Text style={[styles.bottomModalTitle, { color: colors.text, marginBottom: 8 }]}>
-              Asociar a Bloque de Trabajo
+              Programar Alarma del Sistema
             </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 20 }}>
-              Selecciona un bloque de trabajo de hoy para "{showSlotAssociationTask?.title}"
+            <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 24 }}>
+              Fijar para hoy para: "{alarmTask?.title}"
             </Text>
 
-            <ScrollView style={{ maxHeight: 300, width: '100%' }} showsVerticalScrollIndicator={false}>
-              {showSlotAssociationTask?.timeSlotId ? (
+            {/* Time Pickers (Increment/Decrement style) */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24, marginBottom: 30 }}>
+              {/* Hour control */}
+              <View style={{ alignItems: 'center' }}>
                 <Pressable
-                  onPress={async () => {
-                    if (showSlotAssociationTask) {
-                      await handleUnassignFromSlot(showSlotAssociationTask.id);
-                      setShowSlotAssociationTask(null);
-                    }
+                  onPress={() => setAlarmHour((h) => (h + 1) % 24)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 8
                   }}
-                  style={[
-                    styles.bottomModalOptionBtn,
-                    { 
-                      backgroundColor: colors.background,
-                      marginBottom: 12,
-                      borderColor: '#FF3B30',
-                      borderWidth: 1 
-                    }
-                  ]}
                 >
-                  <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 59, 48, 0.15)' }]}>
-                    <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.bottomModalOptionTitle, { color: '#FF3B30' }]}>Desvincular del bloque actual</Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Eliminar la asignación a bloques de trabajo</Text>
-                  </View>
+                  <Ionicons name="chevron-up" size={24} color={colors.text} />
                 </Pressable>
-              ) : null}
-
-              {store.timeSlots.map((slot) => {
-                const isSelected = showSlotAssociationTask?.timeSlotId === slot.id;
-                return (
-                  <Pressable
-                    key={slot.id}
-                    onPress={async () => {
-                      if (showSlotAssociationTask) {
-                        await handleAssignToSlot(showSlotAssociationTask.id, slot.id);
-                        setShowSlotAssociationTask(null);
-                      }
-                    }}
-                    style={[
-                      styles.bottomModalOptionBtn,
-                      { 
-                        backgroundColor: colors.background,
-                        marginBottom: 12,
-                        borderWidth: isSelected ? 2 : 0,
-                        borderColor: '#FF9500'
-                      }
-                    ]}
-                  >
-                    <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                      <Ionicons name="calendar-outline" size={20} color="#FF9500" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.bottomModalOptionTitle, { color: colors.text, fontWeight: isSelected ? '800' : '600' }]}>
-                        {slot.name} {isSelected ? '✓' : ''}
-                      </Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                        ⏱️ {slot.startTime} - {slot.endTime}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-              
-              {store.timeSlots.length === 0 && (
-                <Text style={{ color: colors.textSecondary, textAlign: 'center', marginVertical: 20 }}>
-                  No hay bloques de trabajo creados para hoy.
+                <Text style={{ fontSize: 32, fontWeight: '700', color: colors.text }}>
+                  {alarmHour.toString().padStart(2, '0')}
                 </Text>
-              )}
-            </ScrollView>
+                <Pressable
+                  onPress={() => setAlarmHour((h) => (h - 1 + 24) % 24)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginTop: 8
+                  }}
+                >
+                  <Ionicons name="chevron-down" size={24} color={colors.text} />
+                </Pressable>
+              </View>
 
-            <Pressable 
-              onPress={() => setShowSlotAssociationTask(null)}
-              style={[styles.bottomModalCloseBtn, { backgroundColor: colors.backgroundSelected, marginTop: 8 }]}
-            >
-              <Text style={{ color: colors.text, fontWeight: '700' }}>Cancelar</Text>
-            </Pressable>
+              <Text style={{ fontSize: 32, fontWeight: '700', color: colors.text, marginBottom: 8 }}>:</Text>
+
+              {/* Minute control */}
+              <View style={{ alignItems: 'center' }}>
+                <Pressable
+                  onPress={() => setAlarmMinute((m) => (m + 5) % 60)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 8
+                  }}
+                >
+                  <Ionicons name="chevron-up" size={24} color={colors.text} />
+                </Pressable>
+                <Text style={{ fontSize: 32, fontWeight: '700', color: colors.text }}>
+                  {alarmMinute.toString().padStart(2, '0')}
+                </Text>
+                <Pressable
+                  onPress={() => setAlarmMinute((m) => (m - 5 + 60) % 60)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: colors.backgroundSelected,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginTop: 8
+                  }}
+                >
+                  <Ionicons name="chevron-down" size={24} color={colors.text} />
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={{ gap: 12, width: '100%' }}>
+              <Pressable
+                onPress={async () => {
+                  if (alarmTask) {
+                    await handleScheduleSystemAlarm(alarmTask.title, alarmHour, alarmMinute);
+                    setAlarmTask(null);
+                  }
+                }}
+                style={[styles.bottomModalOptionBtn, { backgroundColor: '#FF3B30', justifyContent: 'center', height: 50 }]}
+              >
+                <Ionicons name="alarm" size={20} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16, marginLeft: 8 }}>
+                  Programar Alarma
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setAlarmTask(null)}
+                style={[styles.bottomModalCloseBtn, { backgroundColor: colors.backgroundSelected }]}
+              >
+                <Text style={{ color: colors.text, fontWeight: '700' }}>Cancelar</Text>
+              </Pressable>
+            </View>
           </View>
         </Pressable>
       </Modal>
@@ -682,6 +697,76 @@ export default function SearchScreen() {
                 contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}
                 showsVerticalScrollIndicator={false}
               >
+                <View style={{ gap: 10, marginBottom: 12 }}>
+                  {showAddNote ? (
+                    <>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>📝 Nueva Nota</Text>
+                      <TextInput
+                        value={newNoteText}
+                        onChangeText={setNewNoteText}
+                        placeholder="Escribe una nota sobre esta tarea..."
+                        placeholderTextColor={colors.textSecondary + '70'}
+                        autoFocus
+                        multiline
+                        style={{
+                          color: colors.text,
+                          backgroundColor: colors.background,
+                          borderColor: colors.backgroundSelected,
+                          borderWidth: 1,
+                          borderRadius: 12,
+                          padding: 10,
+                          fontSize: 13,
+                          minHeight: 60,
+                          textAlignVertical: 'top'
+                        }}
+                      />
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable
+                          onPress={async () => {
+                            const text = newNoteText.trim();
+                            if (text && showProgressRoadmap) {
+                              await store.createSession(showProgressRoadmap.id, 0, text);
+                            }
+                            setNewNoteText('');
+                            setShowAddNote(false);
+                          }}
+                          style={{ flex: 1, backgroundColor: '#FF9500', padding: 12, borderRadius: 10, alignItems: 'center' }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>Guardar Nota</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            setNewNoteText('');
+                            setShowAddNote(false);
+                          }}
+                          style={{ flex: 1, backgroundColor: colors.backgroundSelected, padding: 12, borderRadius: 10, alignItems: 'center' }}
+                        >
+                          <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Cancelar</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  ) : (
+                    <Pressable
+                      onPress={() => setShowAddNote(true)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        backgroundColor: 'rgba(255, 149, 0, 0.12)',
+                        borderWidth: 1,
+                        borderColor: 'rgba(255, 149, 0, 0.4)',
+                        borderStyle: 'dashed',
+                        borderRadius: 12,
+                        paddingVertical: 12
+                      }}
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color="#FF9500" />
+                      <Text style={{ color: '#FF9500', fontSize: 13, fontWeight: '700' }}>Añadir Nota</Text>
+                    </Pressable>
+                  )}
+                </View>
+
                 {(() => {
                   const taskSessions = store.sessions
                     .filter(s => String(s.taskId) === String(showProgressRoadmap.id))
@@ -695,7 +780,7 @@ export default function SearchScreen() {
                           Aún no hay sesiones registradas en el roadmap de esta tarea.
                         </Text>
                         <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center', paddingHorizontal: 24, marginTop: 8, opacity: 0.7 }}>
-                          Completa una sesión de enfoque para comenzar a construir el roadmap.
+                          Completa una sesión de enfoque o añade una nota para comenzar a construir el roadmap.
                         </Text>
                       </View>
                     );
@@ -716,6 +801,7 @@ export default function SearchScreen() {
                           : 'Fecha desconocida';
 
                         const isEditing = editingSessionId === session.id;
+                        const isNoteOnly = !session.realDuration && !session.plannedDuration;
 
                         return (
                           <View 
@@ -734,11 +820,19 @@ export default function SearchScreen() {
                               <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>
                                 📅 {dateStr}
                               </Text>
-                              <View style={{ backgroundColor: 'rgba(255, 149, 0, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                                <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '800' }}>
-                                  ⏱️ {session.realDuration || session.plannedDuration} min
-                                </Text>
-                              </View>
+                              {isNoteOnly ? (
+                                <View style={{ backgroundColor: 'rgba(0, 122, 255, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                  <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '800' }}>
+                                    📝 Nota
+                                  </Text>
+                                </View>
+                              ) : (
+                                <View style={{ backgroundColor: 'rgba(255, 149, 0, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                  <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '800' }}>
+                                    ⏱️ {session.realDuration || session.plannedDuration} min
+                                  </Text>
+                                </View>
+                              )}
                             </View>
 
                             {isEditing ? (
@@ -861,7 +955,7 @@ export default function SearchScreen() {
                                 {/* What was done */}
                                 <View style={{ gap: 4 }}>
                                   <Text style={{ color: '#34C759', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
-                                    ✅ ¿Qué se hizo?
+                                    {isNoteOnly ? '📝 Nota' : '✅ ¿Qué se hizo?'}
                                   </Text>
                                   {session.notes ? (
                                     <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
@@ -875,30 +969,34 @@ export default function SearchScreen() {
                                 </View>
 
                                 {/* What to do next */}
-                                <View style={{ gap: 4 }}>
-                                  <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
-                                    🎯 Siguiente hito / paso planificado:
-                                  </Text>
-                                  {session.nextStep ? (
-                                    <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
-                                      {session.nextStep}
+                                {!isNoteOnly && (
+                                  <View style={{ gap: 4 }}>
+                                    <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                                      🎯 Siguiente hito / paso planificado:
                                     </Text>
-                                  ) : (
-                                    <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic' }}>
-                                      No especificado
-                                    </Text>
-                                  )}
-                                </View>
+                                    {session.nextStep ? (
+                                      <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
+                                        {session.nextStep}
+                                      </Text>
+                                    ) : (
+                                      <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic' }}>
+                                        No especificado
+                                      </Text>
+                                    )}
+                                  </View>
+                                )}
 
                                 {/* Progress Percentage */}
-                                <View style={{ gap: 4 }}>
-                                  <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
-                                    📈 Progreso de la tarea:
-                                  </Text>
-                                  <Text style={{ color: colors.text, fontSize: 13 }}>
-                                    {session.progress !== undefined ? `${session.progress}%` : '0%'}
-                                  </Text>
-                                </View>
+                                {!isNoteOnly && (
+                                  <View style={{ gap: 4 }}>
+                                    <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                                      📈 Progreso de la tarea:
+                                    </Text>
+                                    <Text style={{ color: colors.text, fontSize: 13 }}>
+                                      {session.progress !== undefined ? `${session.progress}%` : '0%'}
+                                    </Text>
+                                  </View>
+                                )}
 
                                 {/* Actions row */}
                                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16, borderTopWidth: 1, borderTopColor: colors.backgroundSelected, paddingTop: 10, marginTop: 4 }}>

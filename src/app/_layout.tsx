@@ -82,11 +82,11 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="backup" />
+              <Stack.Screen name="sync" />
               <Stack.Screen name="settings" />
               <Stack.Screen name="slots" />
               <Stack.Screen name="goals" />
               <Stack.Screen name="tasks" />
-              <Stack.Screen name="reminders" />
               <Stack.Screen name="activities" />
               <Stack.Screen name="trash" />
               <Stack.Screen name="editor" />

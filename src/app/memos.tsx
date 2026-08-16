@@ -8,6 +8,7 @@ import {
   Alert,
   useColorScheme,
   TextInput,
+  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,7 @@ export default function MemosScreen() {
   const [showCompleted, setShowCompleted] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [pastCollapsed, setPastCollapsed] = useState(true);
 
   const handleToggleSelect = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -57,6 +59,24 @@ export default function MemosScreen() {
     );
   };
 
+  const handleBulkCopy = () => {
+    const texts: string[] = [];
+    store.items.forEach((item) => {
+      if (selectedIds.includes(item.id) && item.type === ItemType.MEMO) {
+        const memo = item as Memo;
+        texts.push(memo.title + (memo.description ? ` - ${memo.description}` : ''));
+      }
+    });
+
+    if (texts.length === 0) return;
+    Clipboard.setString(texts.join('\n\n'));
+    setSelectedIds([]);
+  };
+
+  const handleCopyItemText = (memo: Memo) => {
+    Clipboard.setString(memo.title + (memo.description ? ` - ${memo.description}` : ''));
+  };
+
   // Group memos dynamically based on the current local date and search query
   const groupedMemos = useMemo(() => {
     const today = getLocalDateStr(new Date());
@@ -69,21 +89,26 @@ export default function MemosScreen() {
 
     const activeList: Memo[] = [];
     const upcomingList: Memo[] = [];
-    const pastCompletedList: Memo[] = [];
+    const pastList: Memo[] = [];
+    const completedList: Memo[] = [];
 
     filteredList.forEach((memo) => {
       if (memo.completed) {
-        pastCompletedList.push(memo);
+        completedList.push(memo);
       } else {
-        const isStarted = !memo.startDate || memo.startDate <= today;
-        const isNotEnded = !memo.endDate || memo.endDate >= today;
+        const hasStart = !!memo.startDate;
+        const hasEnd = !!memo.endDate;
+        const start = memo.startDate || '';
+        const end = memo.endDate || '';
 
-        if (isStarted && isNotEnded) {
-          activeList.push(memo);
-        } else if (memo.startDate && memo.startDate > today) {
+        const effectiveEndDate = hasEnd ? end : (hasStart ? start : '');
+
+        if (effectiveEndDate && effectiveEndDate < today) {
+          pastList.push(memo);
+        } else if (hasStart && start > today) {
           upcomingList.push(memo);
         } else {
-          pastCompletedList.push(memo);
+          activeList.push(memo);
         }
       }
     });
@@ -95,9 +120,10 @@ export default function MemosScreen() {
     };
 
     return [
+      { title: 'Pasados de fecha', data: pastList.sort(sortByDate), icon: 'alert-circle-outline', color: '#FF3B30' },
       { title: 'Activos en este momento', data: activeList.sort(sortByDate), icon: 'eye-outline', color: '#34C759' },
       { title: 'Programados próximamente', data: upcomingList.sort(sortByDate), icon: 'calendar-outline', color: '#FF9500' },
-      { title: 'Pasados o Completados', data: pastCompletedList.sort(sortByDate), icon: 'archive-outline', color: colors.textSecondary },
+      { title: 'Pasados o Completados', data: completedList.sort(sortByDate), icon: 'archive-outline', color: colors.textSecondary },
     ];
   }, [store.items, colors.textSecondary, searchQuery]);
 
@@ -218,16 +244,24 @@ export default function MemosScreen() {
           </View>
 
           <View style={styles.cardActions}>
-            <Pressable
-              onPress={() => router.push({ pathname: '/editor', params: { id: item.id } })}
-              style={styles.actionBtn}
-            >
-              <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
-            </Pressable>
+            {selectedIds.length === 0 && (
+              <>
+                <Pressable onPress={() => handleCopyItemText(item)} style={styles.actionBtn}>
+                  <Ionicons name="copy-outline" size={20} color={colors.textSecondary} />
+                </Pressable>
 
-            <Pressable onPress={() => handleDeleteMemo(item)} style={styles.actionBtn}>
-              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-            </Pressable>
+                <Pressable
+                  onPress={() => router.push({ pathname: '/editor', params: { id: item.id } })}
+                  style={styles.actionBtn}
+                >
+                  <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
+                </Pressable>
+
+                <Pressable onPress={() => handleDeleteMemo(item)} style={styles.actionBtn}>
+                  <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </Pressable>
@@ -246,9 +280,14 @@ export default function MemosScreen() {
             <Ionicons name="close" size={24} color={colors.text} />
           </Pressable>
           <Text style={[styles.headerTitle, { color: colors.text }]}>{selectedIds.length} seleccionadas</Text>
-          <Pressable onPress={handleBulkDelete} style={styles.headerButton}>
-            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable onPress={handleBulkCopy} style={styles.headerButton}>
+              <Ionicons name="copy-outline" size={24} color="#00C7BE" />
+            </Pressable>
+            <Pressable onPress={handleBulkDelete} style={styles.headerButton}>
+              <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+            </Pressable>
+          </View>
         </View>
       ) : (
         <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
@@ -286,6 +325,24 @@ export default function MemosScreen() {
         </View>
       )}
 
+      {/* Schedule Today's Alarms Button */}
+      {!selectedIds.length && (
+        <View style={styles.scheduleButtonContainer}>
+          <Pressable
+            onPress={async () => {
+              await store.scheduleTodayMemosAlarms();
+            }}
+            style={({ pressed }) => [
+              styles.scheduleButton,
+              { backgroundColor: themeColor, opacity: pressed ? 0.8 : 1 }
+            ]}
+          >
+            <Ionicons name="alarm-outline" size={20} color="#fff" />
+            <Text style={styles.scheduleButtonText}>Programar alarmas de hoy</Text>
+          </Pressable>
+        </View>
+      )}
+
       {isListEmpty ? (
         <View style={styles.emptyContainer}>
           {searchQuery ? (
@@ -308,10 +365,29 @@ export default function MemosScreen() {
         <ScrollView contentContainerStyle={styles.listContent}>
           {groupedMemos.map((section) => {
             if (section.data.length === 0) return null;
+            const isPastSection = section.title === 'Pasados de fecha';
+            const isCollapsed = isPastSection && pastCollapsed;
+
             return (
               <View key={section.title} style={styles.sectionContainer}>
-                {renderSectionHeader(section.title, section.data.length, section.icon, section.color)}
-                {section.data.map((item) => renderMemoItem(item))}
+                {isPastSection ? (
+                  <Pressable
+                    onPress={() => setPastCollapsed(!pastCollapsed)}
+                    style={[styles.sectionHeader, { justifyContent: 'space-between', paddingRight: 8 }]}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name={section.icon as any} size={14} color={section.color} />
+                      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{section.title}</Text>
+                      <View style={[styles.badge, { backgroundColor: colors.backgroundSelected }]}>
+                        <Text style={[styles.badgeText, { color: colors.text }]}>{section.data.length}</Text>
+                      </View>
+                    </View>
+                    <Ionicons name={isCollapsed ? 'chevron-forward' : 'chevron-down'} size={18} color={colors.textSecondary} />
+                  </Pressable>
+                ) : (
+                  renderSectionHeader(section.title, section.data.length, section.icon, section.color)
+                )}
+                {!isCollapsed && section.data.map((item) => renderMemoItem(item))}
               </View>
             );
           })}
@@ -434,5 +510,27 @@ const styles = StyleSheet.create({
   },
   clearButton: {
     padding: 2,
+  },
+  scheduleButtonContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  scheduleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 44,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: '#00C7BE',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  scheduleButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

@@ -46,6 +46,8 @@ export interface Task extends BaseItem {
   timeSlotId?: string;
   time?: string; // HH:MM (calculated from slot or custom)
   comments: Comment[];
+  habit?: boolean; // true when the task is saved as a habit
+  habitTime?: string; // HH:MM configurable time shown for the habit
 
   // Cognitive Engine fields
   executionStrategy?: ExecutionStrategy;
