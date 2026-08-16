@@ -10,4 +10,6 @@ export interface Session {
   createdAt: string; // ISO date string
   nextStep?: string;
   progress?: number;
+  notesImages?: string[];
+  nextStepImages?: string[];
 }

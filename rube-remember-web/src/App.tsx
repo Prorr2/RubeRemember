@@ -17,6 +17,7 @@ import {
   getTaskWeightLabel,
   ScoreEngine
 } from './engines';
+import { RichText } from './RichText';
 
 export default function App() {
   const db = useRememberStore();
@@ -880,11 +881,18 @@ export default function App() {
                       ? (db.items.find(i => i.id === recommendation.taskId)?.title || recommendation.reason)
                       : recommendation.reason}
                   </h2>
-                  <p className="rec-desc">
-                    {recommendation.taskId
-                      ? (db.items.find(i => i.id === recommendation.taskId)?.description || 'Sin notas adicionales.')
-                      : ''}
-                  </p>
+                  <div className="rec-desc">
+                    {recommendation.taskId ? (
+                      (() => {
+                        const taskDesc = db.items.find(i => i.id === recommendation.taskId)?.description;
+                        return taskDesc ? (
+                          <RichText text={taskDesc} className="rec-desc-rich" />
+                        ) : (
+                          <span className="rec-desc-fallback">Sin notas adicionales.</span>
+                        );
+                      })()
+                    ) : ''}
+                  </div>
 
                   <div className="rec-reasons-list">
                     <div className="rec-reason-item">
@@ -1071,7 +1079,11 @@ export default function App() {
                               </span>
                               {task.dueDate && <span className="task-due-date">📅 {task.dueDate}</span>}
                             </div>
-                            <span className="task-desc">{task.description || 'Sin notas.'}</span>
+                            {task.description ? (
+                              <RichText text={task.description} className="task-desc" style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }} />
+                            ) : (
+                              <span className="task-desc">Sin notas.</span>
+                            )}
                             <div className="task-meta-tags">
                               <span className={`tag-meta tag-priority-${task.priority}`}>
                                 {task.priority}
@@ -1195,7 +1207,11 @@ export default function App() {
                           {catObj ? catObj.name : act.category}
                         </div>
                         <span className="activity-title">{act.title}</span>
-                        <span className="subtitle">{act.description || 'Sin notas.'}</span>
+                        {act.description ? (
+                          <RichText text={act.description} className="subtitle" style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }} />
+                        ) : (
+                          <span className="subtitle">Sin notas.</span>
+                        )}
                       </div>
                       <div className="activity-stats">
                         <span>Registros: {act.doneCount || 0}</span>
@@ -1355,7 +1371,11 @@ export default function App() {
                       <span className="memo-title">{memo.title}</span>
                       <span className="subtitle">{new Date(memo.createdAt).toLocaleDateString()}</span>
                     </div>
-                    <p className="memo-body">{memo.description || 'Sin contenido.'}</p>
+                    {memo.description ? (
+                      <RichText text={memo.description} className="memo-body" style={{ margin: '8px 0', fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)' }} />
+                    ) : (
+                      <p className="memo-body">Sin contenido.</p>
+                    )}
                     <div className="memo-footer">
                       <span>Rango: {memo.startDate || ''} - {memo.endDate || ''}</span>
                       <div className="memo-actions-row">
@@ -1413,7 +1433,11 @@ export default function App() {
                       <span className="plan-range-tag">
                         {startMonthName} {plan.startYear} - {endMonthName} {plan.endYear}
                       </span>
-                      <p className="subtitle" style={{ margin: '8px 0' }}>{plan.description || 'Sin notas descriptivas.'}</p>
+                      {plan.description ? (
+                        <RichText text={plan.description} className="subtitle" style={{ margin: '8px 0', fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }} />
+                      ) : (
+                        <p className="subtitle" style={{ margin: '8px 0' }}>Sin notas descriptivas.</p>
+                      )}
                       <div className="plan-actions">
                         <button className="btn btn-secondary" onClick={() => handleOpenEditor(ItemType.PLAN, plan.id)}>✏️ Editar</button>
                         <button className="btn btn-danger" onClick={() => rememberStore.deleteItem(plan.id)}>🗑️</button>
@@ -2029,11 +2053,19 @@ export default function App() {
                       </div>
                       <div>
                         <span className="roadmap-session-label" style={{ color: 'var(--color-terra)' }}>✅ ¿Qué se hizo?</span>
-                        <p className="roadmap-session-text">{session.notes || 'No especificado'}</p>
+                        {session.notes ? (
+                          <RichText text={session.notes} className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)' }} />
+                        ) : (
+                          <p className="roadmap-session-text">No especificado</p>
+                        )}
                       </div>
                       <div>
                         <span className="roadmap-session-label" style={{ color: 'var(--color-sol)' }}>🎯 Siguiente paso planificado:</span>
-                        <p className="roadmap-session-text">{session.nextStep || 'No especificado'}</p>
+                        {session.nextStep ? (
+                          <RichText text={session.nextStep} className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)' }} />
+                        ) : (
+                          <p className="roadmap-session-text">No especificado</p>
+                        )}
                       </div>
                       <div>
                         <span className="roadmap-session-label" style={{ color: 'var(--color-luna)' }}>📈 Progreso de la tarea:</span>

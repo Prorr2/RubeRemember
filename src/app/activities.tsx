@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 
 import { useRememberStore, ItemType, Activity } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { RichText } from '@/components/rich-text';
 
 export default function ActivitiesScreen() {
   const store = useRememberStore();
@@ -272,9 +273,11 @@ export default function ActivitiesScreen() {
                     <Text style={[styles.activityTitle, { color: colors.text }]}>{activity.title}</Text>
                     
                     {activity.description ? (
-                      <Text style={[styles.activityDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                        {activity.description}
-                      </Text>
+                      <RichText
+                        text={activity.description}
+                        colors={colors}
+                        textStyle={[styles.activityDesc, { color: colors.textSecondary }]}
+                      />
                     ) : null}
 
                     <View style={styles.cardFooter}>

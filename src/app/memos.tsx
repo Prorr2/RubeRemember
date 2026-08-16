@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 
 import { useRememberStore, ItemType, Memo, getLocalDateStr } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { RichText } from '@/components/rich-text';
 
 export default function MemosScreen() {
   const store = useRememberStore();
@@ -224,9 +225,11 @@ export default function MemosScreen() {
             </Text>
             
             {item.description ? (
-              <Text style={[styles.memoDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                {item.description}
-              </Text>
+              <RichText
+                text={item.description}
+                colors={colors}
+                textStyle={[styles.memoDesc, { color: colors.textSecondary }]}
+              />
             ) : null}
 
             <View style={styles.metaRow}>

@@ -12,13 +12,17 @@ import {
   Platform,
   Modal,
   Clipboard,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { useRememberStore } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { RichText } from '@/components/rich-text';
 
 export default function ListsScreen() {
   const store = useRememberStore();
@@ -37,6 +41,105 @@ export default function ListsScreen() {
 
   // List Item inputs state
   const [newItemTexts, setNewItemTexts] = useState<Record<string, string>>({});
+  const [newItemImages, setNewItemImages] = useState<Record<string, string[]>>({});
+
+
+  const [editingItemImages, setEditingItemImages] = useState<string[]>([]);
+
+  const prepareForEdit = (item: ListItem) => {
+    if (!item) return { cleanText: '', images: [] };
+    const images: string[] = [];
+    if (item.imageUri) {
+      images.push(item.imageUri);
+    }
+    if (item.images && item.images.length > 0) {
+      item.images.forEach(img => {
+        if (!images.includes(img)) images.push(img);
+      });
+    }
+    const fullText = item.text || '';
+    const lines = fullText.split('\n');
+    const textLines: string[] = [];
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('data:image/') && trimmed.includes(';base64,')) {
+        if (!images.includes(trimmed)) images.push(trimmed);
+      } else {
+        textLines.push(line);
+      }
+    });
+    return {
+      cleanText: textLines.join('\n').trim(),
+      images
+    };
+  };
+
+  const handleAddImage = async (onImageSelected: (base64Url: string) => void) => {
+    Alert.alert(
+      'Añadir Imagen',
+      'Elige el origen de la imagen:',
+      [
+        {
+          text: 'Cámara 📸',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la cámara para tomar fotos.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error capturing camera image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen de la cámara.");
+            }
+          }
+        },
+        {
+          text: 'Galería de Fotos 🖼️',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la galería para seleccionar una imagen.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error picking library image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen seleccionada.");
+            }
+          }
+        },
+        { text: 'Cancelar', style: 'cancel' }
+      ]
+    );
+  };
 
   // Editing list item state
   const [editingItemId, setEditingItemId] = useState<{ listId: string; itemId: string } | null>(null);
@@ -153,22 +256,26 @@ export default function ListsScreen() {
 
   const handleAddListItem = async (listId: string) => {
     const text = newItemTexts[listId] || '';
-    if (!text.trim()) {
+    const images = newItemImages[listId] || [];
+    if (!text.trim() && images.length === 0) {
       Alert.alert('Texto vacío', 'Por favor escribe el texto del elemento.');
       return;
     }
-    await store.addListItem(listId, text);
+    await store.addListItem(listId, text.trim(), undefined, images);
     setNewItemTexts((prev) => ({ ...prev, [listId]: '' }));
+    setNewItemImages((prev) => ({ ...prev, [listId]: [] }));
   };
 
   const handleSaveListItemText = async () => {
     if (!editingItemId) return;
-    if (!editingItemText.trim()) {
+    if (!editingItemText.trim() && editingItemImages.length === 0) {
       Alert.alert('Texto vacío', 'El texto del elemento no puede estar vacío.');
       return;
     }
-    await store.updateListItem(editingItemId.listId, editingItemId.itemId, editingItemText);
+    await store.updateListItem(editingItemId.listId, editingItemId.itemId, editingItemText.trim(), undefined, editingItemImages);
     setEditingItemId(null);
+    setEditingItemText('');
+    setEditingItemImages([]);
   };
 
   // Alarm Scheduling Logic
@@ -385,13 +492,58 @@ export default function ListsScreen() {
                             )}
 
                             {isEditingThisItem ? (
-                              <TextInput
-                                value={editingItemText}
-                                onChangeText={setEditingItemText}
-                                autoFocus
-                                multiline
-                                style={[styles.editItemInput, { color: colors.text, textAlignVertical: 'top' }]}
-                              />
+                              <View style={{ flex: 1, gap: 4 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                                  <TextInput
+                                    value={editingItemText}
+                                    onChangeText={setEditingItemText}
+                                    autoFocus
+                                    multiline
+                                    style={[styles.editItemInput, { flex: 1, color: colors.text, textAlignVertical: 'top' }]}
+                                  />
+                                  <Pressable
+                                    onPress={() => handleAddImage((img) => {
+                                      setEditingItemImages((prev) => [...prev, img]);
+                                    })}
+                                    style={{
+                                      backgroundColor: colors.backgroundSelected,
+                                      padding: 6,
+                                      borderRadius: 6,
+                                      height: 36,
+                                      width: 36,
+                                      justifyContent: 'center',
+                                      alignItems: 'center'
+                                    }}
+                                  >
+                                    <Ionicons name="image-outline" size={16} color={colors.textSecondary} />
+                                  </Pressable>
+                                </View>
+                                {editingItemImages.length > 0 && (
+                                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                                    {editingItemImages.map((img, idx) => (
+                                      <View key={idx} style={{ position: 'relative', width: 40, height: 40, borderRadius: 6, overflow: 'hidden' }}>
+                                        <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                                        <Pressable
+                                          onPress={() => setEditingItemImages((prev) => prev.filter((_, i) => i !== idx))}
+                                          style={{
+                                            position: 'absolute',
+                                            top: 1,
+                                            right: 1,
+                                            backgroundColor: 'rgba(0,0,0,0.6)',
+                                            borderRadius: 8,
+                                            width: 14,
+                                            height: 14,
+                                            justifyContent: 'center',
+                                            alignItems: 'center'
+                                          }}
+                                        >
+                                          <Ionicons name="close" size={8} color="#fff" />
+                                        </Pressable>
+                                      </View>
+                                    ))}
+                                  </View>
+                                )}
+                              </View>
                             ) : (
                               // Press item to mark with green check icon (persistent Completed toggling)
                               <Pressable
@@ -401,15 +553,17 @@ export default function ListsScreen() {
                                 {item.completed && (
                                   <Ionicons name="checkmark-circle" size={18} color="#34C759" />
                                 )}
-                                <Text 
-                                  style={[
-                                    styles.itemText, 
+                                <RichText
+                                  text={item.text}
+                                  images={item.images}
+                                  colors={colors}
+                                  textStyle={[
+                                    styles.itemText,
                                     { color: colors.text },
                                     item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
                                   ]}
-                                >
-                                  {item.text}
-                                </Text>
+                                  containerStyle={{ flex: 1 }}
+                                />
                               </Pressable>
                             )}
 
@@ -449,7 +603,9 @@ export default function ListsScreen() {
                                 <Pressable
                                   onPress={() => {
                                     setEditingItemId({ listId: list.id, itemId: item.id });
-                                    setEditingItemText(item.text);
+                                    const parsed = prepareForEdit(item);
+                                    setEditingItemText(parsed.cleanText);
+                                    setEditingItemImages(parsed.images);
                                   }}
                                   style={{ padding: 5 }}
                                 >
@@ -593,15 +749,17 @@ export default function ListsScreen() {
                                               {item.completed && (
                                                 <Ionicons name="checkmark-circle" size={16} color="#34C759" />
                                               )}
-                                              <Text 
-                                                style={[
-                                                  styles.itemText, 
+                                              <RichText
+                                                text={item.text}
+                                                images={item.images}
+                                                colors={colors}
+                                                textStyle={[
+                                                  styles.itemText,
                                                   { color: colors.text, fontSize: 13 },
                                                   item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
                                                 ]}
-                                              >
-                                                {item.text}
-                                              </Text>
+                                                containerStyle={{ flex: 1 }}
+                                              />
                                             </Pressable>
                                           )}
 
@@ -641,7 +799,9 @@ export default function ListsScreen() {
                                               <Pressable
                                                 onPress={() => {
                                                   setEditingItemId({ listId: sublist.id, itemId: item.id });
-                                                  setEditingItemText(item.text);
+                                                  const parsed = prepareForEdit(item);
+                                                  setEditingItemText(parsed.cleanText);
+                                                  setEditingItemImages(parsed.images);
                                                 }}
                                                 style={{ padding: 4 }}
                                               >
@@ -679,12 +839,52 @@ export default function ListsScreen() {
                                         ]}
                                       />
                                       <Pressable
+                                        onPress={() => handleAddImage((img) => {
+                                          setNewItemImages((prev) => ({
+                                            ...prev,
+                                            [sublist.id]: [...(prev[sublist.id] || []), img]
+                                          }));
+                                        })}
+                                        style={[styles.addItemButton, { backgroundColor: colors.backgroundSelected, width: 32, height: 32 }]}
+                                      >
+                                        <Ionicons name="image-outline" size={16} color={colors.textSecondary} />
+                                      </Pressable>
+                                      <Pressable
                                         onPress={() => handleAddListItem(sublist.id)}
                                         style={[styles.addItemButton, { backgroundColor: '#34C759', width: 32, height: 32 }]}
                                       >
                                         <Ionicons name="add" size={18} color="#fff" />
                                       </Pressable>
                                     </View>
+
+                                    {newItemImages[sublist.id] && newItemImages[sublist.id].length > 0 && (
+                                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                        {newItemImages[sublist.id].map((img, idx) => (
+                                          <View key={idx} style={{ position: 'relative', width: 32, height: 32, borderRadius: 4, overflow: 'hidden' }}>
+                                            <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                                            <Pressable
+                                              onPress={() => setNewItemImages((prev) => ({
+                                                ...prev,
+                                                [sublist.id]: (prev[sublist.id] || []).filter((_, i) => i !== idx)
+                                              }))}
+                                              style={{
+                                                position: 'absolute',
+                                                top: 1,
+                                                right: 1,
+                                                backgroundColor: 'rgba(0,0,0,0.6)',
+                                                borderRadius: 6,
+                                                width: 12,
+                                                height: 12,
+                                                justifyContent: 'center',
+                                                alignItems: 'center'
+                                              }}
+                                            >
+                                              <Ionicons name="close" size={6} color="#fff" />
+                                            </Pressable>
+                                          </View>
+                                        ))}
+                                      </View>
+                                    )}
                                   </View>
                                 )}
                               </View>
@@ -706,12 +906,52 @@ export default function ListsScreen() {
                           style={[styles.itemInput, { color: colors.text, backgroundColor: colors.background, textAlignVertical: 'top' }]}
                         />
                         <Pressable
+                          onPress={() => handleAddImage((img) => {
+                            setNewItemImages((prev) => ({
+                              ...prev,
+                              [list.id]: [...(prev[list.id] || []), img]
+                            }));
+                          })}
+                          style={[styles.addItemButton, { backgroundColor: colors.backgroundSelected }]}
+                        >
+                          <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                        </Pressable>
+                        <Pressable
                           onPress={() => handleAddListItem(list.id)}
                           style={[styles.addItemButton, { backgroundColor: '#34C759' }]}
                         >
                           <Ionicons name="add" size={20} color="#fff" />
                         </Pressable>
                       </View>
+
+                      {newItemImages[list.id] && newItemImages[list.id].length > 0 && (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4, paddingHorizontal: 4 }}>
+                          {newItemImages[list.id].map((img, idx) => (
+                            <View key={idx} style={{ position: 'relative', width: 40, height: 40, borderRadius: 6, overflow: 'hidden' }}>
+                              <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                              <Pressable
+                                onPress={() => setNewItemImages((prev) => ({
+                                  ...prev,
+                                  [list.id]: (prev[list.id] || []).filter((_, i) => i !== idx)
+                                }))}
+                                style={{
+                                  position: 'absolute',
+                                  top: 1,
+                                  right: 1,
+                                  backgroundColor: 'rgba(0,0,0,0.6)',
+                                  borderRadius: 8,
+                                  width: 14,
+                                  height: 14,
+                                  justifyContent: 'center',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Ionicons name="close" size={8} color="#fff" />
+                              </Pressable>
+                            </View>
+                          ))}
+                        </View>
+                      )}
                     </View>
                   )}
                 </View>

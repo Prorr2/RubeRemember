@@ -2,6 +2,7 @@ export interface ListItem {
   id: string;
   text: string;
   imageUri?: string;
+  images?: string[];
   alarmTime?: string;
   completed?: boolean;
 }

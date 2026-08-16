@@ -63,6 +63,7 @@ export interface Task extends BaseItem {
   workedTime?: number;
   sessionsCount?: number;
   lastSession?: string;
+  images?: string[];
 }
 
 export interface Activity extends BaseItem {
@@ -175,6 +176,8 @@ export interface Session {
   nextStep?: string;
   progress?: number;
   endTime?: string | null;
+  notesImages?: string[];
+  nextStepImages?: string[];
 }
 
 export interface Recommendation {

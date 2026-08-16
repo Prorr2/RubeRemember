@@ -9,10 +9,13 @@ import {
   Alert,
   useColorScheme,
   Switch,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr, EnergyType, Memo, Plan, Task, TaskState } from '@/hooks/use-remember-store';
 import { Colors, Spacing } from '@/constants/theme';
@@ -36,6 +39,74 @@ export default function ItemEditorScreen() {
   const [description, setDescription] = useState('');
   const [favourite, setFavourite] = useState(false);
   const [tagsInput, setTagsInput] = useState('');
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+
+  const handleAddImage = async (onImageSelected: (base64Url: string) => void) => {
+    Alert.alert(
+      'Añadir Imagen',
+      'Elige el origen de la imagen:',
+      [
+        {
+          text: 'Cámara 📸',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la cámara para tomar fotos.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error capturing camera image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen de la cámara.");
+            }
+          }
+        },
+        {
+          text: 'Galería de Fotos 🖼️',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la galería para seleccionar una imagen.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error picking library image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen seleccionada.");
+            }
+          }
+        },
+        { text: 'Cancelar', style: 'cancel' }
+      ]
+    );
+  };
 
   // Task Specific State
   const [priority, setPriority] = useState<Priority>(Priority.MEDIUM);
@@ -141,7 +212,46 @@ export default function ItemEditorScreen() {
     if (editingItem) {
       setItemType(editingItem.type);
       setTitle(editingItem.title);
-      setDescription(editingItem.description || '');
+      
+      // Parse description to extract images line-by-line safely
+      const fullDesc = editingItem.description || '';
+      const lines = fullDesc.split('\n');
+      const cleanTextParts: string[] = [];
+      const images: string[] = [];
+      
+      lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data:image/') && trimmed.includes(';base64,')) {
+          images.push(trimmed);
+        } else {
+          const urlRegex = /(https?:\/\/[^\s]+)/gi;
+          const tokens = line.split(urlRegex);
+          tokens.forEach((token) => {
+            if (!token) return;
+            const isUrl = /^https?:\/\/[^\s]+$/i.test(token);
+            if (isUrl) {
+              const cleanUrl = token.split('?')[0].split('#')[0];
+              const isImg = /\.(jpg|jpeg|png|gif|webp|bmp)/i.test(cleanUrl);
+              if (isImg) {
+                images.push(token);
+              } else {
+                cleanTextParts.push(token);
+              }
+            } else {
+              cleanTextParts.push(token);
+            }
+          });
+          cleanTextParts.push('\n');
+        }
+      });
+      
+      let cleanDesc = cleanTextParts.join('');
+      while (cleanDesc.endsWith('\n')) {
+        cleanDesc = cleanDesc.slice(0, -1);
+      }
+      setDescription(cleanDesc.trim());
+      setAttachedImages(images);
+
       setFavourite(editingItem.favourite);
       setTagsInput(editingItem.tags ? editingItem.tags.join(', ') : '');
 
@@ -199,6 +309,11 @@ export default function ItemEditorScreen() {
       }
     } else {
       // Setup default creation values
+      setTitle('');
+      setDescription('');
+      setAttachedImages([]);
+      setFavourite(false);
+      setTagsInput('');
       if (params.type) {
         setItemType(params.type as ItemType);
       }
@@ -326,13 +441,14 @@ export default function ItemEditorScreen() {
       .filter((t) => t !== '');
 
     const hoursNum = estimatedHours.trim() ? parseFloat(estimatedHours.replace(',', '.')) : undefined;
+    const finalDescription = [description.trim(), ...attachedImages].filter(Boolean).join('\n\n');
 
     try {
       if (isEditing && editingItem) {
         // Update item fields based on type
         const commonUpdates = {
           title: cleanTitle,
-          description: description.trim() || undefined,
+          description: finalDescription || undefined,
           favourite,
           tags,
         };
@@ -395,7 +511,7 @@ export default function ItemEditorScreen() {
         if (itemType === ItemType.TASK) {
           await store.createTask(
             cleanTitle,
-            description.trim(),
+            finalDescription,
             taskStartDate || undefined,
             taskDueDate || taskStartDate || undefined,
             hoursNum,
@@ -412,7 +528,7 @@ export default function ItemEditorScreen() {
 
           await store.createReminder(
             cleanTitle,
-            description.trim(),
+            finalDescription,
             chosenDates[0],
             timeStr,
             chosenDates,
@@ -422,7 +538,7 @@ export default function ItemEditorScreen() {
           await store.createActivity(
             cleanTitle,
             activityCategory,
-            description.trim(),
+            finalDescription,
             tags,
             favourite
           );
@@ -433,7 +549,7 @@ export default function ItemEditorScreen() {
 
           await store.createMemo(
             cleanTitle,
-            description.trim(),
+            finalDescription,
             memoStartDate || undefined,
             memoEndDate || undefined,
             memoHasAlarm,
@@ -442,7 +558,7 @@ export default function ItemEditorScreen() {
         } else if (itemType === ItemType.PLAN) {
           await store.createPlan(
             cleanTitle,
-            description.trim(),
+            finalDescription,
             planStartMonth,
             planStartYear,
             planEndMonth,
@@ -592,7 +708,18 @@ export default function ItemEditorScreen() {
 
           <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
 
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Descripción (Opcional)</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 0 }]}>Descripción (Opcional)</Text>
+            {!isPrivate && (
+              <Pressable
+                onPress={() => handleAddImage((img) => setAttachedImages((prev) => [...prev, img]))}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, backgroundColor: colors.backgroundSelected }}
+              >
+                <Ionicons name="image-outline" size={16} color={themeColor} />
+                <Text style={{ fontSize: 12, color: themeColor, fontWeight: '700' }}>Adjuntar Imagen</Text>
+              </Pressable>
+            )}
+          </View>
           <TextInput
             placeholder="Añade notas, ideas o detalles aquí..."
             placeholderTextColor={colors.textSecondary + '80'}
@@ -603,6 +730,32 @@ export default function ItemEditorScreen() {
             numberOfLines={isPrivate ? 1 : 3}
             style={[styles.textInput, { color: colors.text, minHeight: isPrivate ? 40 : 60, textAlignVertical: 'top' }]}
           />
+
+          {attachedImages.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+              {attachedImages.map((imgUrl, idx) => (
+                <View key={idx} style={{ width: 80, height: 80, borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
+                  <Image source={{ uri: imgUrl }} style={{ width: '100%', height: '100%' }} />
+                  <Pressable
+                    onPress={() => setAttachedImages((prev) => prev.filter((_, i) => i !== idx))}
+                    style={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 4,
+                      backgroundColor: 'rgba(0,0,0,0.6)',
+                      borderRadius: 12,
+                      width: 24,
+                      height: 24,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="close" size={16} color="#fff" />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Score Calculator Card */}

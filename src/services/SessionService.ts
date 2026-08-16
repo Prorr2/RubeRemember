@@ -35,7 +35,7 @@ export function useSessionService() {
     realDuration: number,
     completed: boolean,
     notes?: string,
-    taskUpdates?: Partial<Task>
+    taskUpdates?: Partial<Task> & { notesImages?: string[]; nextStepImages?: string[] }
   ) => {
     await store.endSession(sessionId, realDuration, completed, notes, taskUpdates);
   }, [store]);

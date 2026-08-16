@@ -68,7 +68,8 @@ interface RememberStore {
     goalId?: string,
     phaseId?: string,
     timeSlotId?: string,
-    energyType?: EnergyType
+    energyType?: EnergyType,
+    images?: string[]
   ) => Promise<string>;
   createReminder: (
     title: string,
@@ -146,7 +147,7 @@ interface RememberStore {
   scheduleAllAlarms: () => Promise<void>;
   scheduleTodayMemosAlarms: () => Promise<void>;
   clearAll: () => Promise<void>;
-  addComment: (taskId: string, text: string) => Promise<void>;
+  addComment: (taskId: string, text: string, images?: string[]) => Promise<void>;
   updateComment: (taskId: string, commentId: string, text: string) => Promise<void>;
   deleteComment: (taskId: string, commentId: string) => Promise<void>;
   exportBackupData: () => Promise<string>;
@@ -181,8 +182,8 @@ interface RememberStore {
   updateList: (id: string, name: string) => Promise<void>;
   deleteList: (id: string) => Promise<void>;
   toggleListCollapse: (id: string) => Promise<void>;
-  addListItem: (listId: string, text: string, imageUri?: string) => Promise<string>;
-  updateListItem: (listId: string, itemId: string, text: string, imageUri?: string) => Promise<void>;
+  addListItem: (listId: string, text: string, imageUri?: string, images?: string[]) => Promise<string>;
+  updateListItem: (listId: string, itemId: string, text: string, imageUri?: string, images?: string[]) => Promise<void>;
   deleteListItem: (listId: string, itemId: string) => Promise<void>;
   toggleListItemCompleted: (listId: string, itemId: string) => Promise<void>;
   setListAlarm: (listId: string, time: string | null) => Promise<void>;
@@ -212,7 +213,7 @@ interface RememberStore {
     realDuration: number,
     completed: boolean,
     notes?: string,
-    taskUpdates?: Partial<Task>
+    taskUpdates?: Partial<Task> & { notesImages?: string[]; nextStepImages?: string[] }
   ) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   updateUserSettings: (updates: Partial<UserSettings>) => Promise<void>;
@@ -695,7 +696,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     goalId?: string,
     phaseId?: string,
     timeSlotId?: string,
-    energyType?: EnergyType
+    energyType?: EnergyType,
+    images?: string[]
   ) => {
     const cleanTitle = title.trim();
     if (!cleanTitle) return '';
@@ -721,6 +723,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       timeSlotId,
       energyType: energyType || EnergyType.CREATIVE,
       comments: [],
+      images,
     };
 
     await saveItems([...items, newTask]);
@@ -1254,12 +1257,13 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [saveDatabaseState]);
 
   // Comments logic (for Tasks)
-  const addComment = useCallback(async (taskId: string, text: string) => {
-    if (!text.trim()) return;
+  const addComment = useCallback(async (taskId: string, text: string, images?: string[]) => {
+    if (!text.trim() && (!images || images.length === 0)) return;
     const newComment: Comment = {
       id: Math.random().toString(36).substring(7),
       text: text.trim(),
       createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      images,
     };
 
     const task = items.find((i) => i.id === taskId);
@@ -1769,7 +1773,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await saveLists(updated);
   }, [lists, saveLists]);
 
-  const addListItem = useCallback(async (listId: string, text: string, imageUri?: string) => {
+  const addListItem = useCallback(async (listId: string, text: string, imageUri?: string, images?: string[]) => {
     const newItemId = `item-${Math.random().toString(36).substring(7)}`;
     const updated = lists.map((l) => {
       if (l.id === listId) {
@@ -1777,6 +1781,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           id: newItemId,
           text: text.trim(),
           imageUri,
+          images,
         };
         return { ...l, items: [...l.items, newItem] };
       }
@@ -1786,12 +1791,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     return newItemId;
   }, [lists, saveLists]);
 
-  const updateListItem = useCallback(async (listId: string, itemId: string, text: string, imageUri?: string) => {
+  const updateListItem = useCallback(async (listId: string, itemId: string, text: string, imageUri?: string, images?: string[]) => {
     const updated = lists.map((l) => {
       if (l.id === listId) {
         const updatedItems = l.items.map((it) => {
           if (it.id === itemId) {
-            return { ...it, text: text.trim(), imageUri };
+            return { ...it, text: text.trim(), imageUri, images };
           }
           return it;
         });
@@ -2079,7 +2084,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     realDuration: number,
     completed: boolean,
     notes?: string,
-    taskUpdates?: Partial<Task>
+    taskUpdates?: Partial<Task> & { notesImages?: string[]; nextStepImages?: string[] }
   ) => {
     let session = sessions.find((s) => s.id === sessionId);
     let nextSessions = sessions;
@@ -2109,7 +2114,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           realDuration,
           completed,
           notes: notes !== undefined ? notes : s.notes,
+          notesImages: taskUpdates?.notesImages !== undefined ? taskUpdates.notesImages : s.notesImages,
           nextStep: taskUpdates?.nextStep !== undefined ? taskUpdates.nextStep : s.nextStep,
+          nextStepImages: taskUpdates?.nextStepImages !== undefined ? taskUpdates.nextStepImages : s.nextStepImages,
           progress: taskUpdates?.progress !== undefined ? taskUpdates.progress : s.progress,
         };
       }

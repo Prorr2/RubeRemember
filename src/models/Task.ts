@@ -48,6 +48,7 @@ export interface Task extends BaseItem {
   comments: Comment[];
   habit?: boolean; // true when the task is saved as a habit
   habitTime?: string; // HH:MM configurable time shown for the habit
+  active?: boolean; // true when the task is marked as Active ("Trabajando en este momento")
 
   // Cognitive Engine fields
   executionStrategy?: ExecutionStrategy;
@@ -61,4 +62,5 @@ export interface Task extends BaseItem {
   sessionsCount?: number;
   lastSession?: string; // ISO date string of last session
   recommendationCooldown?: string; // ISO date string when cooldown ends
+  images?: string[];
 }

@@ -14,14 +14,18 @@ import {
   Modal,
   Clipboard,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { useRememberStore, ItemType, Priority, Task, EnergyType, getLocalDateStr, TaskState } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { ScoreEngine, getTaskWeightLabel } from '@/engines/ScoreEngine';
+import { RichText } from '@/components/rich-text';
 import { useRecommendationService } from '@/services/RecommendationService';
 
 const speak = (text: string) => {
@@ -122,6 +126,73 @@ export default function TasksScreen() {
 
   const { recommendations, triggerRecalculate } = useRecommendationService();
 
+  const handleAddImage = async (onImageSelected: (base64Url: string) => void) => {
+    Alert.alert(
+      'Añadir Imagen',
+      'Elige el origen de la imagen:',
+      [
+        {
+          text: 'Cámara 📸',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la cámara para tomar fotos.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error capturing camera image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen de la cámara.");
+            }
+          }
+        },
+        {
+          text: 'Galería de Fotos 🖼️',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la galería para seleccionar una imagen.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error picking library image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen seleccionada.");
+            }
+          }
+        },
+        { text: 'Cancelar', style: 'cancel' }
+      ]
+    );
+  };
+
   // Alarm Modal States
   const [alarmTask, setAlarmTask] = useState<Task | null>(null);
   const [alarmHour, setAlarmHour] = useState(new Date().getHours());
@@ -137,10 +208,32 @@ export default function TasksScreen() {
   const [showProgressRoadmap, setShowProgressRoadmap] = useState<Task | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editNotes, setEditNotes] = useState('');
+  const [editNotesImages, setEditNotesImages] = useState<string[]>([]);
   const [editNextStep, setEditNextStep] = useState('');
+  const [editNextStepImages, setEditNextStepImages] = useState<string[]>([]);
   const [editProgress, setEditProgress] = useState('');
   const [showAddNote, setShowAddNote] = useState(false);
   const [newNoteText, setNewNoteText] = useState('');
+  const [newNoteImages, setNewNoteImages] = useState<string[]>([]);
+
+  const prepareForEdit = (fullText: string) => {
+    if (!fullText) return { cleanText: '', images: [] };
+    const lines = fullText.split('\n');
+    const images: string[] = [];
+    const textLines: string[] = [];
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('data:image/') && trimmed.includes(';base64,')) {
+        images.push(trimmed);
+      } else {
+        textLines.push(line);
+      }
+    });
+    return {
+      cleanText: textLines.join('\n').trim(),
+      images
+    };
+  };
 
   const todayStr = getLocalDateStr();
 
@@ -207,12 +300,19 @@ export default function TasksScreen() {
   // Comments/Detail expansion
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [commentImages, setCommentImages] = useState<Record<string, string[]>>({});
+
+  const activeTasks = useMemo(() => {
+    return store.items.filter(
+      (i) => i.type === ItemType.TASK && !i.completed && !i.archived && !i.trash && (i as Task).active
+    ) as Task[];
+  }, [store.items]);
 
   const tasksList = useMemo(() => {
     let list = store.items.filter((i) => i.type === ItemType.TASK && !i.trash) as Task[];
 
     if (taskStatusFilter === 'PENDING') {
-      list = list.filter((t) => !t.completed && !t.archived);
+      list = list.filter((t) => !t.completed && !t.archived && !t.active);
     } else if (taskStatusFilter === 'COMPLETED') {
       list = list.filter((t) => t.completed && !t.archived);
     } else if (taskStatusFilter === 'HABITS') {
@@ -372,11 +472,13 @@ export default function TasksScreen() {
   };
 
   const handleAddComment = async (taskId: string) => {
-    const text = commentInputs[taskId]?.trim();
-    if (!text) return;
+    const text = commentInputs[taskId]?.trim() || '';
+    const images = commentImages[taskId] || [];
+    if (!text && images.length === 0) return;
     
-    await store.addComment(taskId, text);
+    await store.addComment(taskId, text, images);
     setCommentInputs((prev) => ({ ...prev, [taskId]: '' }));
+    setCommentImages((prev) => ({ ...prev, [taskId]: [] }));
   };
 
   const handleDeleteTask = (task: Task) => {
@@ -403,6 +505,11 @@ export default function TasksScreen() {
       isHabit ? 'Quitada de Hábitos' : 'Guardada como Hábito',
       `"${task.title}" ${isHabit ? 'ya no aparece' : 'ahora aparece'} en la sección de Hábitos.`
     );
+  };
+
+  const handleToggleActive = async (task: Task) => {
+    const isActive = !!task.active;
+    await store.updateItem(task.id, { active: !isActive });
   };
 
   const handleOpenHabitTime = (task: Task) => {
@@ -731,6 +838,16 @@ export default function TasksScreen() {
                 >
                   <Ionicons name={item.habit ? 'pin' : 'pin-outline'} size={20} color={item.habit ? '#FF9500' : colors.textSecondary} />
                 </Pressable>
+
+                <Pressable
+                  onPress={async (e) => {
+                    e.stopPropagation();
+                    await handleToggleActive(item);
+                  }}
+                  style={styles.actionBtn}
+                >
+                  <Ionicons name={item.active ? 'flash' : 'flash-outline'} size={20} color={item.active ? '#34C759' : colors.textSecondary} />
+                </Pressable>
               </>
             )}
           </View>
@@ -739,7 +856,12 @@ export default function TasksScreen() {
         {isExpanded && (
           <View style={[styles.cardDetails, { borderTopColor: colors.backgroundSelected }]}>
             {item.description ? (
-              <Text style={[styles.descText, { color: colors.textSecondary }]}>{item.description}</Text>
+              <RichText
+                text={item.description}
+                images={item.images}
+                colors={colors}
+                textStyle={[styles.descText, { color: colors.textSecondary }]}
+              />
             ) : null}
 
             {item.startDate || item.dueDate ? (
@@ -769,7 +891,12 @@ export default function TasksScreen() {
               <View style={styles.commentsList}>
                 {item.comments.map((comment) => (
                   <View key={comment.id} style={[styles.commentBubble, { backgroundColor: colors.backgroundSelected }]}>
-                    <Text style={{ color: colors.text, fontSize: 13 }}>{comment.text}</Text>
+                    <RichText
+                      text={comment.text}
+                      images={comment.images}
+                      colors={colors}
+                      textStyle={{ color: colors.text, fontSize: 13 }}
+                    />
                     <View style={[styles.row, { justifyContent: 'space-between', marginTop: 4 }]}>
                       <Text style={{ color: colors.textSecondary, fontSize: 9 }}>{comment.createdAt}</Text>
                       <Pressable onPress={() => store.deleteComment(item.id, comment.id)}>
@@ -783,6 +910,35 @@ export default function TasksScreen() {
               <Text style={[styles.noCommentsText, { color: colors.textSecondary }]}>No hay comentarios aún.</Text>
             )}
 
+            {commentImages[item.id] && commentImages[item.id].length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8, paddingHorizontal: 12 }}>
+                {commentImages[item.id].map((img, idx) => (
+                  <View key={idx} style={{ position: 'relative', width: 40, height: 40, borderRadius: 6, overflow: 'hidden' }}>
+                    <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                    <Pressable
+                      onPress={() => setCommentImages((prev) => ({
+                        ...prev,
+                        [item.id]: (prev[item.id] || []).filter((_, i) => i !== idx)
+                      }))}
+                      style={{
+                        position: 'absolute',
+                        top: 1,
+                        right: 1,
+                        backgroundColor: 'rgba(0,0,0,0.6)',
+                        borderRadius: 8,
+                        width: 14,
+                        height: 14,
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Ionicons name="close" size={8} color="#fff" />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
+
             <View style={styles.commentInputRow}>
               <TextInput
                 placeholder="Escribe un comentario..."
@@ -791,6 +947,17 @@ export default function TasksScreen() {
                 onChangeText={(text) => setCommentInputs((prev) => ({ ...prev, [item.id]: text }))}
                 style={[styles.commentInput, { color: colors.text, backgroundColor: colors.backgroundSelected }]}
               />
+              <Pressable
+                onPress={() => handleAddImage((img) => {
+                  setCommentImages((prev) => ({
+                    ...prev,
+                    [item.id]: [...(prev[item.id] || []), img]
+                  }));
+                })}
+                style={[styles.commentSendBtn, { backgroundColor: colors.backgroundSelected }]}
+              >
+                <Ionicons name="image-outline" size={16} color={colors.textSecondary} />
+              </Pressable>
               <Pressable onPress={() => handleAddComment(item.id)} style={[styles.commentSendBtn, { backgroundColor: '#FF9500' }]}>
                 <Ionicons name="send" size={14} color="#fff" />
               </Pressable>
@@ -1324,9 +1491,33 @@ export default function TasksScreen() {
         data={tasksList}
         renderItem={taskStatusFilter === 'HABITS' ? renderHabitItem : renderTaskItem}
         keyExtractor={(item) => item.isHeader ? 'header-' + item.title : item.id}
-        extraData={[selectedIds, store.userSettings, alarmTask]}
+        extraData={[selectedIds, store.userSettings, alarmTask, activeTasks]}
         contentContainerStyle={styles.listContent}
-        ListHeaderComponent={null}
+        ListHeaderComponent={
+          activeTasks.length > 0 && taskStatusFilter === 'PENDING' ? (
+            <View style={{ marginBottom: 16 }}>
+              <View style={{
+                marginTop: 8,
+                marginBottom: 12,
+                paddingHorizontal: 4,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                <Ionicons name="flash" size={16} color="#34C759" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, letterSpacing: 0.5 }}>
+                  TRABAJANDO EN ESTE MOMENTO
+                </Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: colors.backgroundSelected, opacity: 0.5 }} />
+              </View>
+              {activeTasks.map((task) => (
+                <View key={task.id} style={{ marginBottom: 8 }}>
+                  {renderTaskItem({ item: task })}
+                </View>
+              ))}
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="checkbox-outline" size={48} color={colors.textSecondary} />
@@ -1745,33 +1936,83 @@ export default function TasksScreen() {
                   {showAddNote ? (
                     <>
                       <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>📝 Nueva Nota</Text>
-                      <TextInput
-                        value={newNoteText}
-                        onChangeText={setNewNoteText}
-                        placeholder="Escribe una nota sobre esta tarea..."
-                        placeholderTextColor={colors.textSecondary + '70'}
-                        autoFocus
-                        multiline
-                        style={{
-                          color: colors.text,
-                          backgroundColor: colors.background,
-                          borderColor: colors.backgroundSelected,
-                          borderWidth: 1,
-                          borderRadius: 12,
-                          padding: 10,
-                          fontSize: 13,
-                          minHeight: 60,
-                          textAlignVertical: 'top'
-                        }}
-                      />
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                        <TextInput
+                          value={newNoteText}
+                          onChangeText={setNewNoteText}
+                          placeholder="Escribe una nota sobre esta tarea..."
+                          placeholderTextColor={colors.textSecondary + '70'}
+                          autoFocus
+                          multiline
+                          style={{
+                            flex: 1,
+                            color: colors.text,
+                            backgroundColor: colors.background,
+                            borderColor: colors.backgroundSelected,
+                            borderWidth: 1,
+                            borderRadius: 12,
+                            padding: 10,
+                            fontSize: 13,
+                            minHeight: 60,
+                            textAlignVertical: 'top'
+                          }}
+                        />
+                        <Pressable
+                          onPress={() => handleAddImage((img) => {
+                            setNewNoteImages((prev) => [...prev, img]);
+                          })}
+                          style={{
+                            backgroundColor: colors.backgroundSelected,
+                            padding: 10,
+                            borderRadius: 12,
+                            height: 60,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            width: 44,
+                            borderColor: colors.backgroundSelected,
+                            borderWidth: 1
+                          }}
+                        >
+                          <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                        </Pressable>
+                      </View>
+
+                      {newNoteImages.length > 0 && (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 }}>
+                          {newNoteImages.map((img, idx) => (
+                            <View key={idx} style={{ position: 'relative', width: 60, height: 60, borderRadius: 8, overflow: 'hidden' }}>
+                              <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                              <Pressable
+                                onPress={() => setNewNoteImages((prev) => prev.filter((_, i) => i !== idx))}
+                                style={{
+                                  position: 'absolute',
+                                  top: 2,
+                                  right: 2,
+                                  backgroundColor: 'rgba(0,0,0,0.6)',
+                                  borderRadius: 10,
+                                  width: 18,
+                                  height: 18,
+                                  justifyContent: 'center',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Ionicons name="close" size={12} color="#fff" />
+                              </Pressable>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
                         <Pressable
                           onPress={async () => {
-                            const text = newNoteText.trim();
-                            if (text && showProgressRoadmap) {
-                              await store.createSession(showProgressRoadmap.id, 0, text);
+                            const textVal = newNoteText.trim();
+                            const finalNoteText = [textVal, ...newNoteImages].filter(Boolean).join('\n');
+                            if (finalNoteText && showProgressRoadmap) {
+                              await store.createSession(showProgressRoadmap.id, 0, finalNoteText);
                             }
                             setNewNoteText('');
+                            setNewNoteImages([]);
                             setShowAddNote(false);
                           }}
                           style={{ flex: 1, backgroundColor: '#FF9500', padding: 12, borderRadius: 10, alignItems: 'center' }}
@@ -1781,6 +2022,7 @@ export default function TasksScreen() {
                         <Pressable
                           onPress={() => {
                             setNewNoteText('');
+                            setNewNoteImages([]);
                             setShowAddNote(false);
                           }}
                           style={{ flex: 1, backgroundColor: colors.backgroundSelected, padding: 12, borderRadius: 10, alignItems: 'center' }}
@@ -1883,40 +2125,133 @@ export default function TasksScreen() {
                               <View style={{ gap: 10 }}>
                                 <View style={{ gap: 4 }}>
                                   <Text style={{ color: '#34C759', fontSize: 11, fontWeight: '800' }}>¿QUÉ SE HIZO?</Text>
-                                  <TextInput
-                                    value={editNotes}
-                                    onChangeText={setEditNotes}
-                                    placeholder="Escribe qué hiciste..."
-                                    placeholderTextColor={colors.textSecondary + '70'}
-                                    style={{
-                                      color: colors.text,
-                                      backgroundColor: colors.backgroundSelected,
-                                      borderRadius: 8,
-                                      padding: 8,
-                                      fontSize: 13,
-                                      minHeight: 50,
-                                      textAlignVertical: 'top'
-                                    }}
-                                    multiline
-                                  />
+                                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                                    <TextInput
+                                      value={editNotes}
+                                      onChangeText={setEditNotes}
+                                      placeholder="Escribe qué hiciste..."
+                                      placeholderTextColor={colors.textSecondary + '70'}
+                                      style={{
+                                        flex: 1,
+                                        color: colors.text,
+                                        backgroundColor: colors.backgroundSelected,
+                                        borderRadius: 8,
+                                        padding: 8,
+                                        fontSize: 13,
+                                        minHeight: 50,
+                                        textAlignVertical: 'top'
+                                      }}
+                                      multiline
+                                    />
+                                    <Pressable
+                                      onPress={() => handleAddImage((img) => {
+                                        setEditNotesImages((prev) => [...prev, img]);
+                                      })}
+                                      style={{
+                                        backgroundColor: colors.backgroundSelected,
+                                        padding: 8,
+                                        borderRadius: 8,
+                                        height: 50,
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        width: 40,
+                                      }}
+                                    >
+                                      <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                                    </Pressable>
+                                  </View>
                                 </View>
+
+                                {editNotesImages.length > 0 && (
+                                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 2 }}>
+                                    {editNotesImages.map((img, idx) => (
+                                      <View key={idx} style={{ position: 'relative', width: 50, height: 50, borderRadius: 6, overflow: 'hidden' }}>
+                                        <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                                        <Pressable
+                                          onPress={() => setEditNotesImages((prev) => prev.filter((_, i) => i !== idx))}
+                                          style={{
+                                            position: 'absolute',
+                                            top: 1,
+                                            right: 1,
+                                            backgroundColor: 'rgba(0,0,0,0.6)',
+                                            borderRadius: 8,
+                                            width: 16,
+                                            height: 16,
+                                            justifyContent: 'center',
+                                            alignItems: 'center'
+                                          }}
+                                        >
+                                          <Ionicons name="close" size={10} color="#fff" />
+                                        </Pressable>
+                                      </View>
+                                    ))}
+                                  </View>
+                                )}
 
                                 <View style={{ gap: 4 }}>
                                   <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '800' }}>SIGUIENTE PASO PLANIFICADO</Text>
-                                  <TextInput
-                                    value={editNextStep}
-                                    onChangeText={setEditNextStep}
-                                    placeholder="Escribe el siguiente paso..."
-                                    placeholderTextColor={colors.textSecondary + '70'}
-                                    style={{
-                                      color: colors.text,
-                                      backgroundColor: colors.backgroundSelected,
-                                      borderRadius: 8,
-                                      padding: 8,
-                                      fontSize: 13
-                                    }}
-                                  />
+                                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                                    <TextInput
+                                      value={editNextStep}
+                                      onChangeText={setEditNextStep}
+                                      placeholder="Escribe el siguiente paso..."
+                                      placeholderTextColor={colors.textSecondary + '70'}
+                                      style={{
+                                        flex: 1,
+                                        color: colors.text,
+                                        backgroundColor: colors.backgroundSelected,
+                                        borderRadius: 8,
+                                        padding: 8,
+                                        fontSize: 13,
+                                        minHeight: 50,
+                                        textAlignVertical: 'top'
+                                      }}
+                                      multiline
+                                    />
+                                    <Pressable
+                                      onPress={() => handleAddImage((img) => {
+                                        setEditNextStepImages((prev) => [...prev, img]);
+                                      })}
+                                      style={{
+                                        backgroundColor: colors.backgroundSelected,
+                                        padding: 8,
+                                        borderRadius: 8,
+                                        height: 50,
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        width: 40,
+                                      }}
+                                    >
+                                      <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                                    </Pressable>
+                                  </View>
                                 </View>
+
+                                {editNextStepImages.length > 0 && (
+                                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 2 }}>
+                                    {editNextStepImages.map((img, idx) => (
+                                      <View key={idx} style={{ position: 'relative', width: 50, height: 50, borderRadius: 6, overflow: 'hidden' }}>
+                                        <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                                        <Pressable
+                                          onPress={() => setEditNextStepImages((prev) => prev.filter((_, i) => i !== idx))}
+                                          style={{
+                                            position: 'absolute',
+                                            top: 1,
+                                            right: 1,
+                                            backgroundColor: 'rgba(0,0,0,0.6)',
+                                            borderRadius: 8,
+                                            width: 16,
+                                            height: 16,
+                                            justifyContent: 'center',
+                                            alignItems: 'center'
+                                          }}
+                                        >
+                                          <Ionicons name="close" size={10} color="#fff" />
+                                        </Pressable>
+                                      </View>
+                                    ))}
+                                  </View>
+                                )}
 
                                 <View style={{ gap: 4 }}>
                                   <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800' }}>PROGRESO DE LA TAREA (%)</Text>
@@ -1947,23 +2282,26 @@ export default function TasksScreen() {
                                   <Pressable
                                     onPress={async () => {
                                       const prog = parseInt(editProgress, 10) || 0;
+                                      const finalNotes = [editNotes.trim(), ...editNotesImages].filter(Boolean).join('\n');
+                                      const finalNextStep = [editNextStep.trim(), ...editNextStepImages].filter(Boolean).join('\n');
+
                                       await store.updateSession(session.id, {
-                                        notes: editNotes.trim(),
-                                        nextStep: editNextStep.trim(),
+                                        notes: finalNotes,
+                                        nextStep: finalNextStep,
                                         progress: prog
                                       });
 
                                       if (taskSessions[0]?.id === session.id) {
                                         await store.updateItem(showProgressRoadmap.id, {
                                           progress: prog,
-                                          nextStep: editNextStep.trim(),
+                                          nextStep: finalNextStep,
                                           completed: prog === 100,
                                           taskState: prog === 100 ? TaskState.COMPLETED : TaskState.IN_PROGRESS
                                         });
                                         setShowProgressRoadmap(prev => prev ? {
                                           ...prev,
                                           progress: prog,
-                                          nextStep: editNextStep.trim(),
+                                          nextStep: finalNextStep,
                                           completed: prog === 100
                                         } : null);
                                       }
@@ -2002,9 +2340,12 @@ export default function TasksScreen() {
                                     {isNoteOnly ? '📝 Nota' : '✅ ¿Qué se hizo?'}
                                   </Text>
                                   {session.notes ? (
-                                    <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
-                                      {session.notes}
-                                    </Text>
+                                    <RichText
+                                      text={session.notes}
+                                      images={session.notesImages}
+                                      colors={colors}
+                                      textStyle={{ color: colors.text, fontSize: 13, lineHeight: 18 }}
+                                    />
                                   ) : (
                                     <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic' }}>
                                       No especificado
@@ -2019,9 +2360,12 @@ export default function TasksScreen() {
                                       🎯 Siguiente paso planificado:
                                     </Text>
                                     {session.nextStep ? (
-                                      <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
-                                        {session.nextStep}
-                                      </Text>
+                                      <RichText
+                                        text={session.nextStep}
+                                        images={session.nextStepImages}
+                                        colors={colors}
+                                        textStyle={{ color: colors.text, fontSize: 13, lineHeight: 18 }}
+                                      />
                                     ) : (
                                       <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic' }}>
                                         No especificado

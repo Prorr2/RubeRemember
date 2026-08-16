@@ -10,11 +10,14 @@ import {
   ActivityIndicator,
   AppState,
   ScrollView,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { useRememberStore, Task } from '@/hooks/use-remember-store';
 import { useSessionService } from '@/services/SessionService';
@@ -52,8 +55,76 @@ export default function SessionScreen() {
 
   // Question states
   const [note, setNote] = useState('');
+  const [noteImages, setNoteImages] = useState<string[]>([]);
   const [isTaskCompleted, setIsTaskCompleted] = useState(false);
   const [progress, setProgress] = useState('0');
+
+  const handleAddImage = async (onImageSelected: (base64Url: string) => void) => {
+    Alert.alert(
+      'Añadir Imagen',
+      'Elige el origen de la imagen:',
+      [
+        {
+          text: 'Cámara 📸',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la cámara para tomar fotos.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error capturing camera image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen de la cámara.");
+            }
+          }
+        },
+        {
+          text: 'Galería de Fotos 🖼️',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permiso requerido', 'Se necesita acceso a la galería para seleccionar una imagen.');
+              return;
+            }
+            try {
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: false,
+                quality: 0.2,
+              });
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const asset = result.assets[0];
+                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const mimeType = asset.mimeType || 'image/jpeg';
+                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                onImageSelected(base64Url);
+              }
+            } catch (err) {
+              console.error("Error picking library image:", err);
+              Alert.alert("Error", "No se pudo procesar la imagen seleccionada.");
+            }
+          }
+        },
+        { text: 'Cancelar', style: 'cancel' }
+      ]
+    );
+  };
 
   // Timer Ref
   const targetTimeRef = useRef<number | null>(null);
@@ -231,7 +302,7 @@ export default function SessionScreen() {
 
       // 2. End session and apply task updates in a single atomic transaction
       // note is saved in the notes field
-      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, note.trim(), taskUpdates);
+      await sessionService.endSession(sessionId, actualDurationMinutes, isTaskFullyCompleted, note.trim(), { ...taskUpdates, notesImages: noteImages });
 
       setCompletedState('done');
       setTimeout(() => {
@@ -312,7 +383,16 @@ export default function SessionScreen() {
           </Text>
 
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.text }]}>Nota</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>Nota</Text>
+              <Pressable
+                onPress={() => handleAddImage((img) => setNoteImages((prev) => [...prev, img]))}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, backgroundColor: colors.backgroundSelected }}
+              >
+                <Ionicons name="image-outline" size={16} color="#FF9500" />
+                <Text style={{ fontSize: 12, color: '#FF9500', fontWeight: '700' }}>Adjuntar Imagen</Text>
+              </Pressable>
+            </View>
             <TextInput
               placeholder="Escribe una nota sobre esta sesión"
               placeholderTextColor={colors.textSecondary + '70'}
@@ -321,6 +401,21 @@ export default function SessionScreen() {
               style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement, minHeight: 80, textAlignVertical: 'top' }]}
               multiline
             />
+            {noteImages.length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {noteImages.map((img, idx) => (
+                  <View key={idx} style={{ position: 'relative', width: 60, height: 60, borderRadius: 8, overflow: 'hidden' }}>
+                    <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                    <Pressable
+                      onPress={() => setNoteImages((prev) => prev.filter((_, i) => i !== idx))}
+                      style={{ position: 'absolute', top: 2, right: 2, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 10, padding: 2 }}
+                    >
+                      <Ionicons name="close" size={12} color="#fff" />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           <View style={styles.inputGroup}>
