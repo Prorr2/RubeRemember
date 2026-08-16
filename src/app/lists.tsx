@@ -62,6 +62,8 @@ export default function ListsScreen() {
     Clipboard.setString(text);
   };
 
+  const isLongItemText = (text: string) => text.length > 28;
+
   const selectedItemIds = Object.keys(selectedItems).filter((id) => selectedItems[id]);
   const numSelected = selectedItemIds.length;
 
@@ -411,37 +413,37 @@ export default function ListsScreen() {
                               </Pressable>
                             )}
 
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <View style={{ flexDirection: isLongItemText(item.text) ? 'column' : 'row', alignItems: 'center', gap: isLongItemText(item.text) ? 4 : 10 }}>
                               {/* Item Alarm Icon */}
                               {item.alarmTime ? (
                                 <Pressable
                                   onPress={() => openAlarmModal(list.id, item.id, item.alarmTime)}
-                                  style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4 }}
+                                  style={{ flexDirection: 'row', alignItems: 'center', gap: 3, padding: 5 }}
                                 >
-                                  <Ionicons name="notifications" size={14} color="#FF9500" />
-                                  <Text style={{ fontSize: 10, color: '#FF9500', fontWeight: 'bold' }}>{item.alarmTime}</Text>
+                                  <Ionicons name="notifications" size={18} color="#FF9500" />
+                                  <Text style={{ fontSize: 11, color: '#FF9500', fontWeight: 'bold' }}>{item.alarmTime}</Text>
                                 </Pressable>
                               ) : (
                                 <Pressable
                                   onPress={() => openAlarmModal(list.id, item.id, undefined)}
-                                  style={{ padding: 4, opacity: 0.5 }}
+                                  style={{ padding: 5, opacity: 0.5 }}
                                 >
-                                  <Ionicons name="notifications-outline" size={14} color={colors.textSecondary} />
+                                  <Ionicons name="notifications-outline" size={18} color={colors.textSecondary} />
                                 </Pressable>
                               )}
 
                               {!isEditingThisItem && (
                                 <Pressable
                                   onPress={() => handleCopyItemText(item.text)}
-                                  style={{ padding: 4 }}
+                                  style={{ padding: 5 }}
                                 >
-                                  <Ionicons name="copy-outline" size={16} color={colors.textSecondary} />
+                                  <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
                                 </Pressable>
                               )}
 
                               {isEditingThisItem ? (
-                                <Pressable onPress={handleSaveListItemText} style={{ padding: 4 }}>
-                                  <Ionicons name="checkmark-circle" size={18} color="#34C759" />
+                                <Pressable onPress={handleSaveListItemText} style={{ padding: 5 }}>
+                                  <Ionicons name="checkmark-circle" size={20} color="#34C759" />
                                 </Pressable>
                               ) : (
                                 <Pressable
@@ -449,14 +451,14 @@ export default function ListsScreen() {
                                     setEditingItemId({ listId: list.id, itemId: item.id });
                                     setEditingItemText(item.text);
                                   }}
-                                  style={{ padding: 4 }}
+                                  style={{ padding: 5 }}
                                 >
-                                  <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
+                                  <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
                                 </Pressable>
                               )}
 
-                              <Pressable onPress={() => store.deleteListItem(list.id, item.id)} style={{ padding: 4 }}>
-                                <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
+                              <Pressable onPress={() => store.deleteListItem(list.id, item.id)} style={{ padding: 5 }}>
+                                <Ionicons name="close-circle-outline" size={18} color="#FF3B30" />
                               </Pressable>
                             </View>
                           </View>
@@ -603,37 +605,37 @@ export default function ListsScreen() {
                                             </Pressable>
                                           )}
 
-                                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                          <View style={{ flexDirection: isLongItemText(item.text) ? 'column' : 'row', alignItems: 'center', gap: isLongItemText(item.text) ? 4 : 8 }}>
                                             {/* Item Alarm Icon */}
                                             {item.alarmTime ? (
                                               <Pressable
                                                 onPress={() => openAlarmModal(sublist.id, item.id, item.alarmTime)}
-                                                style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 2 }}
+                                                style={{ flexDirection: 'row', alignItems: 'center', gap: 3, padding: 4 }}
                                               >
-                                                <Ionicons name="notifications" size={12} color="#FF9500" />
-                                                <Text style={{ fontSize: 9, color: '#FF9500', fontWeight: 'bold' }}>{item.alarmTime}</Text>
+                                                <Ionicons name="notifications" size={16} color="#FF9500" />
+                                                <Text style={{ fontSize: 10, color: '#FF9500', fontWeight: 'bold' }}>{item.alarmTime}</Text>
                                               </Pressable>
                                             ) : (
                                               <Pressable
                                                 onPress={() => openAlarmModal(sublist.id, item.id, undefined)}
-                                                style={{ padding: 2, opacity: 0.5 }}
+                                                style={{ padding: 4, opacity: 0.5 }}
                                               >
-                                                <Ionicons name="notifications-outline" size={12} color={colors.textSecondary} />
+                                                <Ionicons name="notifications-outline" size={16} color={colors.textSecondary} />
                                               </Pressable>
                                             )}
 
                                             {!isEditingThisItem && (
                                               <Pressable
                                                 onPress={() => handleCopyItemText(item.text)}
-                                                style={{ padding: 2 }}
+                                                style={{ padding: 4 }}
                                               >
-                                                <Ionicons name="copy-outline" size={14} color={colors.textSecondary} />
+                                                <Ionicons name="copy-outline" size={16} color={colors.textSecondary} />
                                               </Pressable>
                                             )}
 
                                             {isEditingThisItem ? (
-                                              <Pressable onPress={handleSaveListItemText} style={{ padding: 2 }}>
-                                                <Ionicons name="checkmark-circle" size={16} color="#34C759" />
+                                              <Pressable onPress={handleSaveListItemText} style={{ padding: 4 }}>
+                                                <Ionicons name="checkmark-circle" size={18} color="#34C759" />
                                               </Pressable>
                                             ) : (
                                               <Pressable
@@ -641,14 +643,14 @@ export default function ListsScreen() {
                                                   setEditingItemId({ listId: sublist.id, itemId: item.id });
                                                   setEditingItemText(item.text);
                                                 }}
-                                                style={{ padding: 2 }}
+                                                style={{ padding: 4 }}
                                               >
-                                                <Ionicons name="create-outline" size={14} color={colors.textSecondary} />
+                                                <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
                                               </Pressable>
                                             )}
 
-                                            <Pressable onPress={() => store.deleteListItem(sublist.id, item.id)} style={{ padding: 2 }}>
-                                              <Ionicons name="close-circle-outline" size={14} color="#FF3B30" />
+                                            <Pressable onPress={() => store.deleteListItem(sublist.id, item.id)} style={{ padding: 4 }}>
+                                              <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
                                             </Pressable>
                                           </View>
                                         </View>

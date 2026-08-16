@@ -1766,8 +1766,8 @@ export default function DecisionCenterScreen() {
           <Pressable onPress={() => handleQuickCreate(ItemType.TASK)} style={[styles.composerBtn, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
             <Ionicons name="checkmark-circle" size={24} color="#FF9500" />
           </Pressable>
-          <Pressable onPress={() => handleQuickCreate(ItemType.REMINDER)} style={[styles.composerBtn, { backgroundColor: 'rgba(0, 122, 255, 0.15)' }]}>
-            <Ionicons name="notifications" size={24} color="#007AFF" />
+          <Pressable onPress={() => router.push('/lists')} style={[styles.composerBtn, { backgroundColor: 'rgba(52, 199, 89, 0.15)' }]}>
+            <Ionicons name="list" size={24} color="#34C759" />
           </Pressable>
           <Pressable onPress={() => setIsVoiceModalVisible(true)} style={[styles.composerBtn, { backgroundColor: 'rgba(255, 45, 85, 0.15)' }]}>
             <Ionicons name="mic" size={24} color="#FF2D55" />
