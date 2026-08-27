@@ -64,6 +64,9 @@ export interface Task extends BaseItem {
   sessionsCount?: number;
   lastSession?: string;
   images?: string[];
+  active?: boolean;
+  habit?: boolean;
+  habitTime?: string;
 }
 
 export interface Activity extends BaseItem {
@@ -166,6 +169,26 @@ export interface TimeSlot {
   assignedTaskIds: string[];
 }
 
+export interface Phase {
+  id: string;
+  name: string;
+  description: string;
+  completed: boolean;
+  order: number;
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  completed: boolean;
+  phases: Phase[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface Session {
   id: string;
   taskId: string;
@@ -178,6 +201,7 @@ export interface Session {
   endTime?: string | null;
   notesImages?: string[];
   nextStepImages?: string[];
+  title?: string;
 }
 
 export interface Recommendation {

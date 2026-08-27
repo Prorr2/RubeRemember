@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { useRememberStore, HourWeight, CustomCategory, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/hooks/use-remember-store';
+import { useRememberStore, HourWeight, CustomCategory, TaskCategory, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { useSettingsService } from '@/services/SettingsService';
 import { ScoreEngine } from '@/engines/ScoreEngine';
@@ -144,6 +144,12 @@ export default function SettingsScreen() {
   const [editingCat, setEditingCat] = useState<CustomCategory | null>(null);
   const [catName, setCatName] = useState('');
 
+  // Modal State for Adding/Editing Task Category
+  const [taskCatModalVisible, setTaskCatModalVisible] = useState(false);
+  const [editingTaskCat, setEditingTaskCat] = useState<TaskCategory | null>(null);
+  const [taskCatName, setTaskCatName] = useState('');
+  const [taskCatEmoji, setTaskCatEmoji] = useState('📁');
+
   const openAddModal = () => {
     setEditingWeight(null);
     setWeightName('');
@@ -252,6 +258,62 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             await store.deleteActivityCategory(cat.id);
+          },
+        },
+      ]
+    );
+  };
+
+  const openAddTaskCatModal = () => {
+    setEditingTaskCat(null);
+    setTaskCatName('');
+    setTaskCatEmoji('📁');
+    setTaskCatModalVisible(true);
+  };
+
+  const openEditTaskCatModal = (cat: TaskCategory) => {
+    setEditingTaskCat(cat);
+    setTaskCatName(cat.name);
+    setTaskCatEmoji(cat.emoji || '📁');
+    setTaskCatModalVisible(true);
+  };
+
+  const handleSaveTaskCat = async () => {
+    const name = taskCatName.trim();
+    const emoji = taskCatEmoji.trim();
+    if (!name) {
+      Alert.alert('Nombre vacío', 'Por favor ingresa un nombre para la categoría de tarea.');
+      return;
+    }
+    if (!emoji) {
+      Alert.alert('Emoji requerido', 'Debes elegir o ingresar un emoji obligatorio para la categoría de tarea.');
+      return;
+    }
+
+    try {
+      if (editingTaskCat) {
+        await store.updateTaskCategory(editingTaskCat.id, name, emoji);
+      } else {
+        await store.addTaskCategory(name, emoji);
+      }
+      setTaskCatModalVisible(false);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'No se pudo guardar la categoría de tarea.');
+    }
+  };
+
+  const handleDeleteTaskCat = (cat: TaskCategory) => {
+    Alert.alert(
+      'Eliminar Categoría de Tarea',
+      `¿Estás seguro de que quieres eliminar la categoría "${cat.name}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            await store.deleteTaskCategory(cat.id);
           },
         },
       ]
@@ -385,6 +447,47 @@ export default function SettingsScreen() {
                     ) : (
                       <Text style={{ color: colors.textSecondary, fontSize: 11, fontStyle: 'italic' }}>Sistema</Text>
                     )}
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        </View>
+
+        {/* Section: Task Categories */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CATEGORÍAS DE TAREA</Text>
+            <Pressable onPress={openAddTaskCatModal} style={styles.addBtn}>
+              <Ionicons name="add-circle" size={24} color="#34C759" />
+              <Text style={[styles.addBtnText, { color: '#34C759' }]}>Añadir</Text>
+            </Pressable>
+          </View>
+
+          <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>
+            Administra categorías personalizadas para clasificar tus tareas cuando no se asignan a un objetivo.
+          </Text>
+
+          <View style={styles.weightsList}>
+            {store.taskCategories.length === 0 ? (
+              <View style={[styles.emptyWeights, { backgroundColor: colors.backgroundElement }]}>
+                <Ionicons name="folder-open-outline" size={32} color={colors.textSecondary} style={{ opacity: 0.5 }} />
+                <Text style={{ color: colors.textSecondary, marginTop: 8 }}>No tienes categorías de tarea.</Text>
+              </View>
+            ) : (
+              store.taskCategories.map((tcat) => (
+                <View key={tcat.id} style={[styles.weightCard, { backgroundColor: colors.backgroundElement }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Text style={{ fontSize: 18 }}>{tcat.emoji}</Text>
+                    <Text style={[styles.weightName, { color: colors.text }]}>{tcat.name}</Text>
+                  </View>
+                  <View style={styles.weightCardActions}>
+                    <Pressable onPress={() => openEditTaskCatModal(tcat)} style={styles.actionIconButton}>
+                      <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
+                    </Pressable>
+                    <Pressable onPress={() => handleDeleteTaskCat(tcat)} style={styles.actionIconButton}>
+                      <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                    </Pressable>
                   </View>
                 </View>
               ))
@@ -1102,6 +1205,66 @@ export default function SettingsScreen() {
               <Pressable
                 onPress={handleSaveCat}
                 style={[styles.modalBtn, { backgroundColor: '#5856D6' }]}
+              >
+                <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>Guardar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Add/Edit Task Category Modal */}
+      <Modal
+        visible={taskCatModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTaskCatModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.modalContent, { backgroundColor: colors.backgroundElement }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {editingTaskCat ? 'Editar Categoría de Tarea' : 'Nueva Categoría de Tarea'}
+            </Text>
+
+            <View style={styles.formGroup}>
+              <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Emoji Obligatorio *</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <TextInput
+                  value={taskCatEmoji}
+                  onChangeText={setTaskCatEmoji}
+                  maxLength={4}
+                  placeholder="📁"
+                  placeholderTextColor={colors.textSecondary + '80'}
+                  style={[styles.modalInput, { width: 60, textAlign: 'center', fontSize: 22, color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Nombre de la Categoría *</Text>
+              <TextInput
+                value={taskCatName}
+                onChangeText={setTaskCatName}
+                placeholder="ej. Trabajo, Personal, Salud..."
+                placeholderTextColor={colors.textSecondary + '80'}
+                style={[styles.modalInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.backgroundSelected }]}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setTaskCatModalVisible(false)}
+                style={[styles.modalBtn, { backgroundColor: colors.backgroundSelected }]}
+              >
+                <Text style={[styles.modalBtnText, { color: colors.text }]}>Cancelar</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleSaveTaskCat}
+                style={[styles.modalBtn, { backgroundColor: '#34C759' }]}
               >
                 <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>Guardar</Text>
               </Pressable>

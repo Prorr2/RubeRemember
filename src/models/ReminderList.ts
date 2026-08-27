@@ -1,6 +1,7 @@
 export interface ListItem {
   id: string;
   text: string;
+  title?: string;
   imageUri?: string;
   images?: string[];
   alarmTime?: string;

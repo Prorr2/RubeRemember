@@ -14,4 +14,7 @@ export interface Goal {
   phases: Phase[];
   createdAt: string;
   completed?: boolean;
+  isMain?: boolean;
+  emoji?: string;
 }
+

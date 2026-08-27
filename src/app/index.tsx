@@ -1210,46 +1210,88 @@ export default function DecisionCenterScreen() {
           </Pressable>
         </View>
 
-        {/* BOTÓN VER LISTAS */}
-        <Pressable
-          onPress={() => router.push('/lists')}
-          style={({ pressed }) => [
-            {
-              backgroundColor: colors.backgroundElement,
-              borderRadius: 16,
-              paddingVertical: 14,
-              paddingHorizontal: 16,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              opacity: pressed ? 0.9 : 1,
-              marginTop: 12,
-              marginBottom: 4,
-              borderWidth: 1,
-              borderColor: colors.backgroundSelected,
-            }
-          ]}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={{ 
-              width: 38, 
-              height: 38, 
-              borderRadius: 12, 
-              backgroundColor: 'rgba(52, 199, 89, 0.15)', 
-              alignItems: 'center', 
-              justifyContent: 'center' 
-            }}>
-              <Ionicons name="list" size={20} color="#34C759" />
+        {/* GRUPO LISTAS Y ROADMAPS */}
+        <View style={{
+          backgroundColor: colors.backgroundElement,
+          borderRadius: 16,
+          overflow: 'hidden',
+          marginTop: 12,
+          marginBottom: 12,
+          borderWidth: 1,
+          borderColor: colors.backgroundSelected,
+        }}>
+          {/* BOTÓN VER LISTAS */}
+          <Pressable
+            onPress={() => router.push('/lists')}
+            style={({ pressed }) => [
+              {
+                paddingVertical: 14,
+                paddingHorizontal: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                opacity: pressed ? 0.8 : 1,
+                borderBottomWidth: 1,
+                borderBottomColor: colors.backgroundSelected,
+              }
+            ]}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ 
+                width: 38, 
+                height: 38, 
+                borderRadius: 12, 
+                backgroundColor: 'rgba(52, 199, 89, 0.15)', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Ionicons name="list" size={20} color="#34C759" />
+              </View>
+              <View>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>Mis Listas</Text>
+                <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 1 }}>
+                  Organiza tus notas, compras y tareas rápidas
+                </Text>
+              </View>
             </View>
-            <View>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>Mis Listas</Text>
-              <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 1 }}>
-                Organiza tus notas, compras y tareas rápidas
-              </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </Pressable>
+
+          {/* BOTÓN ROADMAPS */}
+          <Pressable
+            onPress={() => router.push('/goals')}
+            style={({ pressed }) => [
+              {
+                paddingVertical: 14,
+                paddingHorizontal: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                opacity: pressed ? 0.8 : 1,
+              }
+            ]}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ 
+                width: 38, 
+                height: 38, 
+                borderRadius: 12, 
+                backgroundColor: 'rgba(255, 45, 85, 0.15)', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Ionicons name="trophy" size={20} color="#FF2D55" />
+              </View>
+              <View>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>Roadmaps</Text>
+                <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 1 }}>
+                  Metas a largo plazo y objetivos
+                </Text>
+              </View>
             </View>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-        </Pressable>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </Pressable>
+        </View>
 
         {/* 1. RECOMMENDATION CARD */}
         <View style={[styles.sectionContainer]}>
@@ -1665,51 +1707,10 @@ export default function DecisionCenterScreen() {
 
 
 
-        {/* Group 3: Roadmaps, Franjas, Papelera */}
+        {/* Group 3: Papelera */}
         <View style={styles.sectionContainer}>
           <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 4 }]}>🎯 Organización</Text>
           <View style={[styles.listGroup, { backgroundColor: colors.backgroundElement }]}>
-            {/* Roadmaps */}
-            <Pressable 
-              onPress={() => router.push('/goals')} 
-              style={[styles.listGroupItem, { borderBottomWidth: 1, borderBottomColor: colors.backgroundSelected }]}
-            >
-              <View style={styles.listGroupLeft}>
-                <View style={[styles.iconContainer, { backgroundColor: 'rgba(255, 45, 85, 0.1)' }]}>
-                  <Ionicons name="trophy" size={18} color="#FF2D55" />
-                </View>
-                <View>
-                  <Text style={[styles.listGroupTitle, { color: colors.text }]}>Roadmaps</Text>
-                  <Text style={[styles.listGroupSubtitle, { color: colors.textSecondary }]}>Metas a largo plazo y objetivos</Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </Pressable>
-
-            {/* Planes a Largo Plazo */}
-            <Pressable 
-              onPress={() => router.push('/plans')} 
-              style={[styles.listGroupItem, { borderBottomWidth: 1, borderBottomColor: colors.backgroundSelected }]}
-            >
-              <View style={styles.listGroupLeft}>
-                <View style={[styles.iconContainer, { backgroundColor: 'rgba(191, 90, 242, 0.1)' }]}>
-                  <Ionicons name="compass" size={18} color="#BF5AF2" />
-                </View>
-                <View>
-                  <Text style={[styles.listGroupTitle, { color: colors.text }]}>Planes a Largo Plazo</Text>
-                  <Text style={[styles.listGroupSubtitle, { color: colors.textSecondary }]}>Aspiraciones y metas futuras</Text>
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {pendingPlansCount > 0 && (
-                  <View style={[styles.inlineTrashBadge, { backgroundColor: 'rgba(191, 90, 242, 0.15)' }]}>
-                    <Text style={[styles.inlineTrashBadgeText, { color: '#BF5AF2' }]}>{pendingPlansCount}</Text>
-                  </View>
-                )}
-                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-              </View>
-            </Pressable>
-
             {/* Papelera */}
             <Pressable 
               onPress={() => router.push('/trash')} 

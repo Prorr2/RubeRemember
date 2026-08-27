@@ -1652,3 +1652,128 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ==================== GOALS & ROADMAP MODULE ==================== */
+.goals-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.goal-card {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.goal-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.goal-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.goal-dates-badge {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding-left: 12px;
+  border-left: 2px dashed rgba(255, 255, 255, 0.1);
+}
+
+.phase-item-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  transition: all 0.2s ease;
+}
+
+.phase-item-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.phase-item-card.completed {
+  opacity: 0.6;
+}
+
+.phase-item-card.completed .phase-name {
+  text-decoration: line-through;
+}
+
+/* ==================== SYNC & BACKUP MODULE ==================== */
+.sync-card, .backup-card {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sync-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.sync-connected {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-success);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.sync-disconnected {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--color-warning);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* ==================== TRASH MODULE ==================== */
+.trash-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.trash-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.trash-card-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.trash-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+

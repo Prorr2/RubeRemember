@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -9,9 +9,165 @@ import {
   ViewStyle,
   Modal,
   Pressable,
+  PanResponder,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { openBrowserAsync } from 'expo-web-browser';
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+interface ZoomableImageProps {
+  uri: string;
+  onClose: () => void;
+}
+
+function ZoomableImage({ uri, onClose }: ZoomableImageProps) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+
+  const currentScale = useRef(1);
+  const currentTranslateX = useRef(0);
+  const currentTranslateY = useRef(0);
+
+  const lastScale = useRef(1);
+  const lastTranslateX = useRef(0);
+  const lastTranslateY = useRef(0);
+
+  const initialDistance = useRef<number | null>(null);
+  const initialTouchX = useRef<number>(0);
+  const initialTouchY = useRef<number>(0);
+  
+  const touchStartTime = useRef<number>(0);
+
+  useEffect(() => {
+    const scaleId = scale.addListener(({ value }) => {
+      currentScale.current = value;
+    });
+    const txId = translateX.addListener(({ value }) => {
+      currentTranslateX.current = value;
+    });
+    const tyId = translateY.addListener(({ value }) => {
+      currentTranslateY.current = value;
+    });
+    return () => {
+      scale.removeListener(scaleId);
+      translateX.removeListener(txId);
+      translateY.removeListener(tyId);
+    };
+  }, []);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt, gestureState) => {
+        touchStartTime.current = Date.now();
+        const touches = evt.nativeEvent.touches;
+        if (touches.length === 2) {
+          const touch1 = touches[0];
+          const touch2 = touches[1];
+          initialDistance.current = Math.hypot(
+            touch1.pageX - touch2.pageX,
+            touch1.pageY - touch2.pageY
+          );
+        } else if (touches.length === 1) {
+          initialTouchX.current = gestureState.x0;
+          initialTouchY.current = gestureState.y0;
+        }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const touches = evt.nativeEvent.touches;
+
+        if (touches.length === 2 && initialDistance.current !== null) {
+          const touch1 = touches[0];
+          const touch2 = touches[1];
+          const currentDistance = Math.hypot(
+            touch1.pageX - touch2.pageX,
+            touch1.pageY - touch2.pageY
+          );
+
+          let newScale = (currentDistance / initialDistance.current) * lastScale.current;
+          newScale = Math.max(1, Math.min(5, newScale));
+          scale.setValue(newScale);
+        } else if (touches.length === 1 && lastScale.current > 1) {
+          const deltaX = gestureState.dx;
+          const deltaY = gestureState.dy;
+
+          const maxTranslateX = (screenWidth * (lastScale.current - 1)) / 2;
+          const maxTranslateY = (screenHeight * (lastScale.current - 1)) / 2;
+
+          let newTranslateX = lastTranslateX.current + deltaX;
+          let newTranslateY = lastTranslateY.current + deltaY;
+
+          newTranslateX = Math.max(-maxTranslateX, Math.min(maxTranslateX, newTranslateX));
+          newTranslateY = Math.max(-maxTranslateY, Math.min(maxTranslateY, newTranslateY));
+
+          translateX.setValue(newTranslateX);
+          translateY.setValue(newTranslateY);
+        }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const duration = Date.now() - touchStartTime.current;
+        const distance = Math.hypot(gestureState.dx, gestureState.dy);
+
+        // Close on quick tap if not zoomed
+        if (duration < 250 && distance < 10 && lastScale.current <= 1.05) {
+          onClose();
+          return;
+        }
+
+        const scaleVal = currentScale.current;
+        const txVal = currentTranslateX.current;
+        const tyVal = currentTranslateY.current;
+
+        lastScale.current = scaleVal;
+        lastTranslateX.current = txVal;
+        lastTranslateY.current = tyVal;
+
+        initialDistance.current = null;
+
+        if (scaleVal <= 1.05) {
+          Animated.parallel([
+            Animated.spring(scale, { toValue: 1, useNativeDriver: true }),
+            Animated.spring(translateX, { toValue: 0, useNativeDriver: true }),
+            Animated.spring(translateY, { toValue: 0, useNativeDriver: true }),
+          ]).start();
+          lastScale.current = 1;
+          lastTranslateX.current = 0;
+          lastTranslateY.current = 0;
+        }
+      },
+    })
+  ).current;
+
+  return (
+    <Animated.View
+      style={{
+        transform: [
+          { scale: scale },
+          { translateX: translateX },
+          { translateY: translateY },
+        ],
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}
+      {...panResponder.panHandlers}
+    >
+      <Image
+        source={{ uri }}
+        style={{ width: '100%', height: '100%' }}
+        resizeMode="contain"
+      />
+    </Animated.View>
+  );
+}
+
+
 
 interface RichTextProps {
   text?: string;
@@ -172,7 +328,7 @@ export function RichText({
             <Pressable
               key={`indep-img-${idx}`}
               onPress={() => setFullscreenImage(img)}
-              style={[{ width: 80, height: 80, borderRadius: 8, overflow: 'hidden' }, imageStyle]}
+              style={[{ width: 160, height: 160, borderRadius: 8, overflow: 'hidden' }, imageStyle]}
             >
               <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
             </Pressable>
@@ -187,16 +343,14 @@ export function RichText({
           animationType="fade"
           onRequestClose={() => setFullscreenImage(null)}
         >
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={() => setFullscreenImage(null)}
-          >
-            <View style={styles.modalContent}>
-              <Image
-                source={{ uri: fullscreenImage }}
-                style={styles.fullscreenImage}
-                resizeMode="contain"
-              />
+          <View style={styles.modalOverlay}>
+            {/* Absolute backdrop for closing on empty click */}
+            <Pressable
+              style={StyleSheet.absoluteFillObject}
+              onPress={() => setFullscreenImage(null)}
+            />
+            <View style={styles.modalContent} pointerEvents="box-none">
+              <ZoomableImage uri={fullscreenImage} onClose={() => setFullscreenImage(null)} />
               <Pressable
                 onPress={() => setFullscreenImage(null)}
                 style={styles.closeButton}
@@ -204,7 +358,7 @@ export function RichText({
                 <Ionicons name="close" size={24} color="#fff" />
               </Pressable>
             </View>
-          </Pressable>
+          </View>
         </Modal>
       )}
     </View>

@@ -7,6 +7,7 @@ export interface Session {
   realDuration?: number; // minutes
   completed: boolean;
   notes?: string;
+  title?: string;
   createdAt: string; // ISO date string
   nextStep?: string;
   progress?: number;

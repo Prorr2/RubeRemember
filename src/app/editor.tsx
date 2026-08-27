@@ -113,6 +113,7 @@ export default function ItemEditorScreen() {
   const [estimatedHours, setEstimatedHours] = useState('');
   const [selectedGoalId, setSelectedGoalId] = useState<string>('');
   const [selectedPhaseId, setSelectedPhaseId] = useState<string>('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [selectedSlotId, setSelectedSlotId] = useState<string>('');
   const [taskStartDate, setTaskStartDate] = useState<string>('');
   const [taskDueDate, setTaskDueDate] = useState<string>('');
@@ -261,6 +262,7 @@ export default function ItemEditorScreen() {
         setEstimatedHours(task.estimatedHours ? String(task.estimatedHours) : '');
         setSelectedGoalId(task.goalId || '');
         setSelectedPhaseId(task.phaseId || '');
+        setSelectedCategoryId(task.categoryId || '');
         setSelectedSlotId(task.timeSlotId || '');
         setTaskStartDate(task.startDate || '');
         setTaskDueDate(task.dueDate || '');
@@ -454,6 +456,10 @@ export default function ItemEditorScreen() {
         };
 
         if (itemType === ItemType.TASK) {
+          if (!selectedGoalId && !selectedCategoryId) {
+            Alert.alert('Asignación Requerida', 'Debes asignar obligatoriamente o bien un Roadmap / Objetivo o una Categoría de Tarea.');
+            return;
+          }
           await store.updateItem(editingItem.id, {
             ...commonUpdates,
             startDate: taskStartDate || undefined,
@@ -462,6 +468,7 @@ export default function ItemEditorScreen() {
             priority,
             goalId: selectedGoalId || undefined,
             phaseId: selectedPhaseId || undefined,
+            categoryId: selectedCategoryId || undefined,
             timeSlotId: selectedSlotId || undefined,
             energyType,
           } as any);
@@ -509,6 +516,10 @@ export default function ItemEditorScreen() {
       } else {
         // Create new item
         if (itemType === ItemType.TASK) {
+          if (!selectedGoalId && !selectedCategoryId) {
+            Alert.alert('Asignación Requerida', 'Debes asignar obligatoriamente o bien un Roadmap / Objetivo o una Categoría de Tarea.');
+            return;
+          }
           await store.createTask(
             cleanTitle,
             finalDescription,
@@ -519,7 +530,9 @@ export default function ItemEditorScreen() {
             selectedGoalId || undefined,
             selectedPhaseId || undefined,
             selectedSlotId || undefined,
-            energyType
+            energyType,
+            attachedImages,
+            selectedCategoryId || undefined
           );
         } else if (itemType === ItemType.REMINDER) {
           const formattedHour = chosenHour.toString().padStart(2, '0');
@@ -893,37 +906,63 @@ export default function ItemEditorScreen() {
               <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
 
               {/* Goal & Phase Pickers */}
-              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Asociar a un Objetivo</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
-                <Pressable
-                  onPress={() => { setSelectedGoalId(''); setSelectedPhaseId(''); }}
-                  style={[
-                    styles.chip,
-                    { backgroundColor: colors.backgroundSelected },
-                    selectedGoalId === '' && { backgroundColor: themeColor },
-                  ]}
-                >
-                  <Text style={[styles.chipText, { color: selectedGoalId === '' ? '#fff' : colors.text }]}>Ninguno</Text>
-                </Pressable>
-                {store.goals.map((g) => (
-                  <Pressable
-                    key={g.id}
-                    onPress={() => { setSelectedGoalId(g.id); setSelectedPhaseId(''); }}
-                    style={[
-                      styles.chip,
-                      { backgroundColor: colors.backgroundSelected },
-                      selectedGoalId === g.id && { backgroundColor: themeColor },
-                    ]}
-                  >
-                    <Text style={[styles.chipText, { color: selectedGoalId === g.id ? '#fff' : colors.text }]}>{g.title}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Asociar a un Objetivo (Roadmap)</Text>
+              <View style={{ flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                {store.goals.length === 0 ? (
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontStyle: 'italic' }}>
+                    No hay Objetivos creados.
+                  </Text>
+                ) : (
+                  <>
+                    {store.goals.filter((g) => g.isMain).map((g) => (
+                      <Pressable
+                        key={g.id}
+                        onPress={() => {
+                          setSelectedGoalId(g.id);
+                          setSelectedPhaseId('');
+                          setSelectedCategoryId('');
+                        }}
+                        style={[
+                          styles.chip,
+                          { backgroundColor: colors.backgroundSelected },
+                          selectedGoalId === g.id && { backgroundColor: themeColor },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, { color: selectedGoalId === g.id ? '#fff' : colors.text }]}>
+                          {g.emoji ? `${g.emoji} ` : '🎯 '}{g.title}
+                        </Text>
+                      </Pressable>
+                    ))}
+                    {store.goals.some((g) => g.isMain) && store.goals.some((g) => !g.isMain) && (
+                      <View style={{ height: 8 }} />
+                    )}
+                    {store.goals.filter((g) => !g.isMain).map((g) => (
+                      <Pressable
+                        key={g.id}
+                        onPress={() => {
+                          setSelectedGoalId(g.id);
+                          setSelectedPhaseId('');
+                          setSelectedCategoryId('');
+                        }}
+                        style={[
+                          styles.chip,
+                          { backgroundColor: colors.backgroundSelected },
+                          selectedGoalId === g.id && { backgroundColor: themeColor },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, { color: selectedGoalId === g.id ? '#fff' : colors.text }]}>
+                          {g.emoji ? `${g.emoji} ` : '🎯 '}{g.title}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </>
+                )}
+              </View>
 
               {selectedGoalId !== '' && goalPhases.length > 0 && (
                 <>
                   <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]}>Fase del Roadmap</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+                  <View style={{ flexDirection: 'column', gap: 6, marginTop: 4 }}>
                     {goalPhases.map((p) => (
                       <Pressable
                         key={p.id}
@@ -934,12 +973,46 @@ export default function ItemEditorScreen() {
                           selectedPhaseId === p.id && { backgroundColor: themeColor },
                         ]}
                       >
-                        <Text style={[styles.chipText, { color: selectedPhaseId === p.id ? '#fff' : colors.text }]}>{p.name}</Text>
+                        <Text style={[styles.chipText, { color: selectedPhaseId === p.id ? '#fff' : colors.text }]}>
+                          Fase {p.order + 1}: {p.name}
+                        </Text>
                       </Pressable>
                     ))}
-                  </ScrollView>
+                  </View>
                 </>
               )}
+
+              <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
+
+              {/* Task Categories Picker */}
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Categorías de Tarea</Text>
+              <View style={{ flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                {store.taskCategories.length === 0 ? (
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontStyle: 'italic' }}>
+                    No hay categorías de tarea configuradas.
+                  </Text>
+                ) : (
+                  store.taskCategories.map((c) => (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => {
+                        setSelectedCategoryId(c.id);
+                        setSelectedGoalId('');
+                        setSelectedPhaseId('');
+                      }}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: colors.backgroundSelected },
+                        selectedCategoryId === c.id && { backgroundColor: '#34C759' },
+                      ]}
+                    >
+                      <Text style={[styles.chipText, { color: selectedCategoryId === c.id ? '#fff' : colors.text }]}>
+                        {c.emoji} {c.name}
+                      </Text>
+                    </Pressable>
+                  ))
+                )}
+              </View>
 
               <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
 

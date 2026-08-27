@@ -42,9 +42,11 @@ export default function ListsScreen() {
   // List Item inputs state
   const [newItemTexts, setNewItemTexts] = useState<Record<string, string>>({});
   const [newItemImages, setNewItemImages] = useState<Record<string, string[]>>({});
+  const [newItemTitles, setNewItemTitles] = useState<Record<string, string>>({});
 
 
   const [editingItemImages, setEditingItemImages] = useState<string[]>([]);
+  const [editingItemTitle, setEditingItemTitle] = useState('');
 
   const prepareForEdit = (item: ListItem) => {
     if (!item) return { cleanText: '', images: [] };
@@ -256,25 +258,35 @@ export default function ListsScreen() {
 
   const handleAddListItem = async (listId: string) => {
     const text = newItemTexts[listId] || '';
+    const title = newItemTitles[listId] || '';
     const images = newItemImages[listId] || [];
-    if (!text.trim() && images.length === 0) {
-      Alert.alert('Texto vacío', 'Por favor escribe el texto del elemento.');
+    if (!text.trim() && !title.trim() && images.length === 0) {
+      Alert.alert('Texto vacío', 'Por favor escribe el texto o un título para el elemento.');
       return;
     }
-    await store.addListItem(listId, text.trim(), undefined, images);
+    await store.addListItem(listId, text.trim(), undefined, images, title.trim() || undefined);
     setNewItemTexts((prev) => ({ ...prev, [listId]: '' }));
+    setNewItemTitles((prev) => ({ ...prev, [listId]: '' }));
     setNewItemImages((prev) => ({ ...prev, [listId]: [] }));
   };
 
   const handleSaveListItemText = async () => {
     if (!editingItemId) return;
-    if (!editingItemText.trim() && editingItemImages.length === 0) {
-      Alert.alert('Texto vacío', 'El texto del elemento no puede estar vacío.');
+    if (!editingItemText.trim() && !editingItemTitle.trim() && editingItemImages.length === 0) {
+      Alert.alert('Texto vacío', 'El elemento no puede estar vacío.');
       return;
     }
-    await store.updateListItem(editingItemId.listId, editingItemId.itemId, editingItemText.trim(), undefined, editingItemImages);
+    await store.updateListItem(
+      editingItemId.listId,
+      editingItemId.itemId,
+      editingItemText.trim(),
+      undefined,
+      editingItemImages,
+      editingItemTitle.trim() || undefined
+    );
     setEditingItemId(null);
     setEditingItemText('');
+    setEditingItemTitle('');
     setEditingItemImages([]);
   };
 
@@ -493,6 +505,23 @@ export default function ListsScreen() {
 
                             {isEditingThisItem ? (
                               <View style={{ flex: 1, gap: 4 }}>
+                                <TextInput
+                                  value={editingItemTitle}
+                                  onChangeText={setEditingItemTitle}
+                                  placeholder="Título (opcional)..."
+                                  placeholderTextColor={colors.textSecondary + '70'}
+                                  style={[
+                                    styles.editItemInput,
+                                    {
+                                      color: colors.text,
+                                      fontWeight: '700',
+                                      fontSize: 16,
+                                      borderBottomWidth: 1,
+                                      borderBottomColor: colors.backgroundSelected,
+                                      paddingBottom: 2
+                                    }
+                                  ]}
+                                />
                                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
                                   <TextInput
                                     value={editingItemText}
@@ -553,17 +582,29 @@ export default function ListsScreen() {
                                 {item.completed && (
                                   <Ionicons name="checkmark-circle" size={18} color="#34C759" />
                                 )}
-                                <RichText
-                                  text={item.text}
-                                  images={item.images}
-                                  colors={colors}
-                                  textStyle={[
-                                    styles.itemText,
-                                    { color: colors.text },
-                                    item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
-                                  ]}
-                                  containerStyle={{ flex: 1 }}
-                                />
+                                <View style={{ flex: 1, gap: 2 }}>
+                                  {item.title ? (
+                                    <Text
+                                      style={[
+                                        { fontWeight: '700', color: colors.text, fontSize: 14 },
+                                        item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
+                                      ]}
+                                    >
+                                      {item.title}
+                                    </Text>
+                                  ) : null}
+                                  <RichText
+                                    text={item.text}
+                                    images={item.images}
+                                    colors={colors}
+                                    textStyle={[
+                                      styles.itemText,
+                                      { color: colors.text },
+                                      item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
+                                    ]}
+                                    containerStyle={{ flex: 1 }}
+                                  />
+                                </View>
                               </Pressable>
                             )}
 
@@ -606,6 +647,8 @@ export default function ListsScreen() {
                                     const parsed = prepareForEdit(item);
                                     setEditingItemText(parsed.cleanText);
                                     setEditingItemImages(parsed.images);
+                                                   setEditingItemTitle(item.title || '');
+                                    setEditingItemTitle(item.title || '');
                                   }}
                                   style={{ padding: 5 }}
                                 >
@@ -734,13 +777,75 @@ export default function ListsScreen() {
                                           )}
 
                                           {isEditingThisItem ? (
-                                            <TextInput
-                                              value={editingItemText}
-                                              onChangeText={setEditingItemText}
-                                              autoFocus
-                                              multiline
-                                              style={[styles.editItemInput, { color: colors.text, fontSize: 13, textAlignVertical: 'top' }]}
-                                            />
+                                            <View style={{ flex: 1, gap: 4 }}>
+                                              <TextInput
+                                                value={editingItemTitle}
+                                                onChangeText={setEditingItemTitle}
+                                                placeholder="Título (opcional)..."
+                                                placeholderTextColor={colors.textSecondary + '70'}
+                                                style={[
+                                                  styles.editItemInput,
+                                                  {
+                                                    color: colors.text,
+                                                    fontWeight: '700',
+                                                    fontSize: 15,
+                                                    borderBottomWidth: 1,
+                                                    borderBottomColor: colors.backgroundSelected,
+                                                    paddingBottom: 2
+                                                  }
+                                                ]}
+                                              />
+                                              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                                                <TextInput
+                                                  value={editingItemText}
+                                                  onChangeText={setEditingItemText}
+                                                  autoFocus
+                                                  multiline
+                                                  style={[styles.editItemInput, { flex: 1, color: colors.text, fontSize: 13, textAlignVertical: 'top' }]}
+                                                />
+                                                <Pressable
+                                                  onPress={() => handleAddImage((img) => {
+                                                    setEditingItemImages((prev) => [...prev, img]);
+                                                  })}
+                                                  style={{
+                                                    backgroundColor: colors.backgroundSelected,
+                                                    padding: 6,
+                                                    borderRadius: 6,
+                                                    height: 36,
+                                                    width: 36,
+                                                    justifyContent: 'center',
+                                                    alignItems: 'center'
+                                                  }}
+                                                >
+                                                  <Ionicons name="image-outline" size={16} color={colors.textSecondary} />
+                                                </Pressable>
+                                              </View>
+                                              {editingItemImages.length > 0 && (
+                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                                                  {editingItemImages.map((img, idx) => (
+                                                    <View key={idx} style={{ position: 'relative', width: 40, height: 40, borderRadius: 6, overflow: 'hidden' }}>
+                                                      <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                                                      <Pressable
+                                                        onPress={() => setEditingItemImages((prev) => prev.filter((_, i) => i !== idx))}
+                                                        style={{
+                                                          position: 'absolute',
+                                                          top: 1,
+                                                          right: 1,
+                                                          backgroundColor: 'rgba(0,0,0,0.6)',
+                                                          borderRadius: 8,
+                                                          width: 14,
+                                                          height: 14,
+                                                          justifyContent: 'center',
+                                                          alignItems: 'center'
+                                                        }}
+                                                      >
+                                                        <Ionicons name="close" size={8} color="#fff" />
+                                                      </Pressable>
+                                                    </View>
+                                                  ))}
+                                                </View>
+                                              )}
+                                            </View>
                                           ) : (
                                             <Pressable
                                               onPress={() => store.toggleListItemCompleted(sublist.id, item.id)}
@@ -749,17 +854,29 @@ export default function ListsScreen() {
                                               {item.completed && (
                                                 <Ionicons name="checkmark-circle" size={16} color="#34C759" />
                                               )}
-                                              <RichText
-                                                text={item.text}
-                                                images={item.images}
-                                                colors={colors}
-                                                textStyle={[
-                                                  styles.itemText,
-                                                  { color: colors.text, fontSize: 13 },
-                                                  item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
-                                                ]}
-                                                containerStyle={{ flex: 1 }}
-                                              />
+                                              <View style={{ flex: 1, gap: 2 }}>
+                                                {item.title ? (
+                                                  <Text
+                                                    style={[
+                                                      { fontWeight: '700', color: colors.text, fontSize: 15 },
+                                                      item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
+                                                    ]}
+                                                  >
+                                                    {item.title}
+                                                  </Text>
+                                                ) : null}
+                                                <RichText
+                                                  text={item.text}
+                                                  images={item.images}
+                                                  colors={colors}
+                                                  textStyle={[
+                                                    styles.itemText,
+                                                    { color: colors.text, fontSize: 13 },
+                                                    item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
+                                                  ]}
+                                                  containerStyle={{ flex: 1 }}
+                                                />
+                                              </View>
                                             </Pressable>
                                           )}
 
@@ -802,6 +919,7 @@ export default function ListsScreen() {
                                                   const parsed = prepareForEdit(item);
                                                   setEditingItemText(parsed.cleanText);
                                                   setEditingItemImages(parsed.images);
+                                                   setEditingItemTitle(item.title || '');
                                                 }}
                                                 style={{ padding: 4 }}
                                               >
@@ -818,43 +936,65 @@ export default function ListsScreen() {
                                     })}
 
                                     {/* Add sublist item input */}
-                                    <View style={styles.addItemRow}>
+                                    <View style={[styles.addItemRow, { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
                                       <TextInput
-                                        placeholder="Añadir elemento..."
-                                        placeholderTextColor={colors.textSecondary + '80'}
-                                        value={newItemTexts[sublist.id] || ''}
+                                        placeholder="Título (opcional)..."
+                                        placeholderTextColor={colors.textSecondary + '70'}
+                                        value={newItemTitles[sublist.id] || ''}
                                         onChangeText={(txt) =>
-                                          setNewItemTexts((prev) => ({ ...prev, [sublist.id]: txt }))
+                                          setNewItemTitles((prev) => ({ ...prev, [sublist.id]: txt }))
                                         }
-                                        multiline
                                         style={[
                                           styles.itemInput,
                                           { 
                                             color: colors.text, 
                                             backgroundColor: colors.backgroundSelected, 
-                                            textAlignVertical: 'top',
-                                            fontSize: 12,
-                                            minHeight: 32
+                                            fontWeight: '700',
+                                            fontSize: 14,
+                                            minHeight: 28,
+                                            paddingVertical: 2
                                           }
                                         ]}
                                       />
-                                      <Pressable
-                                        onPress={() => handleAddImage((img) => {
-                                          setNewItemImages((prev) => ({
-                                            ...prev,
-                                            [sublist.id]: [...(prev[sublist.id] || []), img]
-                                          }));
-                                        })}
-                                        style={[styles.addItemButton, { backgroundColor: colors.backgroundSelected, width: 32, height: 32 }]}
-                                      >
-                                        <Ionicons name="image-outline" size={16} color={colors.textSecondary} />
-                                      </Pressable>
-                                      <Pressable
-                                        onPress={() => handleAddListItem(sublist.id)}
-                                        style={[styles.addItemButton, { backgroundColor: '#34C759', width: 32, height: 32 }]}
-                                      >
-                                        <Ionicons name="add" size={18} color="#fff" />
-                                      </Pressable>
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                        <TextInput
+                                          placeholder="Añadir elemento..."
+                                          placeholderTextColor={colors.textSecondary + '80'}
+                                          value={newItemTexts[sublist.id] || ''}
+                                          onChangeText={(txt) =>
+                                            setNewItemTexts((prev) => ({ ...prev, [sublist.id]: txt }))
+                                          }
+                                          multiline
+                                          style={[
+                                            styles.itemInput,
+                                            { 
+                                              flex: 1,
+                                              color: colors.text, 
+                                              backgroundColor: colors.backgroundSelected, 
+                                              textAlignVertical: 'top',
+                                              fontSize: 12,
+                                              minHeight: 32
+                                            }
+                                          ]}
+                                        />
+                                        <Pressable
+                                          onPress={() => handleAddImage((img) => {
+                                            setNewItemImages((prev) => ({
+                                              ...prev,
+                                              [sublist.id]: [...(prev[sublist.id] || []), img]
+                                            }));
+                                          })}
+                                          style={[styles.addItemButton, { backgroundColor: colors.backgroundSelected, width: 32, height: 32 }]}
+                                        >
+                                          <Ionicons name="image-outline" size={16} color={colors.textSecondary} />
+                                        </Pressable>
+                                        <Pressable
+                                          onPress={() => handleAddListItem(sublist.id)}
+                                          style={[styles.addItemButton, { backgroundColor: '#34C759', width: 32, height: 32 }]}
+                                        >
+                                          <Ionicons name="add" size={18} color="#fff" />
+                                        </Pressable>
+                                      </View>
                                     </View>
 
                                     {newItemImages[sublist.id] && newItemImages[sublist.id].length > 0 && (
@@ -894,34 +1034,69 @@ export default function ListsScreen() {
                       )}
 
                       {/* Add item input inside list */}
-                      <View style={styles.addItemRow}>
-                        <TextInput
-                          placeholder="Añadir elemento..."
-                          placeholderTextColor={colors.textSecondary + '80'}
-                          value={newItemTexts[list.id] || ''}
-                          onChangeText={(txt) =>
-                            setNewItemTexts((prev) => ({ ...prev, [list.id]: txt }))
-                          }
-                          multiline
-                          style={[styles.itemInput, { color: colors.text, backgroundColor: colors.background, textAlignVertical: 'top' }]}
-                        />
-                        <Pressable
-                          onPress={() => handleAddImage((img) => {
-                            setNewItemImages((prev) => ({
-                              ...prev,
-                              [list.id]: [...(prev[list.id] || []), img]
-                            }));
-                          })}
-                          style={[styles.addItemButton, { backgroundColor: colors.backgroundSelected }]}
-                        >
-                          <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
-                        </Pressable>
-                        <Pressable
-                          onPress={() => handleAddListItem(list.id)}
-                          style={[styles.addItemButton, { backgroundColor: '#34C759' }]}
-                        >
-                          <Ionicons name="add" size={20} color="#fff" />
-                        </Pressable>
+                      <View style={[styles.addItemRow, { flexDirection: 'column', alignItems: 'stretch', gap: 6 }]}>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          <TextInput
+                            placeholder="Título (opcional)..."
+                            placeholderTextColor={colors.textSecondary + '70'}
+                            value={newItemTitles[list.id] || ''}
+                            onChangeText={(txt) =>
+                              setNewItemTitles((prev) => ({ ...prev, [list.id]: txt }))
+                            }
+                            style={[
+                              styles.itemInput,
+                              { 
+                                flex: 1, 
+                                color: colors.text, 
+                                backgroundColor: colors.background, 
+                                fontWeight: '700',
+                                fontSize: 15,
+                                minHeight: 32,
+                                paddingVertical: 4
+                              }
+                            ]}
+                          />
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <TextInput
+                            placeholder="Añadir elemento..."
+                            placeholderTextColor={colors.textSecondary + '80'}
+                            value={newItemTexts[list.id] || ''}
+                            onChangeText={(txt) =>
+                              setNewItemTexts((prev) => ({ ...prev, [list.id]: txt }))
+                            }
+                            multiline
+                            style={[
+                              styles.itemInput, 
+                              { 
+                                flex: 1, 
+                                color: colors.text, 
+                                backgroundColor: colors.background, 
+                                textAlignVertical: 'top',
+                                fontSize: 13,
+                                minHeight: 36,
+                                paddingVertical: 6
+                              }
+                            ]}
+                          />
+                          <Pressable
+                            onPress={() => handleAddImage((img) => {
+                              setNewItemImages((prev) => ({
+                                ...prev,
+                                [list.id]: [...(prev[list.id] || []), img]
+                              }));
+                            })}
+                            style={[styles.addItemButton, { backgroundColor: colors.backgroundSelected }]}
+                          >
+                            <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleAddListItem(list.id)}
+                            style={[styles.addItemButton, { backgroundColor: '#34C759' }]}
+                          >
+                            <Ionicons name="add" size={20} color="#fff" />
+                          </Pressable>
+                        </View>
                       </View>
 
                       {newItemImages[list.id] && newItemImages[list.id].length > 0 && (

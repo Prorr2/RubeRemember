@@ -11,6 +11,7 @@ import {
   Modal,
   Alert,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -675,7 +676,10 @@ export default function SearchScreen() {
         animationType="slide"
         onRequestClose={() => setShowProgressRoadmap(null)}
       >
-        <View style={styles.bottomModalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.bottomModalOverlay}
+        >
           <Pressable 
             style={StyleSheet.absoluteFill}
             onPress={() => setShowProgressRoadmap(null)}
@@ -1053,7 +1057,7 @@ export default function SearchScreen() {
               <Text style={{ color: colors.text, fontWeight: '700' }}>Cerrar</Text>
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

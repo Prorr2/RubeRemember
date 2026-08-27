@@ -22,4 +22,5 @@ export * from './Session';
 export * from './Recommendation';
 export * from './UserSettings';
 export * from './Statistics';
+export * from './TaskCategory';
 

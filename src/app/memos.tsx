@@ -461,8 +461,8 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   memoTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '800',
     marginBottom: 4,
   },
   memoDesc: {

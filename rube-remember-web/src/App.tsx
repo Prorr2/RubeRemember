@@ -25,6 +25,48 @@ export default function App() {
   // Navigation
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
 
+  // Lists feature states
+  const [newListName, setNewListName] = useState('');
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [editingListName, setEditingListName] = useState('');
+  const [newItemTexts, setNewItemTexts] = useState<Record<string, string>>({});
+  const [newItemImages, setNewItemImages] = useState<Record<string, string[]>>({});
+  const [newItemTitles, setNewItemTitles] = useState<Record<string, string>>({});
+  const [editingListItemId, setEditingListItemId] = useState<string | null>(null);
+  const [editingListIdForItem, setEditingListIdForItem] = useState<string | null>(null);
+  const [editingItemText, setEditingItemText] = useState('');
+  const [editingItemTitle, setEditingItemTitle] = useState('');
+  const [editingItemImages, setEditingItemImages] = useState<string[]>([]);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+
+  // Notes/Comments inputs inside tasks/roadmap
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [commentTitles, setCommentTitles] = useState<Record<string, string>>({});
+  const [commentImages, setCommentImages] = useState<Record<string, string[]>>({});
+
+  // Task Editor images
+  const [formTaskImages, setFormTaskImages] = useState<string[]>([]);
+
+  // Roadmap editing states
+  const [editSessionTitle, setEditSessionTitle] = useState('');
+  const [editSessionNotesImages, setEditSessionNotesImages] = useState<string[]>([]);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, onImagesAdded: (base64s: string[]) => void) => {
+    if (e.target.files) {
+      const files = Array.from(e.target.files);
+      const promises = files.map(file => {
+        return new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            resolve(reader.result as string);
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+      Promise.all(promises).then(onImagesAdded);
+    }
+  };
+
   // Search
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchOverlay, setShowSearchOverlay] = useState(false);
@@ -73,7 +115,6 @@ export default function App() {
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [fbProgress, setFbProgress] = useState(0);
   const [fbNotes, setFbNotes] = useState('');
-  const [fbNextStep, setFbNextStep] = useState('');
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Task Filter
@@ -359,7 +400,6 @@ export default function App() {
       setFbProgress(0);
     }
     setFbNotes('');
-    setFbNextStep('');
     setShowCompletionForm(true);
   };
 
@@ -384,8 +424,7 @@ export default function App() {
       completed,
       fbNotes,
       {
-        progress: fbProgress,
-        nextStep: fbNextStep
+        progress: fbProgress
       }
     );
 
@@ -418,6 +457,7 @@ export default function App() {
           setFormTaskGoalId(t.goalId || '');
           setFormTaskPhaseId(t.phaseId || '');
           setFormTaskSlotId(t.timeSlotId || '');
+          setFormTaskImages(t.images || []);
         } else if (item.type === ItemType.ACTIVITY) {
           setFormActivityCat((item as Activity).category);
         } else if (item.type === ItemType.REMINDER) {
@@ -459,6 +499,7 @@ export default function App() {
       setFormPlanStartYear('2026');
       setFormPlanEndMonth('1');
       setFormPlanEndYear('2026');
+      setFormTaskImages([]);
     }
 
     setFormTaskHours(prev => prev || '1');
@@ -485,6 +526,7 @@ export default function App() {
       data.goalId = formTaskGoalId || undefined;
       data.phaseId = formTaskPhaseId || undefined;
       data.timeSlotId = formTaskSlotId || undefined;
+      data.images = formTaskImages;
     } else if (editorType === ItemType.ACTIVITY) {
       data.category = formActivityCat;
     } else if (editorType === ItemType.REMINDER) {
@@ -703,6 +745,37 @@ export default function App() {
     };
   }, []);
 
+  const handleReceiveFromMobile = async () => {
+    setSyncBusy(true);
+    try {
+      const dataRes = await fetch('/api/backup/latest');
+      const dataJson = await dataRes.json();
+      if (dataJson.data) {
+        const count = Array.isArray(dataJson.data.items) ? dataJson.data.items.length : 0;
+        const confirmed = window.confirm(
+          `Se han recibido datos del móvil (${count} elementos). ¿Aceptar e importarlos directamente?`
+        );
+        if (confirmed) {
+          const result = rememberStore.importBackupData(JSON.stringify(dataJson.data));
+          if (result.success) {
+            setSyncBanner(`✅ Datos del móvil importados correctamente (${count} elementos).`);
+            setSyncPending(false);
+          } else {
+            setSyncBanner('❌ Error al importar: ' + (result.errors || []).join(' '));
+          }
+        } else {
+          setSyncBanner('ℹ️ Importación cancelada.');
+        }
+      } else {
+        setSyncBanner('ℹ️ No hay datos nuevos del móvil.');
+      }
+    } catch (e) {
+      setSyncBanner('❌ Error al recibir datos.');
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   const closeSyncBanner = () => {
     setSyncBanner(null);
     setSyncPending(false);
@@ -730,6 +803,9 @@ export default function App() {
           </button>
           <button className={`nav-item ${currentTab === 'reminders' ? 'active' : ''}`} onClick={() => setCurrentTab('reminders')}>
             <span>🔔 Recordatorios</span>
+          </button>
+          <button className={`nav-item ${currentTab === 'lists' ? 'active' : ''}`} onClick={() => setCurrentTab('lists')}>
+            <span>📋 Listas</span>
           </button>
           <button className={`nav-item ${currentTab === 'memos' ? 'active' : ''}`} onClick={() => setCurrentTab('memos')}>
             <span>📝 Memos</span>
@@ -884,9 +960,9 @@ export default function App() {
                   <div className="rec-desc">
                     {recommendation.taskId ? (
                       (() => {
-                        const taskDesc = db.items.find(i => i.id === recommendation.taskId)?.description;
-                        return taskDesc ? (
-                          <RichText text={taskDesc} className="rec-desc-rich" />
+                        const task = db.items.find(i => i.id === recommendation.taskId) as Task;
+                        return task && (task.description || (task.images && task.images.length > 0)) ? (
+                          <RichText text={task.description || ''} images={task.images} onImageClick={setZoomedImage} className="rec-desc-rich" />
                         ) : (
                           <span className="rec-desc-fallback">Sin notas adicionales.</span>
                         );
@@ -1079,11 +1155,11 @@ export default function App() {
                               </span>
                               {task.dueDate && <span className="task-due-date">📅 {task.dueDate}</span>}
                             </div>
-                            {task.description ? (
-                              <RichText text={task.description} className="task-desc" style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }} />
-                            ) : (
-                              <span className="task-desc">Sin notas.</span>
-                            )}
+                             {task.description || (task.images && task.images.length > 0) ? (
+                               <RichText text={task.description || ''} images={task.images} onImageClick={setZoomedImage} className="task-desc" style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }} />
+                             ) : (
+                               <span className="task-desc">Sin notas.</span>
+                             )}
                             <div className="task-meta-tags">
                               <span className={`tag-meta tag-priority-${task.priority}`}>
                                 {task.priority}
@@ -1854,6 +1930,597 @@ export default function App() {
               </div>
             </div>
           </section>
+
+          {/* 10. LISTS TAB */}
+          <section className={`tab-pane ${currentTab === 'lists' ? 'active' : ''}`} id="tab-lists">
+            <div className="lists-tab-container">
+              <div className="section-header">
+                <div className="section-title-group">
+                  <h2 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Listas de Recordatorios</h2>
+                  <span className="section-subtitle">Gestiona tus listas, sublistas y notas adjuntas</span>
+                </div>
+              </div>
+
+              {/* Create List form */}
+              <div className="glass-panel" style={{ padding: '16px', marginBottom: '20px' }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '12px' }}>Nueva Lista Principal</h3>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newListName.trim()) {
+                    rememberStore.addList(newListName);
+                    setNewListName('');
+                  }
+                }} style={{ display: 'flex', gap: '10px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Nombre de la lista..."
+                    value={newListName}
+                    onChange={(e) => setNewListName(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button type="submit" className="btn btn-primary">Crear Lista</button>
+                </form>
+              </div>
+
+              {/* Lists Forest */}
+              <div className="lists-grid" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {(() => {
+                  const rootLists = (db.lists || []).filter((l: any) => !l.parentId);
+                  if (rootLists.length === 0) {
+                    return (
+                      <div className="slot-empty-msg" style={{ padding: '40px', textAlign: 'center' }}>
+                        No hay listas creadas aún. Crea una arriba para empezar.
+                      </div>
+                    );
+                  }
+
+                  return rootLists.map((list: any) => {
+                    const sublists = (db.lists || []).filter((l: any) => l.parentId === list.id);
+                    const isEditingList = editingListId === list.id;
+
+                    return (
+                      <div key={list.id} className="glass-panel list-group-panel" style={{ padding: '16px' }}>
+                        {/* List Header */}
+                        <div className="list-group-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px', marginBottom: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                            <span style={{ cursor: 'pointer', fontSize: '1.1rem', userSelect: 'none' }} onClick={() => rememberStore.toggleListCollapse(list.id)}>
+                              {list.collapsed ? '▶' : '▼'}
+                            </span>
+                            {isEditingList ? (
+                              <form onSubmit={(e) => {
+                                e.preventDefault();
+                                if (editingListName.trim()) {
+                                  rememberStore.updateList(list.id, editingListName);
+                                  setEditingListId(null);
+                                }
+                              }} style={{ display: 'flex', gap: '6px', flex: 1 }}>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editingListName}
+                                  onChange={(e) => setEditingListName(e.target.value)}
+                                  style={{ fontSize: '1rem', padding: '4px 8px' }}
+                                  autoFocus
+                                />
+                                <button type="submit" className="btn btn-success" style={{ padding: '4px 8px' }}>✓</button>
+                                <button type="button" className="btn btn-secondary" onClick={() => setEditingListId(null)} style={{ padding: '4px 8px' }}>&times;</button>
+                              </form>
+                            ) : (
+                              <span style={{ fontSize: '1.15rem', fontWeight: 800, cursor: 'pointer' }} onDoubleClick={() => {
+                                setEditingListId(list.id);
+                                setEditingListName(list.name);
+                              }}>
+                                {list.name}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button className="btn btn-secondary btn-sm" onClick={() => {
+                              const subName = window.prompt(`Nombre de la sublista para "${list.name}":`);
+                              if (subName && subName.trim()) {
+                                rememberStore.addList(subName, list.id);
+                              }
+                            }}>
+                              + Sublista
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => {
+                              setEditingListId(list.id);
+                              setEditingListName(list.name);
+                            }}>
+                              ✏️
+                            </button>
+                            <button className="btn btn-danger btn-sm" onClick={() => {
+                              if (window.confirm(`¿Seguro que deseas eliminar la lista "${list.name}" y todos sus elementos?`)) {
+                                rememberStore.deleteList(list.id);
+                              }
+                            }}>
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* List Content */}
+                        {!list.collapsed && (
+                          <div className="list-group-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {/* List Items */}
+                            <div className="list-items-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {(list.items || []).map((item: any) => {
+                                const isEditingItem = editingListItemId === item.id && editingListIdForItem === list.id;
+
+                                if (isEditingItem) {
+                                  return (
+                                    <div key={item.id} className="list-item-edit-box" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                      <input
+                                        type="text"
+                                        className="form-control"
+                                        placeholder="Título (opcional)..."
+                                        value={editingItemTitle}
+                                        onChange={(e) => setEditingItemTitle(e.target.value)}
+                                        style={{ fontWeight: 'bold', fontSize: '1.05rem' }}
+                                      />
+                                      <textarea
+                                        className="form-control"
+                                        placeholder="Texto del elemento..."
+                                        value={editingItemText}
+                                        onChange={(e) => setEditingItemText(e.target.value)}
+                                        rows={2}
+                                      />
+                                      
+                                      {/* Attached images previews */}
+                                      {editingItemImages.length > 0 && (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                          {editingItemImages.map((img, idx) => (
+                                            <div key={idx} style={{ position: 'relative', width: '60px', height: '60px', borderRadius: '6px', overflow: 'hidden' }}>
+                                              <img src={img} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingItemImages(prev => prev.filter((_, i) => i !== idx))}
+                                                style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', width: '16px', height: '16px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                              >
+                                                &times;
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                                          📷 Adjuntar
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            multiple
+                                            style={{ display: 'none' }}
+                                            onChange={(e) => handleImageUpload(e, (base64s) => {
+                                              setEditingItemImages(prev => [...prev, ...base64s]);
+                                            })}
+                                          />
+                                        </label>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                          <button className="btn btn-success btn-sm" onClick={() => {
+                                            rememberStore.updateListItem(list.id, item.id, editingItemText, undefined, editingItemImages, editingItemTitle);
+                                            setEditingListItemId(null);
+                                            setEditingListIdForItem(null);
+                                          }}>
+                                            Guardar
+                                          </button>
+                                          <button className="btn btn-secondary btn-sm" onClick={() => {
+                                            setEditingListItemId(null);
+                                            setEditingListIdForItem(null);
+                                          }}>
+                                            Cancelar
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div key={item.id} className="list-item-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: 'rgba(255,255,255,0.01)', borderRadius: '8px', padding: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', flex: 1 }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={!!item.completed}
+                                        onChange={() => rememberStore.toggleListItemCompleted(list.id, item.id)}
+                                        style={{ width: '18px', height: '18px', cursor: 'pointer', marginTop: '3px' }}
+                                      />
+                                      <div style={{ flex: 1 }}>
+                                        {item.title && (
+                                          <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#fff', textDecoration: item.completed ? 'line-through' : 'none', opacity: item.completed ? 0.6 : 1, marginBottom: '4px' }}>
+                                            {item.title}
+                                          </div>
+                                        )}
+                                        <RichText
+                                          text={item.text}
+                                          images={item.images}
+                                          onImageClick={setZoomedImage}
+                                          style={{ textDecoration: item.completed ? 'line-through' : 'none', opacity: item.completed ? 0.6 : 1, fontSize: '1rem', lineHeight: '1.4' }}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '6px', marginLeft: '10px' }}>
+                                      <button className="btn btn-secondary btn-sm" onClick={() => {
+                                        setEditingListItemId(item.id);
+                                        setEditingListIdForItem(list.id);
+                                        setEditingItemTitle(item.title || '');
+                                        setEditingItemText(item.text || '');
+                                        setEditingItemImages(item.images || []);
+                                      }}>
+                                        ✏️
+                                      </button>
+                                      <button className="btn btn-danger btn-sm" onClick={() => rememberStore.deleteListItem(list.id, item.id)}>
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Add Item form */}
+                            <div className="add-item-form-box" style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              <input
+                                type="text"
+                                className="form-control"
+                                placeholder="Título (opcional)..."
+                                value={newItemTitles[list.id] || ''}
+                                onChange={(e) => {
+                                  const txt = e.target.value;
+                                  setNewItemTitles(prev => ({ ...prev, [list.id]: txt }));
+                                }}
+                                style={{ fontWeight: 'bold', fontSize: '1.05rem' }}
+                              />
+                              <textarea
+                                className="form-control"
+                                placeholder="Añadir elemento..."
+                                value={newItemTexts[list.id] || ''}
+                                onChange={(e) => {
+                                  const txt = e.target.value;
+                                  setNewItemTexts(prev => ({ ...prev, [list.id]: txt }));
+                                }}
+                                rows={2}
+                              />
+
+                              {/* Attached images previews */}
+                              {newItemImages[list.id] && newItemImages[list.id].length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {newItemImages[list.id].map((img, idx) => (
+                                    <div key={idx} style={{ position: 'relative', width: '60px', height: '60px', borderRadius: '6px', overflow: 'hidden' }}>
+                                      <img src={img} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setNewItemImages(prev => ({
+                                            ...prev,
+                                            [list.id]: prev[list.id].filter((_, i) => i !== idx)
+                                          }));
+                                        }}
+                                        style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', width: '16px', height: '16px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                      >
+                                        &times;
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                                  📷 Adjuntar Imágenes
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => handleImageUpload(e, (base64s) => {
+                                      setNewItemImages(prev => ({
+                                        ...prev,
+                                        [list.id]: [...(prev[list.id] || []), ...base64s]
+                                      }));
+                                    })}
+                                  />
+                                </label>
+                                <button className="btn btn-primary btn-sm" onClick={() => {
+                                  const txt = newItemTexts[list.id] || '';
+                                  if (txt.trim()) {
+                                    rememberStore.addListItem(
+                                      list.id,
+                                      txt,
+                                      undefined,
+                                      newItemImages[list.id] || [],
+                                      newItemTitles[list.id] || ''
+                                    );
+                                    setNewItemTexts(prev => ({ ...prev, [list.id]: '' }));
+                                    setNewItemTitles(prev => ({ ...prev, [list.id]: '' }));
+                                    setNewItemImages(prev => ({ ...prev, [list.id]: [] }));
+                                  }
+                                }}>
+                                  Agregar Elemento
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Sublists */}
+                            {sublists.length > 0 && (
+                              <div className="sublists-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingLeft: '24px', borderLeft: '2px solid rgba(255,255,255,0.05)' }}>
+                                {sublists.map((sublist: any) => {
+                                  const isEditingSublist = editingListId === sublist.id;
+
+                                  return (
+                                    <div key={sublist.id} className="sublist-group" style={{ background: 'rgba(255,255,255,0.01)', borderRadius: '8px', padding: '12px' }}>
+                                      {/* Sublist Header */}
+                                      <div className="sublist-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px', marginBottom: '10px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                                          <span style={{ cursor: 'pointer', fontSize: '0.9rem', userSelect: 'none' }} onClick={() => rememberStore.toggleListCollapse(sublist.id)}>
+                                            {sublist.collapsed ? '▶' : '▼'}
+                                          </span>
+                                          {isEditingSublist ? (
+                                            <form onSubmit={(e) => {
+                                              e.preventDefault();
+                                              if (editingListName.trim()) {
+                                                rememberStore.updateList(sublist.id, editingListName);
+                                                setEditingListId(null);
+                                              }
+                                            }} style={{ display: 'flex', gap: '6px', flex: 1 }}>
+                                              <input
+                                                type="text"
+                                                className="form-control"
+                                                value={editingListName}
+                                                onChange={(e) => setEditingListName(e.target.value)}
+                                                style={{ fontSize: '0.9rem', padding: '2px 6px' }}
+                                                autoFocus
+                                              />
+                                              <button type="submit" className="btn btn-success" style={{ padding: '2px 6px' }}>✓</button>
+                                              <button type="button" className="btn btn-secondary" onClick={() => setEditingListId(null)} style={{ padding: '2px 6px' }}>&times;</button>
+                                            </form>
+                                          ) : (
+                                            <span style={{ fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer' }} onDoubleClick={() => {
+                                              setEditingListId(sublist.id);
+                                              setEditingListName(sublist.name);
+                                            }}>
+                                              {sublist.name}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                          <button className="btn btn-secondary btn-sm" onClick={() => {
+                                            setEditingListId(sublist.id);
+                                            setEditingListName(sublist.name);
+                                          }} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>
+                                            ✏️
+                                          </button>
+                                          <button className="btn btn-danger btn-sm" onClick={() => {
+                                            if (window.confirm(`¿Seguro que deseas eliminar la sublista "${sublist.name}"?`)) {
+                                              rememberStore.deleteList(sublist.id);
+                                            }
+                                          }} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>
+                                            🗑️
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {/* Sublist Content */}
+                                      {!sublist.collapsed && (
+                                        <div className="sublist-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                          {/* Sublist Items */}
+                                          <div className="sublist-items-container" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            {(sublist.items || []).map((item: any) => {
+                                              const isEditingSubItem = editingListItemId === item.id && editingListIdForItem === sublist.id;
+
+                                              if (isEditingSubItem) {
+                                                return (
+                                                  <div key={item.id} className="list-item-edit-box" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                    <input
+                                                      type="text"
+                                                      className="form-control"
+                                                      placeholder="Título (opcional)..."
+                                                      value={editingItemTitle}
+                                                      onChange={(e) => setEditingItemTitle(e.target.value)}
+                                                      style={{ fontWeight: 'bold', fontSize: '0.95rem' }}
+                                                    />
+                                                    <textarea
+                                                      className="form-control"
+                                                      placeholder="Texto del elemento..."
+                                                      value={editingItemText}
+                                                      onChange={(e) => setEditingItemText(e.target.value)}
+                                                      rows={2}
+                                                    />
+                                                    
+                                                    {/* Attached images previews */}
+                                                    {editingItemImages.length > 0 && (
+                                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                        {editingItemImages.map((img, idx) => (
+                                                          <div key={idx} style={{ position: 'relative', width: '50px', height: '50px', borderRadius: '6px', overflow: 'hidden' }}>
+                                                            <img src={img} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => setEditingItemImages(prev => prev.filter((_, i) => i !== idx))}
+                                                              style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', width: '14px', height: '14px', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                            >
+                                                              &times;
+                                                            </button>
+                                                          </div>
+                                                        ))}
+                                                      </div>
+                                                    )}
+
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                      <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', padding: '2px 6px', fontSize: '0.75rem' }}>
+                                                        📷 Adjuntar
+                                                        <input
+                                                          type="file"
+                                                          accept="image/*"
+                                                          multiple
+                                                          style={{ display: 'none' }}
+                                                          onChange={(e) => handleImageUpload(e, (base64s) => {
+                                                            setEditingItemImages(prev => [...prev, ...base64s]);
+                                                          })}
+                                                        />
+                                                      </label>
+                                                      <div style={{ display: 'flex', gap: '4px' }}>
+                                                        <button className="btn btn-success btn-sm" onClick={() => {
+                                                          rememberStore.updateListItem(sublist.id, item.id, editingItemText, undefined, editingItemImages, editingItemTitle);
+                                                          setEditingListItemId(null);
+                                                          setEditingListIdForItem(null);
+                                                        }} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>
+                                                          Guardar
+                                                        </button>
+                                                        <button className="btn btn-secondary btn-sm" onClick={() => {
+                                                          setEditingListItemId(null);
+                                                          setEditingListIdForItem(null);
+                                                        }} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>
+                                                          Cancelar
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                );
+                                              }
+
+                                              return (
+                                                <div key={item.id} className="list-item-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: 'rgba(255,255,255,0.01)', borderRadius: '6px', padding: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', flex: 1 }}>
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={!!item.completed}
+                                                      onChange={() => rememberStore.toggleListItemCompleted(sublist.id, item.id)}
+                                                      style={{ width: '16px', height: '16px', cursor: 'pointer', marginTop: '3px' }}
+                                                    />
+                                                    <div style={{ flex: 1 }}>
+                                                      {item.title && (
+                                                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#fff', textDecoration: item.completed ? 'line-through' : 'none', opacity: item.completed ? 0.6 : 1, marginBottom: '4px' }}>
+                                                          {item.title}
+                                                        </div>
+                                                      )}
+                                                      <RichText
+                                                        text={item.text}
+                                                        images={item.images}
+                                                        onImageClick={setZoomedImage}
+                                                        style={{ textDecoration: item.completed ? 'line-through' : 'none', opacity: item.completed ? 0.6 : 1, fontSize: '0.95rem' }}
+                                                      />
+                                                    </div>
+                                                  </div>
+                                                  <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
+                                                    <button className="btn btn-secondary btn-sm" onClick={() => {
+                                                      setEditingListItemId(item.id);
+                                                      setEditingListIdForItem(sublist.id);
+                                                      setEditingItemTitle(item.title || '');
+                                                      setEditingItemText(item.text || '');
+                                                      setEditingItemImages(item.images || []);
+                                                    }} style={{ padding: '2px 4px', fontSize: '0.7rem' }}>
+                                                      ✏️
+                                                    </button>
+                                                    <button className="btn btn-danger btn-sm" onClick={() => rememberStore.deleteListItem(sublist.id, item.id)} style={{ padding: '2px 4px', fontSize: '0.7rem' }}>
+                                                      🗑️
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+
+                                          {/* Add Sublist Item form */}
+                                          <div className="add-item-form-box" style={{ background: 'rgba(255,255,255,0.01)', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: '6px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            <input
+                                              type="text"
+                                              className="form-control"
+                                              placeholder="Título (opcional)..."
+                                              value={newItemTitles[sublist.id] || ''}
+                                              onChange={(e) => {
+                                                const txt = e.target.value;
+                                                setNewItemTitles(prev => ({ ...prev, [sublist.id]: txt }));
+                                              }}
+                                              style={{ fontWeight: 'bold', fontSize: '0.95rem', padding: '4px 8px' }}
+                                            />
+                                            <textarea
+                                              className="form-control"
+                                              placeholder="Añadir elemento..."
+                                              value={newItemTexts[sublist.id] || ''}
+                                              onChange={(e) => {
+                                                const txt = e.target.value;
+                                                setNewItemTexts(prev => ({ ...prev, [sublist.id]: txt }));
+                                              }}
+                                              rows={2}
+                                              style={{ fontSize: '0.9rem', padding: '4px 8px' }}
+                                            />
+
+                                            {/* Attached images previews */}
+                                            {newItemImages[sublist.id] && newItemImages[sublist.id].length > 0 && (
+                                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                {newItemImages[sublist.id].map((img, idx) => (
+                                                  <div key={idx} style={{ position: 'relative', width: '50px', height: '50px', borderRadius: '6px', overflow: 'hidden' }}>
+                                                    <img src={img} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => {
+                                                        setNewItemImages(prev => ({
+                                                          ...prev,
+                                                          [sublist.id]: prev[sublist.id].filter((_, i) => i !== idx)
+                                                        }));
+                                                      }}
+                                                      style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', width: '14px', height: '14px', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                    >
+                                                      &times;
+                                                    </button>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                              <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', padding: '2px 6px', fontSize: '0.75rem' }}>
+                                                📷 Adjuntar Imágenes
+                                                <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  multiple
+                                                  style={{ display: 'none' }}
+                                                  onChange={(e) => handleImageUpload(e, (base64s) => {
+                                                    setNewItemImages(prev => ({
+                                                      ...prev,
+                                                      [sublist.id]: [...(prev[sublist.id] || []), ...base64s]
+                                                    }));
+                                                  })}
+                                                />
+                                              </label>
+                                              <button className="btn btn-primary btn-sm" onClick={() => {
+                                                const txt = newItemTexts[sublist.id] || '';
+                                                if (txt.trim()) {
+                                                  rememberStore.addListItem(
+                                                    sublist.id,
+                                                    txt,
+                                                    undefined,
+                                                    newItemImages[sublist.id] || [],
+                                                    newItemTitles[sublist.id] || ''
+                                                  );
+                                                  setNewItemTexts(prev => ({ ...prev, [sublist.id]: '' }));
+                                                  setNewItemTitles(prev => ({ ...prev, [sublist.id]: '' }));
+                                                  setNewItemImages(prev => ({ ...prev, [sublist.id]: [] }));
+                                                }
+                                              }} style={{ padding: '4px 8px', fontSize: '0.75rem' }}>
+                                                Agregar Elemento
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          </section>
         </div>
       </main>
 
@@ -1975,7 +2642,7 @@ export default function App() {
               <button className="modal-close" onClick={() => setShowRoadmapModal(false)}>&times;</button>
             </div>
 
-            <div className="roadmap-timeline" id="roadmap-sessions-list">
+            <div className="roadmap-timeline" id="roadmap-sessions-list" style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '5px' }}>
               {(() => {
                 const list = db.sessions
                   .filter(s => s.taskId === selectedTaskId)
@@ -1987,49 +2654,109 @@ export default function App() {
 
                 return list.map(session => {
                   const isEditing = editingSessionId === session.id;
+                  const isNoteOnly = !session.realDuration && !session.plannedDuration;
 
                   if (isEditing) {
                     return (
-                      <div key={session.id} className="roadmap-session-card">
-                        <h4 style={{ fontSize: '0.9rem', fontWeight: 700 }}>Editar sesión del {new Date(session.endTime!).toLocaleDateString()}</h4>
-                        <div className="roadmap-session-edit-form">
-                          <div className="form-group">
-                            <label>¿Qué se hizo?</label>
-                            <textarea
-                              className="form-control"
-                              rows={2}
-                              value={editSessionNotes}
-                              onChange={e => setEditSessionNotes(e.target.value)}
-                            />
-                          </div>
-                          <div className="form-group">
-                            <label>Siguiente paso</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              value={editSessionNext}
-                              onChange={e => setEditSessionNext(e.target.value)}
-                            />
-                          </div>
-                          <div className="form-group">
-                            <label>Progreso de la tarea (%):</label>
-                            <input
-                              type="number"
-                              className="form-control"
-                              min="0"
-                              max="100"
-                              value={editSessionProg}
-                              onChange={e => setEditSessionProg(parseInt(e.target.value) || 0)}
-                            />
-                          </div>
-                          <div className="form-row">
+                      <div key={session.id} className="roadmap-session-card" style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                        <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '10px' }}>Editar {isNoteOnly ? 'nota' : 'sesión'} del {new Date(session.endTime!).toLocaleDateString()}</h4>
+                        <div className="roadmap-session-edit-form" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {isNoteOnly ? (
+                            <>
+                              <div className="form-group">
+                                <label>Título de la Nota</label>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editSessionTitle}
+                                  onChange={e => setEditSessionTitle(e.target.value)}
+                                  style={{ fontWeight: 'bold' }}
+                                />
+                              </div>
+                              <div className="form-group">
+                                <label>Contenido de la Nota</label>
+                                <textarea
+                                  className="form-control"
+                                  rows={3}
+                                  value={editSessionNotes}
+                                  onChange={e => setEditSessionNotes(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group">
+                                <label>Imágenes de la nota</label>
+                                {editSessionNotesImages.length > 0 && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                                    {editSessionNotesImages.map((img, idx) => (
+                                      <div key={idx} style={{ position: 'relative', width: '50px', height: '50px', borderRadius: '6px', overflow: 'hidden' }}>
+                                        <img src={img} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditSessionNotesImages(prev => prev.filter((_, i) => i !== idx))}
+                                          style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', width: '14px', height: '14px', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                        >
+                                          &times;
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                                  📷 Adjuntar Imágenes
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => handleImageUpload(e, (base64s) => {
+                                      setEditSessionNotesImages(prev => [...prev, ...base64s]);
+                                    })}
+                                  />
+                                </label>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="form-group">
+                                <label>¿Qué se hizo?</label>
+                                <textarea
+                                  className="form-control"
+                                  rows={2}
+                                  value={editSessionNotes}
+                                  onChange={e => setEditSessionNotes(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group">
+                                <label>Siguiente paso</label>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editSessionNext}
+                                  onChange={e => setEditSessionNext(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group">
+                                <label>Progreso de la tarea (%):</label>
+                                <input
+                                  type="number"
+                                  className="form-control"
+                                  min="0"
+                                  max="100"
+                                  value={editSessionProg}
+                                  onChange={e => setEditSessionProg(parseInt(e.target.value) || 0)}
+                                />
+                              </div>
+                            </>
+                          )}
+                          <div className="form-row" style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                             <button
                               className="btn btn-primary"
                               onClick={() => {
                                 rememberStore.updateSession(session.id, {
+                                  title: isNoteOnly ? editSessionTitle : undefined,
                                   notes: editSessionNotes,
-                                  nextStep: editSessionNext,
-                                  progress: editSessionProg
+                                  notesImages: editSessionNotesImages,
+                                  nextStep: isNoteOnly ? undefined : editSessionNext,
+                                  progress: isNoteOnly ? undefined : editSessionProg
                                 });
                                 setEditingSessionId(null);
                               }}
@@ -2044,52 +2771,76 @@ export default function App() {
                   }
 
                   return (
-                    <div key={session.id} className="roadmap-session-card">
-                      <div className="roadmap-session-header-row">
-                        <span className="roadmap-session-date">
+                    <div key={session.id} className="roadmap-session-card" style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div className="roadmap-session-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span className="roadmap-session-date" style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)' }}>
                           {new Date(session.endTime!).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' }) + ' ' + new Date(session.endTime!).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
                         </span>
-                        <span className="roadmap-session-duration">{session.realDuration} min</span>
+                        <span className="roadmap-session-duration" style={{ fontSize: '0.8rem', fontWeight: 'bold', background: 'rgba(255,255,255,0.08)', padding: '2px 6px', borderRadius: '4px' }}>
+                          {isNoteOnly ? '📝 Nota' : `${session.realDuration} min`}
+                        </span>
                       </div>
-                      <div>
-                        <span className="roadmap-session-label" style={{ color: 'var(--color-terra)' }}>✅ ¿Qué se hizo?</span>
-                        {session.notes ? (
-                          <RichText text={session.notes} className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)' }} />
-                        ) : (
-                          <p className="roadmap-session-text">No especificado</p>
-                        )}
-                      </div>
-                      <div>
-                        <span className="roadmap-session-label" style={{ color: 'var(--color-sol)' }}>🎯 Siguiente paso planificado:</span>
-                        {session.nextStep ? (
-                          <RichText text={session.nextStep} className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)' }} />
-                        ) : (
-                          <p className="roadmap-session-text">No especificado</p>
-                        )}
-                      </div>
-                      <div>
-                        <span className="roadmap-session-label" style={{ color: 'var(--color-luna)' }}>📈 Progreso de la tarea:</span>
-                        <p className="roadmap-session-text">{session.progress || 0}%</p>
-                      </div>
-                      <div className="roadmap-session-actions">
+                      
+                      {isNoteOnly ? (
+                        <div style={{ marginTop: '6px' }}>
+                          {session.title && (
+                            <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: '0 0 6px 0' }}>
+                              {session.title}
+                            </h4>
+                          )}
+                          <RichText
+                            text={session.notes || ''}
+                            images={session.notesImages}
+                            onImageClick={setZoomedImage}
+                            style={{ fontSize: '0.95rem', color: 'rgba(255,255,255,0.9)', whiteSpace: 'pre-wrap' }}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div>
+                            <span className="roadmap-session-label" style={{ color: 'var(--color-terra)', display: 'block', fontSize: '0.75rem', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>✅ ¿Qué se hizo?</span>
+                            {session.notes ? (
+                              <RichText text={session.notes} images={session.notesImages} onImageClick={setZoomedImage} className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.85)' }} />
+                            ) : (
+                              <p className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.4)', margin: 0 }}>No especificado</p>
+                            )}
+                          </div>
+                          {session.nextStep && (
+                            <div>
+                              <span className="roadmap-session-label" style={{ color: 'var(--color-sol)', display: 'block', fontSize: '0.75rem', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>🎯 Siguiente paso planificado:</span>
+                              <RichText text={session.nextStep} className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.85)' }} />
+                            </div>
+                          )}
+                          <div>
+                            <span className="roadmap-session-label" style={{ color: 'var(--color-luna)', display: 'block', fontSize: '0.75rem', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>📈 Progreso de la tarea:</span>
+                            <p className="roadmap-session-text" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.85)', margin: 0 }}>{session.progress || 0}%</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="roadmap-session-actions" style={{ display: 'flex', gap: '8px', marginTop: '10px', justifyContent: 'flex-end' }}>
                         <button
-                          className="btn btn-secondary"
+                          className="btn btn-secondary btn-sm"
                           onClick={() => {
                             setEditingSessionId(session.id);
+                            setEditSessionTitle(session.title || '');
                             setEditSessionNotes(session.notes || '');
+                            setEditSessionNotesImages(session.notesImages || []);
                             setEditSessionNext(session.nextStep || '');
                             setEditSessionProg(session.progress || 0);
                           }}
+                          style={{ padding: '2px 8px', fontSize: '0.75rem' }}
                         >
                           ✏️ Editar
                         </button>
                         <button
-                          className="btn btn-danger"
+                          className="btn btn-danger btn-sm"
                           onClick={() => {
-                            if (window.confirm('¿Eliminar sesión de enfoque?')) {
+                            if (window.confirm('¿Eliminar esta entrada del roadmap?')) {
                               rememberStore.deleteSession(session.id);
                             }
                           }}
+                          style={{ padding: '2px 8px', fontSize: '0.75rem' }}
                         >
                           🗑️ Eliminar
                         </button>
@@ -2098,6 +2849,84 @@ export default function App() {
                   );
                 });
               })()}
+            </div>
+
+            {/* New Note Form at bottom of Roadmap Modal */}
+            <div className="roadmap-new-note-form" style={{ marginTop: '15px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '8px' }}>Nueva Nota de Tarea</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Título de la nota (opcional)..."
+                  value={commentTitles[selectedTaskId] || ''}
+                  onChange={e => setCommentTitles(prev => ({ ...prev, [selectedTaskId]: e.target.value }))}
+                  style={{ fontSize: '0.9rem', fontWeight: 'bold', padding: '6px 10px' }}
+                />
+                <textarea
+                  className="form-control"
+                  rows={2}
+                  placeholder="Escribe la nota..."
+                  value={commentInputs[selectedTaskId] || ''}
+                  onChange={e => setCommentInputs(prev => ({ ...prev, [selectedTaskId]: e.target.value }))}
+                  style={{ fontSize: '0.85rem', padding: '6px 10px' }}
+                />
+                
+                {commentImages[selectedTaskId] && commentImages[selectedTaskId].length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '2px' }}>
+                    {commentImages[selectedTaskId].map((img, idx) => (
+                      <div key={idx} style={{ position: 'relative', width: '45px', height: '45px', borderRadius: '6px', overflow: 'hidden' }}>
+                        <img src={img} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <button
+                          type="button"
+                          onClick={() => setCommentImages(prev => ({
+                            ...prev,
+                            [selectedTaskId]: prev[selectedTaskId].filter((_, i) => i !== idx)
+                          }))}
+                          style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', width: '14px', height: '14px', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                  <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', padding: '3px 8px', fontSize: '0.75rem' }}>
+                    📷 Adjuntar Imágenes
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={(e) => handleImageUpload(e, (base64s) => {
+                        setCommentImages(prev => ({
+                          ...prev,
+                          [selectedTaskId]: [...(prev[selectedTaskId] || []), ...base64s]
+                        }));
+                      })}
+                    />
+                  </label>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      const txt = commentInputs[selectedTaskId]?.trim() || '';
+                      const title = commentTitles[selectedTaskId]?.trim() || '';
+                      const imgs = commentImages[selectedTaskId] || [];
+                      if (!txt && !title && imgs.length === 0) return;
+
+                      rememberStore.createSession(selectedTaskId, 0, txt, title || undefined, imgs);
+                      setCommentInputs(prev => ({ ...prev, [selectedTaskId]: '' }));
+                      setCommentTitles(prev => ({ ...prev, [selectedTaskId]: '' }));
+                      setCommentImages(prev => ({ ...prev, [selectedTaskId]: [] }));
+                    }}
+                    style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                  >
+                    Enviar Nota
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2316,6 +3145,37 @@ export default function App() {
                         onChange={e => setFormTaskDue(e.target.value)}
                       />
                     </div>
+                  </div>
+                  <div className="form-group" style={{ marginTop: '12px' }}>
+                    <label>Imágenes de la Tarea</label>
+                    {formTaskImages.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                        {formTaskImages.map((img, idx) => (
+                          <div key={idx} style={{ position: 'relative', width: '60px', height: '60px', borderRadius: '6px', overflow: 'hidden' }}>
+                            <img src={img} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <button
+                              type="button"
+                              onClick={() => setFormTaskImages(prev => prev.filter((_, i) => i !== idx))}
+                              style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', width: '16px', height: '16px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                      📷 Adjuntar Imágenes
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={(e) => handleImageUpload(e, (base64s) => {
+                          setFormTaskImages(prev => [...prev, ...base64s]);
+                        })}
+                      />
+                    </label>
                   </div>
                 </div>
               )}
@@ -2571,27 +3431,15 @@ export default function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>¿Qué se hizo en esta sesión?</label>
+                    <label>Notas de la sesión</label>
                     <textarea
                       id="fb-notes"
                       className="form-control"
-                      rows={2}
+                      rows={4}
                       required
-                      placeholder="Detalles sobre lo avanzado..."
+                      placeholder="Detalles sobre lo avanzado y notas de esta sesión..."
                       value={fbNotes}
                       onChange={e => setFbNotes(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Siguiente paso concreto</label>
-                    <input
-                      type="text"
-                      id="fb-next-step"
-                      className="form-control"
-                      placeholder="¿Qué harás la próxima vez?"
-                      value={fbNextStep}
-                      onChange={e => setFbNextStep(e.target.value)}
                     />
                   </div>
 
@@ -2622,6 +3470,57 @@ export default function App() {
             {(syncBanner && !syncPending) && (
               <button className="btn btn-secondary" onClick={closeSyncBanner}>Cerrar</button>
             )}
+          </div>
+        </div>
+      )}
+      {/* Zoomed Image Modal Overlay */}
+      {zoomedImage && (
+        <div
+          className="modal-overlay"
+          onClick={() => setZoomedImage(null)}
+          style={{
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh'
+          }}
+        >
+          <div style={{ position: 'relative', maxWidth: '90%', maxHeight: '90%' }} onClick={e => e.stopPropagation()}>
+            <img
+              src={zoomedImage}
+              alt="Zoomed"
+              style={{
+                width: 'auto',
+                height: 'auto',
+                maxWidth: '100%',
+                maxHeight: '90vh',
+                borderRadius: '8px',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+              }}
+            />
+            <button
+              className="modal-close"
+              onClick={() => setZoomedImage(null)}
+              style={{
+                position: 'absolute',
+                top: '-40px',
+                right: '0px',
+                background: 'none',
+                border: 'none',
+                color: '#fff',
+                fontSize: '2.5rem',
+                cursor: 'pointer',
+                lineHeight: 1
+              }}
+            >
+              &times;
+            </button>
           </div>
         </div>
       )}

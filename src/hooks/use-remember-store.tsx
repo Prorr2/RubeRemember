@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { NotificationService } from '@/services/notification-service';
 
-import { Item, ItemType, Priority, Task, TaskState, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
+import { Item, ItemType, Priority, Task, TaskState, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS, TaskCategory, DEFAULT_TASK_CATEGORIES } from '@/models/Item';
 import { Goal, Phase } from '@/models/Goal';
 import { TimeSlot } from '@/models/TimeSlot';
 import { ReminderList, ListItem } from '@/models/ReminderList';
@@ -16,7 +16,7 @@ export { Comment } from '@/models/Comment';
 export { Goal, Phase } from '@/models/Goal';
 export { TimeSlot } from '@/models/TimeSlot';
 export { ReminderList, ListItem } from '@/models/ReminderList';
-export { Item, ItemType, Priority, Task, TaskState, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/models/Item';
+export { Item, ItemType, Priority, Task, TaskState, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS, TaskCategory, DEFAULT_TASK_CATEGORIES } from '@/models/Item';
 
 
 
@@ -167,10 +167,11 @@ interface RememberStore {
 
   // Goals
   goals: Goal[];
-  addGoal: (title: string, description: string, startDate: string, endDate: string) => Promise<void>;
-  updateGoal: (id: string, title: string, description: string, startDate: string, endDate: string) => Promise<void>;
+  addGoal: (title: string, description: string, startDate: string, endDate: string, emoji?: string) => Promise<void>;
+  updateGoal: (id: string, title: string, description: string, startDate: string, endDate: string, emoji?: string) => Promise<void>;
   deleteGoal: (id: string) => Promise<void>;
   toggleGoalCompleted: (id: string) => Promise<void>;
+  toggleGoalMain: (id: string) => Promise<void>;
   addPhase: (goalId: string, name: string, description: string) => Promise<void>;
   updatePhase: (goalId: string, phaseId: string, name: string, description: string) => Promise<void>;
   deletePhase: (goalId: string, phaseId: string) => Promise<void>;
@@ -182,8 +183,8 @@ interface RememberStore {
   updateList: (id: string, name: string) => Promise<void>;
   deleteList: (id: string) => Promise<void>;
   toggleListCollapse: (id: string) => Promise<void>;
-  addListItem: (listId: string, text: string, imageUri?: string, images?: string[]) => Promise<string>;
-  updateListItem: (listId: string, itemId: string, text: string, imageUri?: string, images?: string[]) => Promise<void>;
+  addListItem: (listId: string, text: string, imageUri?: string, images?: string[], title?: string) => Promise<string>;
+  updateListItem: (listId: string, itemId: string, text: string, imageUri?: string, images?: string[], title?: string) => Promise<void>;
   deleteListItem: (listId: string, itemId: string) => Promise<void>;
   toggleListItemCompleted: (listId: string, itemId: string) => Promise<void>;
   setListAlarm: (listId: string, time: string | null) => Promise<void>;
@@ -194,6 +195,12 @@ interface RememberStore {
   addActivityCategory: (name: string) => Promise<void>;
   updateActivityCategory: (id: string, name: string) => Promise<void>;
   deleteActivityCategory: (id: string) => Promise<void>;
+
+  // Task Categories
+  taskCategories: TaskCategory[];
+  addTaskCategory: (name: string, emoji: string) => Promise<void>;
+  updateTaskCategory: (id: string, name: string, emoji: string) => Promise<void>;
+  deleteTaskCategory: (id: string) => Promise<void>;
 
   // Hour Weights configuration
   hourWeights: HourWeight[];
@@ -206,7 +213,7 @@ interface RememberStore {
   recommendations: Recommendation[];
   userSettings: UserSettings;
   statistics: Statistics;
-  createSession: (taskId: string, plannedDuration: number, notes?: string) => Promise<string>;
+  createSession: (taskId: string, plannedDuration: number, notes?: string, title?: string, notesImages?: string[]) => Promise<string>;
   updateSession: (id: string, updates: Partial<Session>) => Promise<void>;
   endSession: (
     sessionId: string,
@@ -421,6 +428,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [lists, setLists] = useState<ReminderList[]>([]);
   const [activityCategories, setActivityCategories] = useState<CustomCategory[]>(DEFAULT_ACTIVITY_CATEGORIES);
+  const [taskCategories, setTaskCategories] = useState<TaskCategory[]>(DEFAULT_TASK_CATEGORIES);
   const [hourWeights, setHourWeights] = useState<HourWeight[]>(DEFAULT_HOUR_WEIGHTS);
   
   // Cognitive Engine V3 States
@@ -452,6 +460,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           setActivityCategories(db.activityCategories);
         } else {
           setActivityCategories(DEFAULT_ACTIVITY_CATEGORIES);
+        }
+
+        if (db.taskCategories && db.taskCategories.length > 0) {
+          setTaskCategories(db.taskCategories);
+        } else {
+          setTaskCategories(DEFAULT_TASK_CATEGORIES);
         }
 
         if (db.hourWeights && db.hourWeights.length > 0) {
@@ -697,7 +711,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     phaseId?: string,
     timeSlotId?: string,
     energyType?: EnergyType,
-    images?: string[]
+    images?: string[],
+    categoryId?: string
   ) => {
     const cleanTitle = title.trim();
     if (!cleanTitle) return '';
@@ -720,6 +735,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       priority,
       goalId,
       phaseId,
+      categoryId,
       timeSlotId,
       energyType: energyType || EnergyType.CREATIVE,
       comments: [],
@@ -1573,7 +1589,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await MigrationEngine.saveDatabase(db);
   }, [items, lists, timeSlots, proximityDays, slotSeparationMinutes]);
 
-  const addGoal = useCallback(async (title: string, description: string, startDate: string, endDate: string) => {
+  const addGoal = useCallback(async (title: string, description: string, startDate: string, endDate: string, emoji?: string) => {
     const newGoal: Goal = {
       id: `goal-${Math.random().toString(36).substring(7)}`,
       title: title.trim(),
@@ -1583,14 +1599,22 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       phases: [],
       createdAt: new Date().toISOString(),
       completed: false,
+      emoji: emoji ? emoji.trim() : '🎯',
     };
     await saveGoals([...goals, newGoal]);
   }, [goals, saveGoals]);
 
-  const updateGoal = useCallback(async (id: string, title: string, description: string, startDate: string, endDate: string) => {
+  const updateGoal = useCallback(async (id: string, title: string, description: string, startDate: string, endDate: string, emoji?: string) => {
     const updated = goals.map((g) => {
       if (g.id === id) {
-        return { ...g, title: title.trim(), description: description.trim(), startDate, endDate };
+        return {
+          ...g,
+          title: title.trim(),
+          description: description.trim(),
+          startDate,
+          endDate,
+          emoji: emoji !== undefined ? emoji.trim() : (g.emoji || '🎯'),
+        };
       }
       return g;
     });
@@ -1628,6 +1652,16 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     const updated = goals.map((g) => {
       if (g.id === id) {
         return { ...g, completed: !g.completed };
+      }
+      return g;
+    });
+    await saveGoals(updated);
+  }, [goals, saveGoals]);
+
+  const toggleGoalMain = useCallback(async (id: string) => {
+    const updated = goals.map((g) => {
+      if (g.id === id) {
+        return { ...g, isMain: !g.isMain };
       }
       return g;
     });
@@ -1773,13 +1807,14 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await saveLists(updated);
   }, [lists, saveLists]);
 
-  const addListItem = useCallback(async (listId: string, text: string, imageUri?: string, images?: string[]) => {
+  const addListItem = useCallback(async (listId: string, text: string, imageUri?: string, images?: string[], title?: string) => {
     const newItemId = `item-${Math.random().toString(36).substring(7)}`;
     const updated = lists.map((l) => {
       if (l.id === listId) {
         const newItem: ListItem = {
           id: newItemId,
           text: text.trim(),
+          title: title?.trim() || undefined,
           imageUri,
           images,
         };
@@ -1791,12 +1826,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     return newItemId;
   }, [lists, saveLists]);
 
-  const updateListItem = useCallback(async (listId: string, itemId: string, text: string, imageUri?: string, images?: string[]) => {
+  const updateListItem = useCallback(async (listId: string, itemId: string, text: string, imageUri?: string, images?: string[], title?: string) => {
     const updated = lists.map((l) => {
       if (l.id === listId) {
         const updatedItems = l.items.map((it) => {
           if (it.id === itemId) {
-            return { ...it, text: text.trim(), imageUri, images };
+            return { ...it, text: text.trim(), title: title?.trim() || undefined, imageUri, images };
           }
           return it;
         });
@@ -1979,6 +2014,78 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     await MigrationEngine.saveDatabase(db);
   }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories]);
 
+  // Task Categories CRUD
+  const saveTaskCategories = useCallback(async (newCategories: TaskCategory[]) => {
+    setTaskCategories(newCategories);
+    const db: DatabaseV3 = {
+      version: 3,
+      items,
+      goals,
+      lists,
+      timeSlots,
+      activityCategories,
+      taskCategories: newCategories,
+      hourWeights,
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      settings: {
+        proximityDays,
+        slotSeparationMinutes,
+      },
+    };
+    await MigrationEngine.saveDatabase(db);
+  }, [items, goals, lists, timeSlots, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes]);
+
+  const addTaskCategory = useCallback(async (name: string, emoji: string) => {
+    const id = `tcat-${Math.random().toString(36).substring(7)}`;
+    const newCategory: TaskCategory = {
+      id,
+      name: name.trim(),
+      emoji: emoji.trim() || '📋',
+    };
+    await saveTaskCategories([...taskCategories, newCategory]);
+  }, [taskCategories, saveTaskCategories]);
+
+  const updateTaskCategory = useCallback(async (id: string, name: string, emoji: string) => {
+    const updated = taskCategories.map((c) => (c.id === id ? { ...c, name: name.trim(), emoji: emoji.trim() || '📋' } : c));
+    await saveTaskCategories(updated);
+  }, [taskCategories, saveTaskCategories]);
+
+  const deleteTaskCategory = useCallback(async (id: string) => {
+    const updatedCategories = taskCategories.filter((c) => c.id !== id);
+    const updatedItems = items.map((i) => {
+      if (i.type === ItemType.TASK && (i as Task).categoryId === id) {
+        return { ...i, categoryId: undefined };
+      }
+      return i;
+    });
+
+    setItems(updatedItems);
+    setTaskCategories(updatedCategories);
+
+    const db: DatabaseV3 = {
+      version: 3,
+      items: updatedItems,
+      goals,
+      lists,
+      timeSlots,
+      activityCategories,
+      taskCategories: updatedCategories,
+      hourWeights,
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      settings: {
+        proximityDays,
+        slotSeparationMinutes,
+      },
+    };
+    await MigrationEngine.saveDatabase(db);
+  }, [items, goals, lists, timeSlots, activityCategories, taskCategories, hourWeights, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes]);
+
   // Hour Weights CRUD
   const saveHourWeights = useCallback(async (newWeights: HourWeight[]) => {
     setHourWeights(newWeights);
@@ -2022,7 +2129,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [hourWeights, saveHourWeights]);
 
   // V3 Cognitive Engine Actions
-  const createSession = useCallback(async (taskId: string, plannedDuration: number, notes = '') => {
+  const createSession = useCallback(async (taskId: string, plannedDuration: number, notes = '', title?: string, notesImages?: string[]) => {
     const newSession: Session = {
       id: Math.random().toString(36).substring(7),
       taskId,
@@ -2030,6 +2137,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       plannedDuration,
       completed: false,
       notes,
+      title: title?.trim() || undefined,
+      notesImages,
       createdAt: new Date().toISOString(),
     };
 
@@ -2287,6 +2396,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         updateGoal,
         deleteGoal,
         toggleGoalCompleted,
+        toggleGoalMain,
         addPhase,
         updatePhase,
         deletePhase,
@@ -2306,6 +2416,10 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         addActivityCategory,
         updateActivityCategory,
         deleteActivityCategory,
+        taskCategories,
+        addTaskCategory,
+        updateTaskCategory,
+        deleteTaskCategory,
         hourWeights,
         addHourWeight,
         updateHourWeight,

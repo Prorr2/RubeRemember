@@ -43,6 +43,7 @@ export interface Task extends BaseItem {
   priority: Priority;
   goalId?: string;
   phaseId?: string;
+  categoryId?: string;
   timeSlotId?: string;
   time?: string; // HH:MM (calculated from slot or custom)
   comments: Comment[];

@@ -19,6 +19,7 @@ import { TimeSlot } from '../models/TimeSlot';
 import { ReminderList } from '../models/ReminderList';
 import { CustomCategory } from '../models/Activity';
 import { HourWeight } from '../models/HourWeight';
+import { TaskCategory } from '../models/TaskCategory';
 
 export interface DatabaseV2 {
   version: number;
@@ -41,6 +42,7 @@ export interface DatabaseV3 {
   lists: ReminderList[];
   timeSlots: TimeSlot[];
   activityCategories?: CustomCategory[];
+  taskCategories?: TaskCategory[];
   hourWeights?: HourWeight[];
   sessions?: Session[];
   recommendations?: Recommendation[];
@@ -293,6 +295,9 @@ export const MigrationEngine = {
           const existing = JSON.parse(existingRaw);
           if (db.activityCategories === undefined && existing.activityCategories !== undefined) {
             db.activityCategories = existing.activityCategories;
+          }
+          if (db.taskCategories === undefined && existing.taskCategories !== undefined) {
+            db.taskCategories = existing.taskCategories;
           }
           if (db.hourWeights === undefined && existing.hourWeights !== undefined) {
             db.hourWeights = existing.hourWeights;

@@ -10,7 +10,10 @@ import {
   CustomCategory,
   Statistics,
   TimeSlot,
+  Goal,
+  Phase,
   Session,
+  Recommendation,
   DEFAULT_USER_SETTINGS,
   DEFAULT_HOUR_WEIGHTS,
   DEFAULT_ACTIVITY_CATEGORIES,
@@ -21,7 +24,7 @@ import {
 export interface DatabaseState {
   version: number;
   items: Item[];
-  goals: any[];
+  goals: Goal[];
   lists: any[];
   timeSlots: TimeSlot[];
   sessions: Session[];
@@ -238,10 +241,9 @@ export function sanitizeDatabase(db: DatabaseState): DatabaseState {
     return item;
   });
 
-  // 2. Sanitize lists and list items
-  const sanitizedLists = (db.lists || []).map((list) => {
+  const sanitizedLists = (db.lists || []).map((list: any) => {
     let listUpdated = false;
-    const sanitizedListItems = (list.items || []).map((it) => {
+    const sanitizedListItems = (list.items || []).map((it: any) => {
       let itemUpdated = false;
       let text = it.text;
       const images = [...(it.images || [])];
@@ -602,7 +604,7 @@ export const rememberStore = {
 
   // --- SESSIONS ---
 
-  createSession(taskId: string, plannedDuration: number, notes = '') {
+  createSession(taskId: string, plannedDuration: number, notes = '', title?: string, notesImages?: string[]) {
     const newSession: Session = {
       id: 'session-' + Math.random().toString(36).substring(2, 9),
       taskId,
@@ -610,7 +612,9 @@ export const rememberStore = {
       realDuration: 0,
       completed: false,
       notes,
-      endTime: null
+      title: title?.trim() || undefined,
+      notesImages,
+      endTime: new Date().toISOString()
     };
     saveState({
       ...storeState,
@@ -751,6 +755,46 @@ export const rememberStore = {
 
   // --- TIME SLOTS ---
 
+  addTimeSlot(name: string, startTime: string, endTime: string) {
+    const newSlot: TimeSlot = {
+      id: 'slot-' + Math.random().toString(36).substring(2, 9),
+      name,
+      startTime,
+      endTime,
+      assignedTaskIds: []
+    };
+    saveState({
+      ...storeState,
+      timeSlots: [...storeState.timeSlots, newSlot]
+    });
+    return newSlot.id;
+  },
+
+  updateTimeSlot(id: string, name: string, startTime: string, endTime: string) {
+    saveState({
+      ...storeState,
+      timeSlots: storeState.timeSlots.map(s => (s.id === id ? { ...s, name, startTime, endTime } : s))
+    });
+  },
+
+  deleteTimeSlot(id: string) {
+    saveState({
+      ...storeState,
+      timeSlots: storeState.timeSlots.filter(s => s.id !== id),
+      items: storeState.items.map(item => (item.type === ItemType.TASK && (item as any).timeSlotId === id ? { ...item, timeSlotId: undefined } as Item : item))
+    });
+  },
+
+  setSlotSeparationMinutes(minutes: number) {
+    saveState({
+      ...storeState,
+      settings: {
+        ...(storeState.settings || {}),
+        slotSeparationMinutes: minutes
+      }
+    });
+  },
+
   assignTaskToSlot(slotId: string, taskId: string) {
     saveState({
       ...storeState,
@@ -775,6 +819,260 @@ export const rememberStore = {
         }
         return slot;
       })
+    });
+  },
+
+  // --- GOALS & ROADMAPS ---
+
+  addGoal(title: string, description = '', startDate = getLocalDateStr(), endDate = getLocalDateStr()) {
+    const newGoal: Goal = {
+      id: 'goal-' + Math.random().toString(36).substring(2, 9),
+      title: title.trim(),
+      description: description.trim(),
+      startDate,
+      endDate,
+      completed: false,
+      phases: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    saveState({
+      ...storeState,
+      goals: [...(storeState.goals || []), newGoal]
+    });
+    return newGoal.id;
+  },
+
+  updateGoal(id: string, title: string, description: string, startDate: string, endDate: string) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => (g.id === id ? { ...g, title, description, startDate, endDate, updatedAt: new Date().toISOString() } : g))
+    });
+  },
+
+  deleteGoal(id: string) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).filter(g => g.id !== id),
+      items: storeState.items.map(item => (item.type === ItemType.TASK && (item as any).goalId === id ? { ...item, goalId: undefined, phaseId: undefined } as Item : item))
+    });
+  },
+
+  toggleGoalCompleted(id: string) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => (g.id === id ? { ...g, completed: !g.completed, updatedAt: new Date().toISOString() } : g))
+    });
+  },
+
+  addPhase(goalId: string, name: string, description = '') {
+    const newPhase: Phase = {
+      id: 'phase-' + Math.random().toString(36).substring(2, 9),
+      name: name.trim(),
+      description: description.trim(),
+      completed: false,
+      order: Date.now()
+    };
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => {
+        if (g.id === goalId) {
+          const phases = [...(g.phases || []), newPhase];
+          return { ...g, phases, updatedAt: new Date().toISOString() };
+        }
+        return g;
+      })
+    });
+    return newPhase.id;
+  },
+
+  updatePhase(goalId: string, phaseId: string, name: string, description: string) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => {
+        if (g.id === goalId) {
+          const phases = (g.phases || []).map(p => (p.id === phaseId ? { ...p, name, description } : p));
+          return { ...g, phases, updatedAt: new Date().toISOString() };
+        }
+        return g;
+      })
+    });
+  },
+
+  togglePhaseCompleted(goalId: string, phaseId: string) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => {
+        if (g.id === goalId) {
+          const phases = (g.phases || []).map(p => (p.id === phaseId ? { ...p, completed: !p.completed } : p));
+          return { ...g, phases, updatedAt: new Date().toISOString() };
+        }
+        return g;
+      })
+    });
+  },
+
+  deletePhase(goalId: string, phaseId: string) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => {
+        if (g.id === goalId) {
+          const phases = (g.phases || []).filter(p => p.id !== phaseId);
+          return { ...g, phases, updatedAt: new Date().toISOString() };
+        }
+        return g;
+      }),
+      items: storeState.items.map(item => (item.type === ItemType.TASK && (item as any).phaseId === phaseId ? { ...item, phaseId: undefined } as Item : item))
+    });
+  },
+
+  reorderPhases(goalId: string, reorderedPhases: Phase[]) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => {
+        if (g.id === goalId) {
+          return { ...g, phases: reorderedPhases, updatedAt: new Date().toISOString() };
+        }
+        return g;
+      })
+    });
+  },
+  // --- LISTS ---
+
+  addList(name: string, parentId?: string) {
+    const newId = `list-${Math.random().toString(36).substring(7)}`;
+    const newList = {
+      id: newId,
+      name: name.trim(),
+      items: [],
+      collapsed: false,
+      createdAt: new Date().toISOString(),
+      parentId,
+    };
+    saveState({
+      ...storeState,
+      lists: [...(storeState.lists || []), newList]
+    });
+    return newId;
+  },
+
+  updateList(id: string, name: string) {
+    saveState({
+      ...storeState,
+      lists: (storeState.lists || []).map((l: any) => (l.id === id ? { ...l, name: name.trim() } : l))
+    });
+  },
+
+  deleteList(id: string) {
+    saveState({
+      ...storeState,
+      lists: (storeState.lists || []).filter((l: any) => l.id !== id)
+    });
+  },
+
+  toggleListCollapse(id: string) {
+    saveState({
+      ...storeState,
+      lists: (storeState.lists || []).map((l: any) => (l.id === id ? { ...l, collapsed: !l.collapsed } : l))
+    });
+  },
+
+  addListItem(listId: string, text: string, imageUri?: string, images?: string[], title?: string) {
+    const newItemId = `item-${Math.random().toString(36).substring(7)}`;
+    const updated = (storeState.lists || []).map((l: any) => {
+      if (l.id === listId) {
+        const newItem = {
+          id: newItemId,
+          text: text.trim(),
+          title: title?.trim() || undefined,
+          imageUri,
+          images,
+        };
+        return { ...l, items: [...(l.items || []), newItem] };
+      }
+      return l;
+    });
+    saveState({
+      ...storeState,
+      lists: updated
+    });
+    return newItemId;
+  },
+
+  updateListItem(listId: string, itemId: string, text: string, imageUri?: string, images?: string[], title?: string) {
+    const updated = (storeState.lists || []).map((l: any) => {
+      if (l.id === listId) {
+        const updatedItems = (l.items || []).map((it: any) => {
+          if (it.id === itemId) {
+            return { ...it, text: text.trim(), title: title?.trim() || undefined, imageUri, images };
+          }
+          return it;
+        });
+        return { ...l, items: updatedItems };
+      }
+      return l;
+    });
+    saveState({
+      ...storeState,
+      lists: updated
+    });
+  },
+
+  deleteListItem(listId: string, itemId: string) {
+    const updated = (storeState.lists || []).map((l: any) => {
+      if (l.id === listId) {
+        return { ...l, items: (l.items || []).filter((it: any) => it.id !== itemId) };
+      }
+      return l;
+    });
+    saveState({
+      ...storeState,
+      lists: updated
+    });
+  },
+
+  toggleListItemCompleted(listId: string, itemId: string) {
+    const updated = (storeState.lists || []).map((l: any) => {
+      if (l.id === listId) {
+        const updatedItems = (l.items || []).map((it: any) => {
+          if (it.id === itemId) {
+            return { ...it, completed: !it.completed };
+          }
+          return it;
+        });
+        return { ...l, items: updatedItems };
+      }
+      return l;
+    });
+    saveState({
+      ...storeState,
+      lists: updated
+    });
+  },
+
+  setListAlarm(listId: string, time: string | null) {
+    saveState({
+      ...storeState,
+      lists: (storeState.lists || []).map((l: any) => (l.id === listId ? { ...l, alarmTime: time || undefined } : l))
+    });
+  },
+
+  setListItemAlarm(listId: string, itemId: string, time: string | null) {
+    const updated = (storeState.lists || []).map((l: any) => {
+      if (l.id === listId) {
+        const updatedItems = (l.items || []).map((it: any) => {
+          if (it.id === itemId) {
+            return { ...it, alarmTime: time || undefined };
+          }
+          return it;
+        });
+        return { ...l, items: updatedItems };
+      }
+      return l;
+    });
+    saveState({
+      ...storeState,
+      lists: updated
     });
   },
 
@@ -817,6 +1115,14 @@ export const rememberStore = {
     } catch (e: any) {
       return { success: false, errors: ['Error al analizar el JSON: ' + e.message] };
     }
+  },
+
+  setFullDatabase(newState: any) {
+    saveState({
+      ...storeState,
+      ...newState,
+      version: storeState.version
+    });
   },
 
   clearAll() {

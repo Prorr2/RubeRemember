@@ -5,9 +5,10 @@ interface RichTextProps {
   images?: string[];
   className?: string;
   style?: React.CSSProperties;
+  onImageClick?: (src: string) => void;
 }
 
-export function RichText({ text, images, className, style }: RichTextProps) {
+export function RichText({ text, images, className, style, onImageClick }: RichTextProps) {
   const hasText = typeof text === 'string' && text.trim().length > 0;
   const hasImages = images && images.length > 0;
 
@@ -41,12 +42,14 @@ export function RichText({ text, images, className, style }: RichTextProps) {
                 <img
                   src={targetUrl}
                   alt="Embedded content"
+                  onClick={() => onImageClick?.(targetUrl)}
                   style={{
                     maxWidth: '100%',
                     maxHeight: '300px',
                     borderRadius: '8px',
                     objectFit: 'cover',
-                    border: '1px solid rgba(255,255,255,0.1)'
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    cursor: onImageClick ? 'pointer' : 'default'
                   }}
                 />
               </span>
@@ -80,12 +83,14 @@ export function RichText({ text, images, className, style }: RichTextProps) {
               <img
                 src={img}
                 alt="Attached content"
+                onClick={() => onImageClick?.(img)}
                 style={{
                   maxWidth: '100%',
                   maxHeight: '300px',
                   borderRadius: '8px',
                   objectFit: 'cover',
-                  border: '1px solid rgba(255,255,255,0.1)'
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  cursor: onImageClick ? 'pointer' : 'default'
                 }}
               />
             </span>

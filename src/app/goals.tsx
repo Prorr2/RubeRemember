@@ -265,6 +265,7 @@ export default function GoalsScreen() {
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [goalTitle, setGoalTitle] = useState('');
   const [goalDesc, setGoalDesc] = useState('');
+  const [goalEmoji, setGoalEmoji] = useState('🎯');
   const [goalStart, setGoalStart] = useState('2026-07-26');
   const [goalEnd, setGoalEnd] = useState('2026-12-31');
 
@@ -546,6 +547,7 @@ export default function GoalsScreen() {
     setEditingGoal(null);
     setGoalTitle('');
     setGoalDesc('');
+    setGoalEmoji('🎯');
     setGoalStart(todayStr);
     setGoalEnd(todayStr);
     setIsGoalModalVisible(true);
@@ -555,6 +557,7 @@ export default function GoalsScreen() {
     setEditingGoal(goal);
     setGoalTitle(goal.title);
     setGoalDesc(goal.description);
+    setGoalEmoji(goal.emoji || '🎯');
     setGoalStart(goal.startDate);
     setGoalEnd(goal.endDate);
     setIsGoalModalVisible(true);
@@ -565,10 +568,14 @@ export default function GoalsScreen() {
       Alert.alert('Error', 'El título del objetivo no puede estar vacío.');
       return;
     }
+    if (!goalEmoji.trim()) {
+      Alert.alert('Emoji Requerido', 'Debes elegir un emoji obligatorio para el objetivo.');
+      return;
+    }
     if (editingGoal) {
-      await store.updateGoal(editingGoal.id, goalTitle.trim(), goalDesc.trim(), goalStart, goalEnd);
+      await store.updateGoal(editingGoal.id, goalTitle.trim(), goalDesc.trim(), goalStart, goalEnd, goalEmoji.trim());
     } else {
-      await store.addGoal(goalTitle.trim(), goalDesc.trim(), goalStart, goalEnd);
+      await store.addGoal(goalTitle.trim(), goalDesc.trim(), goalStart, goalEnd, goalEmoji.trim());
     }
     setIsGoalModalVisible(false);
   };
@@ -663,6 +670,289 @@ export default function GoalsScreen() {
     setQuickTaskPhaseId(null);
   };
 
+  const mainGoals = useMemo(() => store.goals.filter((g) => g.isMain), [store.goals]);
+  const otherGoals = useMemo(() => store.goals.filter((g) => !g.isMain), [store.goals]);
+
+  const renderGoalCard = (goal: Goal) => {
+    const goalReminders = store.reminders.filter((r) => r.goalId === goal.id);
+    const completedCount = goalReminders.filter((r) => r.completed).length;
+    const totalCount = goalReminders.length;
+    const progress = totalCount > 0 ? completedCount / totalCount : 0;
+    const isExpanded = expandedGoalId === goal.id;
+
+    return (
+      <View
+        key={goal.id}
+        style={[
+          styles.goalCard,
+          {
+            backgroundColor: colors.backgroundElement,
+            borderColor: isExpanded ? '#FF2D55' : colors.backgroundSelected,
+          },
+        ]}
+      >
+        {/* Header of Goal Card */}
+        <Pressable
+          onPress={() => setExpandedGoalId(isExpanded ? null : goal.id)}
+          style={styles.goalCardHeader}
+        >
+          <View style={{ flexDirection: 'row', flex: 1, alignItems: 'flex-start', gap: 8 }}>
+            <Pressable
+              onPress={() => store.toggleGoalMain(goal.id)}
+              style={{ marginTop: 2, padding: 2 }}
+            >
+              <Ionicons
+                name={goal.isMain ? 'pin' : 'pin-outline'}
+                size={20}
+                color={goal.isMain ? '#FF2D55' : colors.textSecondary}
+              />
+            </Pressable>
+
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text
+                style={[
+                  styles.goalTitleText,
+                  { color: colors.text }
+                ]}
+              >
+                {goal.emoji ? `${goal.emoji} ` : '🎯 '}{goal.title}
+              </Text>
+              {goal.description ? (
+                <Text
+                  numberOfLines={2}
+                  style={[
+                    styles.goalDescText,
+                    { color: colors.textSecondary }
+                  ]}
+                >
+                  {goal.description}
+                </Text>
+              ) : null}
+              <View style={styles.goalDatesRow}>
+                <Ionicons name="calendar-outline" size={12} color="#FF2D55" />
+                <Text style={[styles.goalDatesText, { color: colors.textSecondary }]}>
+                  {formatDisplayDate(goal.startDate)} — {formatDisplayDate(goal.endDate)}
+                </Text>
+              </View>
+              {totalCount > 0 && (
+                <View style={styles.progressBarWrapper}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.progressText, { color: colors.textSecondary }]}>
+                      Progreso: {Math.round(progress * 100)}%
+                    </Text>
+                  </View>
+                  <View style={[styles.progressBarBG, { backgroundColor: colors.backgroundSelected }]}>
+                    <View
+                      style={[
+                        styles.progressBarFill,
+                        {
+                          width: `${progress * 100}%`,
+                          backgroundColor: '#FF2D55',
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+              )}
+            </View>
+          </View>
+
+          <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 6 }}>
+            <Ionicons
+              name={isExpanded ? 'chevron-up' : 'chevron-down'}
+              size={20}
+              color={colors.textSecondary}
+            />
+            {totalCount > 0 && (
+              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#FF2D55' }}>
+                {totalCount} {totalCount === 1 ? 'Tarea' : 'Tareas'}
+              </Text>
+            )}
+          </View>
+        </Pressable>
+
+        {/* Actions row for Goal */}
+        <View style={[styles.goalActionsRow, { borderTopColor: colors.backgroundSelected }]}>
+          <Pressable onPress={() => handleOpenEditGoal(goal)} style={styles.goalActionBtn}>
+            <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.goalActionText, { color: colors.textSecondary }]}>Editar</Text>
+          </Pressable>
+          <Pressable onPress={() => handleDeleteGoal(goal.id)} style={styles.goalActionBtn}>
+            <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+            <Text style={[styles.goalActionText, { color: '#FF3B30' }]}>Eliminar</Text>
+          </Pressable>
+        </View>
+
+        {/* Expanded Roadmap / Phases details */}
+        {isExpanded ? (
+          <View style={[styles.phasesSection, { borderTopColor: colors.backgroundSelected }]}>
+            <View style={styles.phasesHeaderRow}>
+              <Text style={[styles.phasesTitleLabel, { color: colors.text }]}>Roadmap de Fases</Text>
+              <Pressable
+                onPress={() => handleOpenNewPhase(goal.id)}
+                style={styles.addPhaseSmallBtn}
+              >
+                <Ionicons name="add-circle-outline" size={16} color="#FF2D55" />
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#FF2D55' }}>Añadir Fase</Text>
+              </Pressable>
+            </View>
+
+            {goal.phases.length === 0 ? (
+              <View style={[styles.emptyPhasesCard, { borderColor: colors.backgroundSelected }]}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center' }}>
+                  Aún no has definido fases en este objetivo. Divide el objetivo en hitos/etapas y asocia tareas.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.phasesListContainer}>
+                {goal.phases
+                  .sort((a, b) => a.order - b.order)
+                  .map((phase, index) => {
+                    const phaseReminders = goalReminders.filter((r) => r.phaseId === phase.id);
+                    const isAddingTask = quickTaskPhaseId === phase.id;
+
+                    return (
+                      <View key={phase.id} style={styles.phaseItemWrapper}>
+                        {/* Step connector lines */}
+                        <View style={styles.stepIndicatorCol}>
+                          <View style={[styles.stepDot, { backgroundColor: '#FF2D55' }]} />
+                          {index < goal.phases.length - 1 ? (
+                            <View style={[styles.stepLine, { backgroundColor: colors.backgroundSelected }]} />
+                          ) : null}
+                        </View>
+
+                        <View style={styles.phaseCardContent}>
+                          {/* Title & Phase Controls */}
+                          <View style={styles.phaseHeader}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={[styles.phaseNameText, { color: colors.text }]}>
+                                {index + 1}. {phase.name}
+                              </Text>
+                              {phase.description ? (
+                                <Text style={[styles.phaseDescTextContent, { color: colors.textSecondary }]}>
+                                  {phase.description}
+                                </Text>
+                              ) : null}
+                            </View>
+
+                            {/* Reordering / Edit Controls */}
+                            <View style={styles.phaseControlsRow}>
+                              <Pressable
+                                disabled={index === 0}
+                                onPress={() => handleMovePhase(goal, phase, 'up')}
+                                style={{ opacity: index === 0 ? 0.3 : 1 }}
+                              >
+                                <Ionicons name="chevron-up-circle-outline" size={18} color={colors.textSecondary} />
+                              </Pressable>
+                              <Pressable
+                                disabled={index === goal.phases.length - 1}
+                                onPress={() => handleMovePhase(goal, phase, 'down')}
+                                style={{ opacity: index === goal.phases.length - 1 ? 0.3 : 1 }}
+                              >
+                                <Ionicons name="chevron-down-circle-outline" size={18} color={colors.textSecondary} />
+                              </Pressable>
+                              <Pressable onPress={() => handleOpenEditPhase(goal.id, phase)}>
+                                <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
+                              </Pressable>
+                              <Pressable onPress={() => handleDeletePhase(goal.id, phase.id)}>
+                                <Ionicons name="trash-outline" size={15} color="#FF3B30" />
+                              </Pressable>
+                            </View>
+                          </View>
+
+                          {/* Reminders List inside Phase */}
+                          <View style={styles.phaseRemindersList}>
+                            {phaseReminders.map((reminder) => (
+                              <View
+                                key={reminder.id}
+                                style={[
+                                  styles.reminderItemRow,
+                                  { backgroundColor: colors.backgroundSelected }
+                                ]}
+                              >
+                                <Pressable
+                                  onPress={() => store.toggleReminderCompleted(reminder.id)}
+                                  style={styles.completedCheckbox}
+                                >
+                                  <Ionicons
+                                    name={reminder.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                                    size={18}
+                                    color={reminder.completed ? '#34C759' : colors.textSecondary}
+                                  />
+                                </Pressable>
+                                <Text
+                                  style={[
+                                    styles.reminderItemText,
+                                    {
+                                      color: colors.text,
+                                      textDecorationLine: reminder.completed ? 'line-through' : 'none',
+                                      opacity: reminder.completed ? 0.6 : 1,
+                                    }
+                                  ]}
+                                >
+                                  {reminder.text}
+                                </Text>
+                                {reminder.date ? (
+                                  <Text style={[styles.reminderItemDate, { color: colors.textSecondary }]}>
+                                    {formatDisplayDate(reminder.date)}
+                                  </Text>
+                                ) : (
+                                  <Text style={{ fontSize: 9, color: '#30B0C7', fontWeight: 'bold' }}>Idea</Text>
+                                )}
+                              </View>
+                            ))}
+                          </View>
+
+                          {/* Quick task creator */}
+                          {isAddingTask ? (
+                            <View style={styles.quickTaskBox}>
+                              <TextInput
+                                style={[styles.quickTaskInput, { color: colors.text, backgroundColor: colors.backgroundSelected }]}
+                                placeholder="Añadir tarea a esta fase..."
+                                placeholderTextColor={colors.textSecondary}
+                                value={quickTaskText}
+                                onChangeText={setQuickTaskText}
+                                autoFocus
+                              />
+                              <View style={{ flexDirection: 'row', gap: 6 }}>
+                                <Pressable
+                                  onPress={() => handleAddQuickTask(phase.id, goal.id)}
+                                  style={[styles.quickTaskBtn, { backgroundColor: '#FF2D55' }]}
+                                >
+                                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Agregar</Text>
+                                </Pressable>
+                                <Pressable
+                                  onPress={() => setQuickTaskPhaseId(null)}
+                                  style={[styles.quickTaskBtn, { backgroundColor: colors.backgroundSelected }]}
+                                >
+                                  <Text style={{ color: colors.text, fontSize: 11 }}>Cancelar</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          ) : (
+                            <Pressable
+                              onPress={() => {
+                                setQuickTaskPhaseId(phase.id);
+                                setQuickTaskText('');
+                              }}
+                              style={styles.addReminderPlaceholderBtn}
+                            >
+                              <Ionicons name="add" size={14} color={colors.textSecondary} />
+                              <Text style={{ fontSize: 11, color: colors.textSecondary }}>Crear tarea aquí</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+              </View>
+            )}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Custom Header */}
@@ -689,287 +979,13 @@ export default function GoalsScreen() {
             </Pressable>
           </View>
         ) : (
-          store.goals.map((goal) => {
-            const goalReminders = store.reminders.filter((r) => r.goalId === goal.id);
-            const completedCount = goalReminders.filter((r) => r.completed).length;
-            const totalCount = goalReminders.length;
-            const progress = totalCount > 0 ? completedCount / totalCount : 0;
-            const isExpanded = expandedGoalId === goal.id;
-
-            return (
-              <View
-                key={goal.id}
-                style={[
-                  styles.goalCard,
-                  {
-                    backgroundColor: colors.backgroundElement,
-                    borderColor: isExpanded ? '#FF2D55' : colors.backgroundSelected,
-                  },
-                ]}
-              >
-                {/* Header of Goal Card */}
-                <Pressable
-                  onPress={() => setExpandedGoalId(isExpanded ? null : goal.id)}
-                  style={styles.goalCardHeader}
-                >
-                  <View style={{ flexDirection: 'row', flex: 1, alignItems: 'flex-start', gap: 8 }}>
-                    <Pressable
-                      onPress={() => store.toggleGoalCompleted(goal.id)}
-                      style={{ marginTop: 2 }}
-                    >
-                      <Ionicons
-                        name={goal.completed ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={22}
-                        color={goal.completed ? '#34C759' : '#FF2D55'}
-                      />
-                    </Pressable>
-
-                    <View style={{ flex: 1, gap: 4 }}>
-                      <Text
-                        style={[
-                          styles.goalTitleText,
-                          { color: colors.text },
-                          goal.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
-                        ]}
-                      >
-                        {goal.title}
-                      </Text>
-                      {goal.description ? (
-                        <Text
-                          numberOfLines={2}
-                          style={[
-                            styles.goalDescText,
-                            { color: colors.textSecondary },
-                            goal.completed && { opacity: 0.6 }
-                          ]}
-                        >
-                          {goal.description}
-                        </Text>
-                      ) : null}
-                      <View style={styles.goalDatesRow}>
-                        <Ionicons name="calendar-outline" size={12} color="#FF2D55" />
-                        <Text style={[styles.goalDatesText, { color: colors.textSecondary }, goal.completed && { opacity: 0.6 }]}>
-                          {formatDisplayDate(goal.startDate)} — {formatDisplayDate(goal.endDate)}
-                        </Text>
-                      </View>
-                      {totalCount > 0 && (
-                        <View style={styles.progressBarWrapper}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={[styles.progressText, { color: colors.textSecondary }]}>
-                              Progreso: {Math.round(progress * 100)}%
-                            </Text>
-                          </View>
-                          <View style={[styles.progressBarBG, { backgroundColor: colors.backgroundSelected }]}>
-                            <View
-                              style={[
-                                styles.progressBarFill,
-                                {
-                                  width: `${progress * 100}%`,
-                                  backgroundColor: '#FF2D55',
-                                },
-                              ]}
-                            />
-                          </View>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-
-                  <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 6 }}>
-                    <Ionicons
-                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                      size={20}
-                      color={colors.textSecondary}
-                    />
-                    {totalCount > 0 && (
-                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#FF2D55' }}>
-                        {totalCount} {totalCount === 1 ? 'Tarea' : 'Tareas'}
-                      </Text>
-                    )}
-                  </View>
-                </Pressable>
-
-                {/* Actions row for Goal */}
-                <View style={[styles.goalActionsRow, { borderTopColor: colors.backgroundSelected }]}>
-                  <Pressable onPress={() => handleOpenEditGoal(goal)} style={styles.goalActionBtn}>
-                    <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
-                    <Text style={[styles.goalActionText, { color: colors.textSecondary }]}>Editar</Text>
-                  </Pressable>
-                  <Pressable onPress={() => handleDeleteGoal(goal.id)} style={styles.goalActionBtn}>
-                    <Ionicons name="trash-outline" size={16} color="#FF3B30" />
-                    <Text style={[styles.goalActionText, { color: '#FF3B30' }]}>Eliminar</Text>
-                  </Pressable>
-                </View>
-
-                {/* Expanded Roadmap / Phases details */}
-                {isExpanded ? (
-                  <View style={[styles.phasesSection, { borderTopColor: colors.backgroundSelected }]}>
-                    <View style={styles.phasesHeaderRow}>
-                      <Text style={[styles.phasesTitleLabel, { color: colors.text }]}>Roadmap de Fases</Text>
-                      <Pressable
-                        onPress={() => handleOpenNewPhase(goal.id)}
-                        style={styles.addPhaseSmallBtn}
-                      >
-                        <Ionicons name="add-circle-outline" size={16} color="#FF2D55" />
-                        <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#FF2D55' }}>Añadir Fase</Text>
-                      </Pressable>
-                    </View>
-
-                    {goal.phases.length === 0 ? (
-                      <View style={[styles.emptyPhasesCard, { borderColor: colors.backgroundSelected }]}>
-                        <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center' }}>
-                          Aún no has definido fases en este objetivo. Divide el objetivo en hitos/etapas y asocia tareas.
-                        </Text>
-                      </View>
-                    ) : (
-                      <View style={styles.phasesListContainer}>
-                        {goal.phases
-                          .sort((a, b) => a.order - b.order)
-                          .map((phase, index) => {
-                            const phaseReminders = goalReminders.filter((r) => r.phaseId === phase.id);
-                            const isAddingTask = quickTaskPhaseId === phase.id;
-
-                            return (
-                              <View key={phase.id} style={styles.phaseItemWrapper}>
-                                {/* Step connector lines */}
-                                <View style={styles.stepIndicatorCol}>
-                                  <View style={[styles.stepDot, { backgroundColor: '#FF2D55' }]} />
-                                  {index < goal.phases.length - 1 ? (
-                                    <View style={[styles.stepLine, { backgroundColor: colors.backgroundSelected }]} />
-                                  ) : null}
-                                </View>
-
-                                <View style={styles.phaseCardContent}>
-                                  {/* Title & Phase Controls */}
-                                  <View style={styles.phaseHeader}>
-                                    <View style={{ flex: 1 }}>
-                                      <Text style={[styles.phaseNameText, { color: colors.text }]}>
-                                        {index + 1}. {phase.name}
-                                      </Text>
-                                      {phase.description ? (
-                                        <Text style={[styles.phaseDescTextContent, { color: colors.textSecondary }]}>
-                                          {phase.description}
-                                        </Text>
-                                      ) : null}
-                                    </View>
-
-                                    {/* Reordering / Edit Controls */}
-                                    <View style={styles.phaseControlsRow}>
-                                      <Pressable
-                                        disabled={index === 0}
-                                        onPress={() => handleMovePhase(goal, phase, 'up')}
-                                        style={{ opacity: index === 0 ? 0.3 : 1 }}
-                                      >
-                                        <Ionicons name="chevron-up-circle-outline" size={18} color={colors.textSecondary} />
-                                      </Pressable>
-                                      <Pressable
-                                        disabled={index === goal.phases.length - 1}
-                                        onPress={() => handleMovePhase(goal, phase, 'down')}
-                                        style={{ opacity: index === goal.phases.length - 1 ? 0.3 : 1 }}
-                                      >
-                                        <Ionicons name="chevron-down-circle-outline" size={18} color={colors.textSecondary} />
-                                      </Pressable>
-                                      <Pressable onPress={() => handleOpenEditPhase(goal.id, phase)}>
-                                        <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
-                                      </Pressable>
-                                      <Pressable onPress={() => handleDeletePhase(goal.id, phase.id)}>
-                                        <Ionicons name="trash-outline" size={15} color="#FF3B30" />
-                                      </Pressable>
-                                    </View>
-                                  </View>
-
-                                  {/* Reminders List inside Phase */}
-                                  <View style={styles.phaseRemindersList}>
-                                    {phaseReminders.map((reminder) => (
-                                      <View
-                                        key={reminder.id}
-                                        style={[
-                                          styles.reminderItemRow,
-                                          { backgroundColor: colors.backgroundSelected }
-                                        ]}
-                                      >
-                                        <Pressable
-                                          onPress={() => store.toggleReminderCompleted(reminder.id)}
-                                          style={styles.completedCheckbox}
-                                        >
-                                          <Ionicons
-                                            name={reminder.completed ? 'checkmark-circle' : 'ellipse-outline'}
-                                            size={18}
-                                            color={reminder.completed ? '#34C759' : colors.textSecondary}
-                                          />
-                                        </Pressable>
-                                        <Text
-                                          style={[
-                                            styles.reminderItemText,
-                                            {
-                                              color: colors.text,
-                                              textDecorationLine: reminder.completed ? 'line-through' : 'none',
-                                              opacity: reminder.completed ? 0.6 : 1,
-                                            }
-                                          ]}
-                                        >
-                                          {reminder.text}
-                                        </Text>
-                                        {reminder.date ? (
-                                          <Text style={[styles.reminderItemDate, { color: colors.textSecondary }]}>
-                                            {formatDisplayDate(reminder.date)}
-                                          </Text>
-                                        ) : (
-                                          <Text style={{ fontSize: 9, color: '#30B0C7', fontWeight: 'bold' }}>Idea</Text>
-                                        )}
-                                      </View>
-                                    ))}
-                                  </View>
-
-                                  {/* Quick task creator */}
-                                  {isAddingTask ? (
-                                    <View style={styles.quickTaskBox}>
-                                      <TextInput
-                                        style={[styles.quickTaskInput, { color: colors.text, backgroundColor: colors.backgroundSelected }]}
-                                        placeholder="Añadir tarea a esta fase..."
-                                        placeholderTextColor={colors.textSecondary}
-                                        value={quickTaskText}
-                                        onChangeText={setQuickTaskText}
-                                        autoFocus
-                                      />
-                                      <View style={{ flexDirection: 'row', gap: 6 }}>
-                                        <Pressable
-                                          onPress={() => handleAddQuickTask(phase.id, goal.id)}
-                                          style={[styles.quickTaskBtn, { backgroundColor: '#FF2D55' }]}
-                                        >
-                                          <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Agregar</Text>
-                                        </Pressable>
-                                        <Pressable
-                                          onPress={() => setQuickTaskPhaseId(null)}
-                                          style={[styles.quickTaskBtn, { backgroundColor: colors.backgroundSelected }]}
-                                        >
-                                          <Text style={{ color: colors.text, fontSize: 11 }}>Cancelar</Text>
-                                        </Pressable>
-                                      </View>
-                                    </View>
-                                  ) : (
-                                    <Pressable
-                                      onPress={() => {
-                                        setQuickTaskPhaseId(phase.id);
-                                        setQuickTaskText('');
-                                      }}
-                                      style={styles.addReminderPlaceholderBtn}
-                                    >
-                                      <Ionicons name="add" size={14} color={colors.textSecondary} />
-                                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>Crear tarea aquí</Text>
-                                    </Pressable>
-                                  )}
-                                </View>
-                              </View>
-                            );
-                          })}
-                      </View>
-                    )}
-                  </View>
-                ) : null}
-              </View>
-            );
-          })
+          <>
+            {mainGoals.map(renderGoalCard)}
+            {mainGoals.length > 0 && otherGoals.length > 0 && (
+              <View style={{ height: 16 }} />
+            )}
+            {otherGoals.map(renderGoalCard)}
+          </>
         )}
 
         {/* Timeline & Upcoming Events for Selected Goal Section */}
@@ -1002,7 +1018,7 @@ export default function GoalsScreen() {
                     ]}
                   >
                     <Text style={[styles.goalChipText, { color: isSelected ? '#FFFFFF' : colors.text, fontWeight: isSelected ? 'bold' : 'normal' }]}>
-                      {g.title}
+                      {g.emoji ? `${g.emoji} ` : '🎯 '}{g.title}
                     </Text>
                   </Pressable>
                 );
@@ -1136,6 +1152,19 @@ export default function GoalsScreen() {
             <Text style={[modalStyles.title, { color: colors.text }]}>
               {editingGoal ? 'Editar Objetivo' : 'Nuevo Objetivo'}
             </Text>
+
+            {/* Emoji */}
+            <Text style={[formStyles.label, { color: colors.textSecondary, marginTop: 12 }]}>Emoji del Objetivo *</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <TextInput
+                style={[modalStyles.textInput, { width: 60, textAlign: 'center', fontSize: 22, color: colors.text, backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}
+                value={goalEmoji}
+                onChangeText={setGoalEmoji}
+                maxLength={4}
+                placeholder="🎯"
+                placeholderTextColor={colors.textSecondary}
+              />
+            </View>
 
             {/* Title */}
             <Text style={[formStyles.label, { color: colors.textSecondary, marginTop: 12 }]}>Título</Text>
