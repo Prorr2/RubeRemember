@@ -11,11 +11,12 @@ export function DropboxAutoSyncHandler() {
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isSyncingRef = useRef<boolean>(false);
+  const initialCheckDoneRef = useRef<boolean>(false);
 
   // Toast state & animation refs
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const translateYAnim = useRef(new Animated.Value(-24)).current;
+  const scaleAnim = useRef(new Animated.Value(0.85)).current;
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const showToast = (message: string) => {
@@ -26,18 +27,18 @@ export function DropboxAutoSyncHandler() {
     setToastMessage(message);
 
     fadeAnim.setValue(0);
-    translateYAnim.setValue(-24);
+    scaleAnim.setValue(0.85);
 
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 350,
+        duration: 300,
         useNativeDriver: true,
       }),
-      Animated.spring(translateYAnim, {
-        toValue: 0,
-        friction: 8,
-        tension: 40,
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 7,
+        tension: 45,
         useNativeDriver: true,
       }),
     ]).start();
@@ -47,12 +48,12 @@ export function DropboxAutoSyncHandler() {
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 0,
-          duration: 400,
+          duration: 350,
           useNativeDriver: true,
         }),
-        Animated.timing(translateYAnim, {
-          toValue: -24,
-          duration: 400,
+        Animated.timing(scaleAnim, {
+          toValue: 0.85,
+          duration: 350,
           useNativeDriver: true,
         }),
       ]).start(() => {
@@ -90,19 +91,27 @@ export function DropboxAutoSyncHandler() {
     }
   };
 
+  // Immediate check on App Launch as soon as store finishes loading
+  useEffect(() => {
+    if (store.userSettings?.dropboxAccessToken && !initialCheckDoneRef.current) {
+      initialCheckDoneRef.current = true;
+      runSyncCheck('App startup launch check');
+    }
+  }, [store.userSettings?.dropboxAccessToken]);
+
   useEffect(() => {
     // 1. Initial check when component mounts (if app is active)
     if (AppState.currentState === 'active') {
       runSyncCheck('Initial app mount');
     }
 
-    // 2. Set interval to check every 30 seconds (30,000 ms) while in foreground
-    const THIRTY_SECONDS_MS = 30 * 1000;
+    // 2. Set interval to check every 1 minute (60,000 ms) while in foreground
+    const ONE_MINUTE_MS = 60 * 1000;
     const intervalId = setInterval(() => {
       if (appStateRef.current === 'active') {
-        runSyncCheck('30-second interval timer');
+        runSyncCheck('1-minute interval timer');
       }
-    }, THIRTY_SECONDS_MS);
+    }, ONE_MINUTE_MS);
 
     // 3. Listen to AppState foreground changes ('active')
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
@@ -133,12 +142,12 @@ export function DropboxAutoSyncHandler() {
         styles.toastContainer,
         {
           opacity: fadeAnim,
-          transform: [{ translateY: translateYAnim }],
+          transform: [{ scale: scaleAnim }],
         },
       ]}
     >
       <View style={styles.toastCard}>
-        <Ionicons name="cloud-done-outline" size={18} color="#0061FF" />
+        <Ionicons name="cloud-done-outline" size={26} color="#0061FF" />
         <Text style={styles.toastText}>{toastMessage}</Text>
       </View>
     </Animated.View>
@@ -148,32 +157,34 @@ export function DropboxAutoSyncHandler() {
 const styles = StyleSheet.create({
   toastContainer: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 56 : 42,
+    top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
+    justifyContent: 'center',
     alignItems: 'center',
     zIndex: 999999,
   },
   toastCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(15, 15, 18, 0.88)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
+    gap: 12,
+    backgroundColor: 'rgba(15, 15, 20, 0.94)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 30,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 16,
   },
   toastText: {
     color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontSize: 17,
+    fontWeight: 'bold',
+    letterSpacing: 0.3,
   },
 });

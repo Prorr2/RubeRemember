@@ -49,6 +49,7 @@ export interface Task extends BaseItem {
   comments: Comment[];
   habit?: boolean; // true when the task is saved as a habit
   habitTime?: string; // HH:MM configurable time shown for the habit
+  completedDates?: string[]; // YYYY-MM-DD dates array when habit/task was completed
   active?: boolean; // true when the task is marked as Active ("Trabajando en este momento")
 
   // Cognitive Engine fields

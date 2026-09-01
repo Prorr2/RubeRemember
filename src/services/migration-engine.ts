@@ -55,6 +55,7 @@ export interface DatabaseV3 {
 }
 
 const V3_DB_KEY = 'rube_v3_database';
+let saveQueue: Promise<void> = Promise.resolve();
 const V2_DB_KEY = 'rube_v2_database';
 
 // Old V1 keys
@@ -285,45 +286,21 @@ export const MigrationEngine = {
   },
 
   async saveDatabase(db: DatabaseV3): Promise<void> {
-    try {
-      db.version = 3; // Always ensure version is correct V3
-      
-      // Preserve properties that might not be in the updated db object
+    db.version = 3; // Always ensure version is correct V3
+    
+    // Add to sequential save queue to eliminate race conditions
+    saveQueue = saveQueue.then(async () => {
       try {
-        const existingRaw = await AsyncStorage.getItem(V3_DB_KEY);
-        if (existingRaw) {
-          const existing = JSON.parse(existingRaw);
-          if (db.activityCategories === undefined && existing.activityCategories !== undefined) {
-            db.activityCategories = existing.activityCategories;
-          }
-          if (db.taskCategories === undefined && existing.taskCategories !== undefined) {
-            db.taskCategories = existing.taskCategories;
-          }
-          if (db.hourWeights === undefined && existing.hourWeights !== undefined) {
-            db.hourWeights = existing.hourWeights;
-          }
-          if (db.sessions === undefined && existing.sessions !== undefined) {
-            db.sessions = existing.sessions;
-          }
-          if (db.recommendations === undefined && existing.recommendations !== undefined) {
-            db.recommendations = existing.recommendations;
-          }
-          if (db.userSettings === undefined && existing.userSettings !== undefined) {
-            db.userSettings = existing.userSettings;
-          }
-          if (db.statistics === undefined && existing.statistics !== undefined) {
-            db.statistics = existing.statistics;
-          }
-        }
-      } catch (err) {
-        console.warn('MigrationEngine: Could not read existing DB for merge', err);
+        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
+      } catch (e) {
+        console.error('MigrationEngine save error:', e);
+        throw e;
       }
+    }).catch((err) => {
+      console.error('MigrationEngine saveQueue error:', err);
+    });
 
-      await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
-    } catch (e) {
-      console.error('MigrationEngine save error:', e);
-      throw e;
-    }
+    return saveQueue;
   },
 
   migrateV2ToV3(v2Db: DatabaseV2): DatabaseV3 {
@@ -392,6 +369,7 @@ export const MigrationEngine = {
         createdAt: r.createdAt || new Date().toISOString(),
         updatedAt: r.createdAt || new Date().toISOString(),
         archived: false,
+        trash: false,
         favourite: r.pinned || false,
         tags: [],
         completed: r.completed || false,

@@ -23,6 +23,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useRememberStore } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { RichText } from '@/components/rich-text';
+import { MaskableTextInput, maskTextContent } from '@/components/maskable-text-input';
 
 export default function ListsScreen() {
   const store = useRememberStore();
@@ -31,6 +32,9 @@ export default function ListsScreen() {
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
   const colors = Colors[scheme];
+
+  // Privacy / Masking state
+  const [isListsMasked, setIsListsMasked] = useState(false);
 
   // List Creation state
   const [newListName, setNewListName] = useState('');
@@ -48,21 +52,21 @@ export default function ListsScreen() {
   const [editingItemImages, setEditingItemImages] = useState<string[]>([]);
   const [editingItemTitle, setEditingItemTitle] = useState('');
 
-  const prepareForEdit = (item: ListItem) => {
+  const prepareForEdit = (item: any) => {
     if (!item) return { cleanText: '', images: [] };
     const images: string[] = [];
     if (item.imageUri) {
       images.push(item.imageUri);
     }
     if (item.images && item.images.length > 0) {
-      item.images.forEach(img => {
+      item.images.forEach((img: string) => {
         if (!images.includes(img)) images.push(img);
       });
     }
     const fullText = item.text || '';
     const lines = fullText.split('\n');
     const textLines: string[] = [];
-    lines.forEach((line) => {
+    lines.forEach((line: string) => {
       const trimmed = line.trim();
       if (trimmed.startsWith('data:image/') && trimmed.includes(';base64,')) {
         if (!images.includes(trimmed)) images.push(trimmed);
@@ -358,7 +362,20 @@ export default function ListsScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Listas</Text>
-        <View style={{ width: 32 }} />
+        <Pressable
+          onPress={() => setIsListsMasked(!isListsMasked)}
+          style={{
+            padding: 6,
+            borderRadius: 20,
+            backgroundColor: isListsMasked ? 'rgba(255, 149, 0, 0.2)' : colors.backgroundSelected,
+          }}
+        >
+          <Ionicons
+            name={isListsMasked ? 'eye-off-outline' : 'eye-outline'}
+            size={22}
+            color={isListsMasked ? '#FF9500' : colors.text}
+          />
+        </Pressable>
       </View>
 
       <KeyboardAvoidingView
@@ -377,7 +394,8 @@ export default function ListsScreen() {
           <View style={[styles.creatorCard, { backgroundColor: colors.backgroundElement }]}>
             <Text style={[styles.creatorTitle, { color: colors.text }]}>Crear nueva lista</Text>
             <View style={styles.creatorInputRow}>
-              <TextInput
+              <MaskableTextInput
+                isMasked={isListsMasked}
                 placeholder="Nombre de la lista (ej. Compra IKEA, Libros)"
                 placeholderTextColor={colors.textSecondary + '80'}
                 value={newListName}
@@ -422,7 +440,8 @@ export default function ListsScreen() {
                         color={colors.textSecondary}
                       />
                       {isEditingThisList ? (
-                        <TextInput
+                        <MaskableTextInput
+                          isMasked={isListsMasked}
                           value={editingListName}
                           onChangeText={setEditingListName}
                           autoFocus
@@ -430,7 +449,9 @@ export default function ListsScreen() {
                           style={[styles.editListInput, { color: colors.text, textAlignVertical: 'top' }]}
                         />
                       ) : (
-                        <Text style={[styles.listTitle, { color: colors.text }]}>{list.name}</Text>
+                        <Text style={[styles.listTitle, { color: colors.text }]}>
+                          {isListsMasked ? maskTextContent(list.name) : list.name}
+                        </Text>
                       )}
                     </Pressable>
 
@@ -505,7 +526,8 @@ export default function ListsScreen() {
 
                             {isEditingThisItem ? (
                               <View style={{ flex: 1, gap: 4 }}>
-                                <TextInput
+                                <MaskableTextInput
+                                  isMasked={isListsMasked}
                                   value={editingItemTitle}
                                   onChangeText={setEditingItemTitle}
                                   placeholder="Título (opcional)..."
@@ -523,7 +545,8 @@ export default function ListsScreen() {
                                   ]}
                                 />
                                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-                                  <TextInput
+                                  <MaskableTextInput
+                                    isMasked={isListsMasked}
                                     value={editingItemText}
                                     onChangeText={setEditingItemText}
                                     autoFocus
@@ -590,13 +613,14 @@ export default function ListsScreen() {
                                         item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
                                       ]}
                                     >
-                                      {item.title}
+                                      {isListsMasked ? maskTextContent(item.title) : item.title}
                                     </Text>
                                   ) : null}
                                   <RichText
                                     text={item.text}
                                     images={item.images}
                                     colors={colors}
+                                    isMasked={isListsMasked}
                                     textStyle={[
                                       styles.itemText,
                                       { color: colors.text },
@@ -695,7 +719,8 @@ export default function ListsScreen() {
                                       color={colors.textSecondary}
                                     />
                                     {isEditingThisSublist ? (
-                                      <TextInput
+                                      <MaskableTextInput
+                                        isMasked={isListsMasked}
                                         value={editingListName}
                                         onChangeText={setEditingListName}
                                         autoFocus
@@ -704,7 +729,7 @@ export default function ListsScreen() {
                                       />
                                     ) : (
                                       <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text, flex: 1 }}>
-                                        {sublist.name}
+                                        {isListsMasked ? maskTextContent(sublist.name) : sublist.name}
                                       </Text>
                                     )}
                                   </Pressable>
@@ -778,7 +803,8 @@ export default function ListsScreen() {
 
                                           {isEditingThisItem ? (
                                             <View style={{ flex: 1, gap: 4 }}>
-                                              <TextInput
+                                              <MaskableTextInput
+                                                isMasked={isListsMasked}
                                                 value={editingItemTitle}
                                                 onChangeText={setEditingItemTitle}
                                                 placeholder="Título (opcional)..."
@@ -796,7 +822,8 @@ export default function ListsScreen() {
                                                 ]}
                                               />
                                               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-                                                <TextInput
+                                                <MaskableTextInput
+                                                  isMasked={isListsMasked}
                                                   value={editingItemText}
                                                   onChangeText={setEditingItemText}
                                                   autoFocus
@@ -862,13 +889,14 @@ export default function ListsScreen() {
                                                       item.completed && { textDecorationLine: 'line-through', opacity: 0.6 }
                                                     ]}
                                                   >
-                                                    {item.title}
+                                                    {isListsMasked ? maskTextContent(item.title) : item.title}
                                                   </Text>
                                                 ) : null}
                                                 <RichText
                                                   text={item.text}
                                                   images={item.images}
-                                                  colors={colors}
+                                                   colors={colors}
+                                                   isMasked={isListsMasked}
                                                   textStyle={[
                                                     styles.itemText,
                                                     { color: colors.text, fontSize: 13 },
@@ -937,7 +965,8 @@ export default function ListsScreen() {
 
                                     {/* Add sublist item input */}
                                     <View style={[styles.addItemRow, { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
-                                      <TextInput
+                                      <MaskableTextInput
+                                        isMasked={isListsMasked}
                                         placeholder="Título (opcional)..."
                                         placeholderTextColor={colors.textSecondary + '70'}
                                         value={newItemTitles[sublist.id] || ''}
@@ -957,7 +986,8 @@ export default function ListsScreen() {
                                         ]}
                                       />
                                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                        <TextInput
+                                        <MaskableTextInput
+                                          isMasked={isListsMasked}
                                           placeholder="Añadir elemento..."
                                           placeholderTextColor={colors.textSecondary + '80'}
                                           value={newItemTexts[sublist.id] || ''}
@@ -1036,7 +1066,8 @@ export default function ListsScreen() {
                       {/* Add item input inside list */}
                       <View style={[styles.addItemRow, { flexDirection: 'column', alignItems: 'stretch', gap: 6 }]}>
                         <View style={{ flexDirection: 'row', gap: 6 }}>
-                          <TextInput
+                          <MaskableTextInput
+                            isMasked={isListsMasked}
                             placeholder="Título (opcional)..."
                             placeholderTextColor={colors.textSecondary + '70'}
                             value={newItemTitles[list.id] || ''}
@@ -1058,7 +1089,8 @@ export default function ListsScreen() {
                           />
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <TextInput
+                          <MaskableTextInput
+                            isMasked={isListsMasked}
                             placeholder="Añadir elemento..."
                             placeholderTextColor={colors.textSecondary + '80'}
                             value={newItemTexts[list.id] || ''}

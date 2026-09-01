@@ -28,6 +28,8 @@ import { Colors } from '@/constants/theme';
 import { ScoreEngine, getTaskWeightLabel } from '@/engines/ScoreEngine';
 import { RichText } from '@/components/rich-text';
 import { useRecommendationService } from '@/services/RecommendationService';
+import { MaskableTextInput, maskTextContent } from '@/components/maskable-text-input';
+import { HabitCalendar } from '@/components/habit-calendar';
 
 const speak = (text: string) => {
   try {
@@ -121,9 +123,10 @@ interface TaskRoadmapProps {
   colors: any;
   store: any;
   handleAddImage: (onImageSelected: (base64Url: string) => void) => Promise<void>;
+  isMasked?: boolean;
 }
 
-const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAddImage }) => {
+const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAddImage, isMasked = false }) => {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editNotes, setEditNotes] = useState('');
@@ -201,7 +204,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
 
                 {session.title ? (
                   <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700', marginTop: 2 }}>
-                    {session.title}
+                    {isMasked ? maskTextContent(session.title) : session.title}
                   </Text>
                 ) : null}
 
@@ -209,7 +212,8 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                   <View style={{ gap: 8 }}>
                     <View style={{ gap: 3 }}>
                       <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '800' }}>TÍTULO (OPCIONAL)</Text>
-                      <TextInput
+                      <MaskableTextInput
+                        isMasked={isMasked}
                         value={editTitle}
                         onChangeText={setEditTitle}
                         placeholder="Título de la nota..."
@@ -228,7 +232,8 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                     <View style={{ gap: 3 }}>
                       <Text style={{ color: '#34C759', fontSize: 10, fontWeight: '800' }}>¿QUÉ SE HIZO?</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-                        <TextInput
+                        <MaskableTextInput
+                          isMasked={isMasked}
                           value={editNotes}
                           onChangeText={setEditNotes}
                           placeholder="Escribe qué hiciste..."
@@ -293,7 +298,8 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                     <View style={{ gap: 3 }}>
                       <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '800' }}>SIGUIENTE PASO PLANIFICADO</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-                        <TextInput
+                        <MaskableTextInput
+                          isMasked={isMasked}
                           value={editNextStep}
                           onChangeText={setEditNextStep}
                           placeholder="Escribe el siguiente paso..."
@@ -443,6 +449,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                           text={session.notes}
                           images={session.notesImages}
                           colors={colors}
+                          isMasked={isMasked}
                           textStyle={{ color: colors.text, fontSize: 12, lineHeight: 16 }}
                         />
                       ) : (
@@ -463,6 +470,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                             text={session.nextStep}
                             images={session.nextStepImages}
                             colors={colors}
+                            isMasked={isMasked}
                             textStyle={{ color: colors.text, fontSize: 12, lineHeight: 16 }}
                           />
                         ) : (
@@ -623,6 +631,7 @@ export default function TasksScreen() {
   const [habitTimeTask, setHabitTimeTask] = useState<Task | null>(null);
   const [habitTimeHour, setHabitTimeHour] = useState(9);
   const [habitTimeMinute, setHabitTimeMinute] = useState(0);
+  const [expandedHabitCalendarId, setExpandedHabitCalendarId] = useState<string | null>(null);
 
   // Task options and roadmap modal state
   const [selectedTaskOptions, setSelectedTaskOptions] = useState<Task | null>(null);
@@ -716,6 +725,7 @@ export default function TasksScreen() {
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [commentImages, setCommentImages] = useState<Record<string, string[]>>({});
   const [commentTitles, setCommentTitles] = useState<Record<string, string>>({});
+  const [isNotesMasked, setIsNotesMasked] = useState(false);
 
   const activeTasks = useMemo(() => {
     return store.items.filter(
@@ -1122,32 +1132,48 @@ export default function TasksScreen() {
         </View>
       );
     }
-    const isExpanded = expandedTaskId === item.id;
-    const goal = store.goals.find((g) => g.id === item.goalId);
-    const phase = goal?.phases.find((p) => p.id === item.phaseId);
+    const latestItem = (store.items.find((i) => i.id === item.id) as Task) || item;
+    const isExpanded = expandedTaskId === latestItem.id;
+    const goal = store.goals.find((g) => g.id === latestItem.goalId);
+    const phase = goal?.phases.find((p) => p.id === latestItem.phaseId);
+    const isCalendarExpanded = expandedHabitCalendarId === latestItem.id;
 
     const priorityColor =
-      item.priority === Priority.URGENT ? '#C20000' : item.priority === Priority.HIGH ? '#FF3B30' : item.priority === Priority.MEDIUM ? '#FF9500' : '#34C759';
+      latestItem.priority === Priority.URGENT ? '#C20000' : latestItem.priority === Priority.HIGH ? '#FF3B30' : latestItem.priority === Priority.MEDIUM ? '#FF9500' : '#34C759';
 
-    const isSelected = selectedIds.includes(item.id);
+    const isSelected = selectedIds.includes(latestItem.id);
+
+    const handleToggleHabitDate = async (dateStr: string) => {
+      const currentTask = (store.items.find((i) => i.id === latestItem.id) as Task) || latestItem;
+      const currentCompleted: string[] = currentTask.completedDates || [];
+      const exists = currentCompleted.includes(dateStr);
+      const updated = exists
+        ? currentCompleted.filter((d: string) => d !== dateStr)
+        : [...currentCompleted, dateStr];
+      await store.updateItem(latestItem.id, { completedDates: updated });
+    };
 
     return (
-      <Pressable
-        onLongPress={() => handleToggleSelect(item.id)}
-        onPress={() => {
-          if (selectedIds.length > 0) {
-            handleToggleSelect(item.id);
-          } else {
-            setSelectedTaskOptions(item);
-          }
-        }}
+      <View
         style={[
           styles.taskCard,
-          { backgroundColor: colors.backgroundElement },
+          { backgroundColor: colors.backgroundElement, flexDirection: 'column' },
           isSelected && { borderColor: '#FF9500', borderWidth: 1.5 },
         ]}
       >
-        <View style={styles.cardMain}>
+        <Pressable
+          onLongPress={() => handleToggleSelect(latestItem.id)}
+          onPress={() => {
+            if (selectedIds.length > 0) {
+              handleToggleSelect(latestItem.id);
+            } else if (latestItem.habit) {
+              setExpandedHabitCalendarId((prev) => (prev === latestItem.id ? null : latestItem.id));
+            } else {
+              setSelectedTaskOptions(latestItem);
+            }
+          }}
+          style={styles.cardMain}
+        >
           {selectedIds.length > 0 ? (
             <View style={styles.checkboxContainer}>
               <Ionicons
@@ -1159,26 +1185,20 @@ export default function TasksScreen() {
           ) : (
             <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 4 }}>
               <Pressable
-                onPress={(e) => {
-                  e.stopPropagation();
-                  handleOpenAlarmDialog(item);
-                }}
+                onPress={() => handleOpenAlarmDialog(latestItem)}
                 style={{ padding: 4 }}
               >
                 <Ionicons name="alarm-outline" size={20} color={colors.textSecondary} />
               </Pressable>
 
               <Pressable
-                onPress={async (e) => {
-                  e.stopPropagation();
-                  await store.toggleItemCompleted(item.id);
-                }}
+                onPress={async () => await store.toggleItemCompleted(latestItem.id)}
                 style={styles.checkboxContainer}
               >
                 <Ionicons
-                  name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                  name={latestItem.completed ? 'checkmark-circle' : 'ellipse-outline'}
                   size={24}
-                  color={item.completed ? '#FF9500' : colors.textSecondary}
+                  color={latestItem.completed ? '#FF9500' : colors.textSecondary}
                 />
               </Pressable>
             </View>
@@ -1190,9 +1210,9 @@ export default function TasksScreen() {
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#FF2D55', marginBottom: 2 }}>
                 {goal.emoji || '🎯'} {goal.title}
               </Text>
-            ) : item.categoryId ? (
+            ) : latestItem.categoryId ? (
               (() => {
-                const cat = store.taskCategories.find((c: any) => c.id === item.categoryId);
+                const cat = store.taskCategories.find((c: any) => c.id === latestItem.categoryId);
                 return cat ? (
                   <Text style={{ fontSize: 11, fontWeight: '700', color: '#34C759', marginBottom: 2 }}>
                     {cat.emoji || '📁'} {cat.name}
@@ -1205,34 +1225,34 @@ export default function TasksScreen() {
               style={[
                 styles.taskTitle,
                 { color: colors.text },
-                item.completed && { textDecorationLine: 'line-through', opacity: 0.6 },
+                latestItem.completed && { textDecorationLine: 'line-through', opacity: 0.6 },
               ]}
             >
-              {item.title}
+              {isNotesMasked ? maskTextContent(latestItem.title) : latestItem.title}
             </Text>
             
             <View style={styles.tagRow}>
               {/* Score */}
               <View style={[styles.metaBadge, { backgroundColor: 'rgba(255, 215, 0, 0.15)' }]}>
                 <Text style={{ color: scheme === 'dark' ? '#FFD700' : '#D4AF37', fontSize: 10, fontWeight: '800' }}>
-                  ⭐ Score: {ScoreEngine.calculateScore(item, store.hourWeights, store.userSettings?.scoreFormula)}
+                  ⭐ Score: {ScoreEngine.calculateScore(latestItem, store.hourWeights, store.userSettings?.scoreFormula)}
                 </Text>
               </View>
 
               {/* Date Badge */}
-              {renderDateBadge(item)}
+              {renderDateBadge(latestItem)}
 
               {/* Hours & Weight */}
-              {item.estimatedHours ? (
+              {latestItem.estimatedHours ? (
                 <>
                   <View style={[styles.metaBadge, { backgroundColor: colors.backgroundSelected }]}>
                     <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>
-                      ⌛ {item.estimatedHours}h
+                      ⌛ {latestItem.estimatedHours}h
                     </Text>
                   </View>
                   {(() => {
                     const sortedWeights = [...(store.hourWeights || [])].sort((a, b) => b.minHours - a.minHours);
-                    const matched = sortedWeights.find((w) => item.estimatedHours! >= w.minHours);
+                    const matched = sortedWeights.find((w) => latestItem.estimatedHours! >= w.minHours);
                     const label = matched ? matched.name : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].name : null);
                     if (!label) return null;
                     return (
@@ -1248,13 +1268,13 @@ export default function TasksScreen() {
             </View>
             
             <EditableProgressBar
-              task={item}
+              task={latestItem}
               colors={colors}
               hourWeights={store.hourWeights || []}
               onUpdate={async (newProgress) => {
-                await store.updateItems([item.id], {
+                await store.updateItems([latestItem.id], {
                   progress: newProgress,
-                  taskState: newProgress === 100 ? TaskState.COMPLETED : item.taskState
+                  taskState: newProgress === 100 ? TaskState.COMPLETED : latestItem.taskState
                 });
               }}
             />
@@ -1264,100 +1284,140 @@ export default function TasksScreen() {
             {selectedIds.length === 0 && (
               <>
                 <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    router.push({ pathname: '/editor', params: { id: item.id } });
-                  }}
+                  onPress={() => router.push({ pathname: '/editor', params: { id: latestItem.id } })}
                   style={styles.actionBtn}
                 >
                   <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
                 </Pressable>
 
                 <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    setShowProgressRoadmap(item);
-                  }}
+                  onPress={() => setShowProgressRoadmap(latestItem)}
                   style={styles.actionBtn}
                 >
                   <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
                 </Pressable>
 
                 <Pressable
-                  onPress={async (e) => {
-                    e.stopPropagation();
-                    await handleToggleHabit(item);
-                  }}
+                  onPress={async () => await handleToggleHabit(latestItem)}
                   style={styles.actionBtn}
                 >
-                  <Ionicons name={item.habit ? 'pin' : 'pin-outline'} size={20} color={item.habit ? '#FF9500' : colors.textSecondary} />
+                  <Ionicons name={latestItem.habit ? 'pin' : 'pin-outline'} size={20} color={latestItem.habit ? '#FF9500' : colors.textSecondary} />
                 </Pressable>
 
                 <Pressable
-                  onPress={async (e) => {
-                    e.stopPropagation();
-                    await handleToggleActive(item);
-                  }}
+                  onPress={async () => await handleToggleActive(latestItem)}
                   style={styles.actionBtn}
                 >
-                  <Ionicons name={item.active ? 'flash' : 'flash-outline'} size={20} color={item.active ? '#34C759' : colors.textSecondary} />
+                  <Ionicons name={latestItem.active ? 'flash' : 'flash-outline'} size={20} color={latestItem.active ? '#34C759' : colors.textSecondary} />
                 </Pressable>
               </>
             )}
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+
+        {latestItem.habit && isCalendarExpanded && (
+          <HabitCalendar
+            completedDates={latestItem.completedDates || []}
+            onToggleDate={handleToggleHabitDate}
+            colors={colors}
+          />
+        )}
+      </View>
     );
   };
 
   const renderHabitItem = ({ item }: { item: any }) => {
-    const isSelected = selectedIds.includes(item.id);
-    const habitTime = item.habitTime || '09:00';
+    if (item.isHeader) {
+      return (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 16, marginBottom: 8, gap: 8 }}>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textSecondary, letterSpacing: 0.5 }}>
+            {item.title}
+          </Text>
+          <View style={{ flex: 1, height: 1, backgroundColor: colors.backgroundSelected, opacity: 0.5 }} />
+        </View>
+      );
+    }
+
+    const latestItem = (store.items.find((i) => i.id === item.id) as Task) || item;
+    const isSelected = selectedIds.includes(latestItem.id);
+    const isCalendarExpanded = expandedHabitCalendarId === latestItem.id;
+    const habitTime = latestItem.habitTime || '09:00';
+
+    const handleToggleHabitDate = async (dateStr: string) => {
+      const currentTask = (store.items.find((i) => i.id === latestItem.id) as Task) || latestItem;
+      const currentCompleted: string[] = currentTask.completedDates || [];
+      const exists = currentCompleted.includes(dateStr);
+      const updated = exists
+        ? currentCompleted.filter((d: string) => d !== dateStr)
+        : [...currentCompleted, dateStr];
+      await store.updateItem(latestItem.id, { completedDates: updated });
+    };
+
     return (
-      <Pressable
-        onLongPress={() => handleToggleSelect(item.id)}
-        onPress={() => {
-          if (selectedIds.length > 0) {
-            handleToggleSelect(item.id);
-          }
-        }}
+      <View
         style={[
           styles.taskCard,
-          { backgroundColor: colors.backgroundElement },
+          { backgroundColor: colors.backgroundElement, flexDirection: 'column' },
           isSelected && { borderColor: '#FF9500', borderWidth: 1.5 },
         ]}
       >
-        <View style={styles.cardMain}>
+        <Pressable
+          onLongPress={() => handleToggleSelect(latestItem.id)}
+          onPress={() => {
+            if (selectedIds.length > 0) {
+              handleToggleSelect(latestItem.id);
+            } else {
+              setExpandedHabitCalendarId((prev) => (prev === latestItem.id ? null : latestItem.id));
+            }
+          }}
+          style={styles.cardMain}
+        >
           <View style={{ flex: 1, marginHorizontal: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Ionicons name="pin" size={14} color="#FF9500" />
-              <Text style={[styles.taskTitle, { color: colors.text, marginBottom: 0 }]}>{item.title}</Text>
-              {item.favourite && <Ionicons name="star" size={14} color="#FFCC00" />}
+              <Text style={[styles.taskTitle, { color: colors.text, marginBottom: 0 }]}>
+                {isNotesMasked ? maskTextContent(latestItem.title) : latestItem.title}
+              </Text>
+              {latestItem.favourite && <Ionicons name="star" size={14} color="#FFCC00" />}
             </View>
 
-            {item.description ? (
+            {latestItem.description ? (
               <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }} numberOfLines={2}>
-                {item.description}
+                {isNotesMasked ? maskTextContent(latestItem.description) : latestItem.description}
               </Text>
             ) : null}
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               {/* Visible and configurable time */}
               <Pressable
-                onPress={() => handleOpenHabitTime(item)}
+                onPress={() => handleOpenHabitTime(latestItem)}
                 style={[styles.utilityBtn, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}
               >
-                <Ionicons name="time-outline" size={16} color="#FF9500" />
+                <Ionicons name="time-outline" size={14} color="#FF9500" />
                 <Text style={[styles.utilityBtnText, { color: '#FF9500' }]}>{habitTime}</Text>
               </Pressable>
 
               {/* Schedule system alarm for today */}
               <Pressable
-                onPress={() => handleOpenHabitAlarmDialog(item)}
+                onPress={() => handleOpenHabitAlarmDialog(latestItem)}
                 style={[styles.utilityBtn, { backgroundColor: 'rgba(255, 59, 48, 0.1)' }]}
               >
-                <Ionicons name="alarm-outline" size={16} color="#FF3B30" />
-                <Text style={[styles.utilityBtnText, { color: '#FF3B30' }]}>Configurar Alarma</Text>
+                <Ionicons name="alarm-outline" size={14} color="#FF3B30" />
+                <Text style={[styles.utilityBtnText, { color: '#FF3B30' }]}>Alarma</Text>
+              </Pressable>
+
+              {/* Toggle Habit Calendar Button */}
+              <Pressable
+                onPress={() => setExpandedHabitCalendarId((prev) => (prev === latestItem.id ? null : latestItem.id))}
+                style={[
+                  styles.utilityBtn,
+                  { backgroundColor: isCalendarExpanded ? 'rgba(52, 199, 89, 0.25)' : 'rgba(52, 199, 89, 0.12)' },
+                ]}
+              >
+                <Ionicons name={isCalendarExpanded ? 'calendar' : 'calendar-outline'} size={14} color="#34C759" />
+                <Text style={[styles.utilityBtnText, { color: '#34C759', fontWeight: isCalendarExpanded ? '700' : '400' }]}>
+                  {isCalendarExpanded ? 'Ocultar Calendario' : 'Calendario'}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -1366,19 +1426,13 @@ export default function TasksScreen() {
             {selectedIds.length === 0 && (
               <>
                 <Pressable
-                  onPress={async (e) => {
-                    e.stopPropagation();
-                    await handleToggleHabit(item);
-                  }}
+                  onPress={async () => await handleToggleHabit(latestItem)}
                   style={styles.actionBtn}
                 >
                   <Ionicons name="pin" size={20} color="#FF9500" />
                 </Pressable>
                 <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    router.push({ pathname: '/editor', params: { id: item.id } });
-                  }}
+                  onPress={() => router.push({ pathname: '/editor', params: { id: latestItem.id } })}
                   style={styles.actionBtn}
                 >
                   <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
@@ -1386,8 +1440,17 @@ export default function TasksScreen() {
               </>
             )}
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+
+        {/* Render compact calendar ONLY when card is clicked/expanded */}
+        {isCalendarExpanded && (
+          <HabitCalendar
+            completedDates={latestItem.completedDates || []}
+            onToggleDate={handleToggleHabitDate}
+            colors={colors}
+          />
+        )}
+      </View>
     );
   };
 
@@ -1849,7 +1912,7 @@ export default function TasksScreen() {
           data={tasksList}
           renderItem={taskStatusFilter === 'HABITS' ? renderHabitItem : renderTaskItem}
           keyExtractor={(item) => item.isHeader ? (item.id || ('header-' + item.title)) : item.id}
-          extraData={[selectedIds, store.userSettings, alarmTask, activeTasks]}
+          extraData={[selectedIds, store.items, expandedHabitCalendarId, isNotesMasked, store.userSettings, alarmTask, activeTasks]}
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
             activeTasks.length > 0 && taskStatusFilter === 'PENDING' ? (
@@ -2295,6 +2358,22 @@ export default function TasksScreen() {
               </View>
 
               <Pressable
+                onPress={() => setIsNotesMasked(!isNotesMasked)}
+                style={{
+                  padding: 8,
+                  borderRadius: 20,
+                  backgroundColor: isNotesMasked ? 'rgba(255, 149, 0, 0.2)' : colors.backgroundSelected,
+                  marginRight: 6
+                }}
+              >
+                <Ionicons
+                  name={isNotesMasked ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color={isNotesMasked ? '#FF9500' : colors.text}
+                />
+              </Pressable>
+
+              <Pressable
                 onPress={() => setShowProgressRoadmap(null)}
                 style={{
                   padding: 8,
@@ -2327,6 +2406,7 @@ export default function TasksScreen() {
                       text={currentRoadmapTask.description}
                       images={currentRoadmapTask.images}
                       colors={colors}
+                      isMasked={isNotesMasked}
                       textStyle={{ color: colors.text, fontSize: 14 }}
                     />
                   </View>
@@ -2388,6 +2468,7 @@ export default function TasksScreen() {
                     colors={colors}
                     store={store}
                     handleAddImage={handleAddImage}
+                    isMasked={isNotesMasked}
                   />
                 </View>
 
@@ -2410,6 +2491,7 @@ export default function TasksScreen() {
                             text={comment.text}
                             images={comment.images}
                             colors={colors}
+                            isMasked={isNotesMasked}
                             textStyle={{ color: colors.text, fontSize: 13 }}
                           />
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, alignItems: 'center' }}>
@@ -2439,7 +2521,8 @@ export default function TasksScreen() {
                   Nueva Nota de Tarea
                 </Text>
 
-                <TextInput
+                <MaskableTextInput
+                  isMasked={isNotesMasked}
                   placeholder="Título de la nota (opcional)..."
                   placeholderTextColor={colors.textSecondary + '70'}
                   value={commentTitles[currentRoadmapTask.id] || ''}
@@ -2456,7 +2539,8 @@ export default function TasksScreen() {
                 />
 
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <TextInput
+                  <MaskableTextInput
+                    isMasked={isNotesMasked}
                     placeholder="Escribe una nota sobre esta tarea..."
                     placeholderTextColor={colors.textSecondary + '80'}
                     value={commentInputs[currentRoadmapTask.id] || ''}

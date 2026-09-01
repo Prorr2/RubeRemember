@@ -169,6 +169,8 @@ function ZoomableImage({ uri, onClose }: ZoomableImageProps) {
 
 
 
+import { maskTextContent } from '@/components/maskable-text-input';
+
 interface RichTextProps {
   text?: string;
   images?: string[];
@@ -181,6 +183,7 @@ interface RichTextProps {
   linkStyle?: StyleProp<TextStyle>;
   imageStyle?: StyleProp<ViewStyle>;
   containerStyle?: StyleProp<ViewStyle>;
+  isMasked?: boolean;
 }
 
 export function RichText({
@@ -191,10 +194,12 @@ export function RichText({
   linkStyle,
   imageStyle,
   containerStyle,
+  isMasked = false,
 }: RichTextProps) {
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
-  const hasText = typeof text === 'string' && text.trim().length > 0;
+  const processedText = isMasked && text ? maskTextContent(text) : text;
+  const hasText = typeof processedText === 'string' && processedText.trim().length > 0;
   const hasImages = images && images.length > 0;
 
   if (!hasText && !hasImages) return null;
@@ -208,7 +213,7 @@ export function RichText({
   }> = [];
 
   if (hasText) {
-    const lines = text!.split('\n');
+    const lines = processedText!.split('\n');
     let currentTextParts: Array<{ type: 'text' | 'link'; text: string; url?: string }> = [];
 
     const flushText = () => {

@@ -50,6 +50,7 @@ export interface UserSettings {
   dropboxFileName?: string;
   hasLocalChanges?: boolean;
   dropboxSyncCooldownMinutes?: number;
+  lastDropboxSlotIndex?: number;
 }
 
 export const DEFAULT_VOICE_KEYWORDS: VoiceKeywords = {
@@ -91,6 +92,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   dropboxFileName: 'rube_remember_backup.json',
   hasLocalChanges: false,
   dropboxSyncCooldownMinutes: 10,
+  lastDropboxSlotIndex: 1,
 };
 
 

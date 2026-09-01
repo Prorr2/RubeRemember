@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Platform, Alert, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as IntentLauncher from 'expo-intent-launcher';
@@ -487,6 +487,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     loadData();
   }, []);
 
+  const saveTimeoutRef = useRef<any>(null);
+
   // General V3 Database Persist Helper
   const saveDatabaseState = useCallback(async (
     newItems = items,
@@ -498,54 +500,31 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     newSettings = userSettings,
     newStats = statistics,
     currentProximity = proximityDays,
-    currentSeparation = slotSeparationMinutes
+    currentSeparation = slotSeparationMinutes,
+    immediate = false
   ) => {
     try {
-      const adjusted = recalculateTaskSlotTimes(newItems, newSlots, currentSeparation);
-      
-      const dataChanged =
-        JSON.stringify(adjusted) !== JSON.stringify(items) ||
-        JSON.stringify(newGoals) !== JSON.stringify(goals) ||
-        JSON.stringify(newLists) !== JSON.stringify(lists) ||
-        JSON.stringify(newSlots) !== JSON.stringify(timeSlots) ||
-        JSON.stringify(newSessions) !== JSON.stringify(sessions) ||
-        JSON.stringify(newRecs) !== JSON.stringify(recommendations) ||
-        JSON.stringify(newStats) !== JSON.stringify(statistics);
+      const itemsOrSlotsChanged =
+        newItems !== items || newSlots !== timeSlots || currentSeparation !== slotSeparationMinutes;
 
-      const finalHasLocalChanges = (dataChanged || newSettings.hasLocalChanges !== false) ? true : false;
+      const adjusted = itemsOrSlotsChanged
+        ? recalculateTaskSlotTimes(newItems, newSlots, currentSeparation)
+        : newItems;
+
       const settingsToSave: UserSettings = {
         ...newSettings,
-        hasLocalChanges: finalHasLocalChanges,
+        hasLocalChanges: true,
       };
 
-      if (JSON.stringify(adjusted) !== JSON.stringify(items)) {
-        setItems(adjusted);
-      }
-      if (JSON.stringify(newGoals) !== JSON.stringify(goals)) {
-        setGoals(newGoals);
-      }
-      if (JSON.stringify(newLists) !== JSON.stringify(lists)) {
-        setLists(newLists);
-      }
-      if (JSON.stringify(newSlots) !== JSON.stringify(timeSlots)) {
-        setTimeSlots(newSlots);
-      }
-      if (JSON.stringify(newSessions) !== JSON.stringify(sessions)) {
-        setSessions(newSessions);
-      }
-      if (JSON.stringify(newRecs) !== JSON.stringify(recommendations)) {
-        setRecommendations(newRecs);
-      }
-      if (JSON.stringify(settingsToSave) !== JSON.stringify(userSettings)) {
-        console.log('[Store] Updating userSettings state from:', JSON.stringify(userSettings), 'to:', JSON.stringify(settingsToSave));
-        setUserSettings(settingsToSave);
-      } else {
-        console.log('[Store] saveDatabaseState userSettings check skipped (equal stringified settings)');
-      }
-      if (JSON.stringify(newStats) !== JSON.stringify(statistics)) {
-        setStatistics(newStats);
-      }
-      
+      if (adjusted !== items) setItems(adjusted);
+      if (newGoals !== goals) setGoals(newGoals);
+      if (newLists !== lists) setLists(newLists);
+      if (newSlots !== timeSlots) setTimeSlots(newSlots);
+      if (newSessions !== sessions) setSessions(newSessions);
+      if (newRecs !== recommendations) setRecommendations(newRecs);
+      if (settingsToSave !== userSettings) setUserSettings(settingsToSave);
+      if (newStats !== statistics) setStatistics(newStats);
+
       const db: DatabaseV3 = {
         version: 3,
         items: adjusted,
@@ -561,7 +540,25 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           slotSeparationMinutes: currentSeparation,
         },
       };
-      await MigrationEngine.saveDatabase(db);
+
+      const executeSave = () => {
+        MigrationEngine.saveDatabase(db).catch((e) =>
+          console.error('Error saving database state:', e)
+        );
+      };
+
+      if (immediate) {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+          saveTimeoutRef.current = null;
+        }
+        await MigrationEngine.saveDatabase(db);
+      } else {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+        }
+        saveTimeoutRef.current = setTimeout(executeSave, 300);
+      }
     } catch (e) {
       console.error('Error saving database state:', e);
     }
@@ -1459,8 +1456,13 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       if (importedDb.userSettings) {
         finalUserSettings = {
           ...importedDb.userSettings,
-          // Preserve local dropboxAccessToken if the imported one is empty
-          dropboxAccessToken: importedDb.userSettings.dropboxAccessToken || userSettings.dropboxAccessToken || '',
+          // Preserve local dropboxAccessToken and local sync rotation state
+          dropboxAccessToken: userSettings.dropboxAccessToken || importedDb.userSettings.dropboxAccessToken || '',
+          dropboxAutoUploadEnabled: userSettings.dropboxAutoUploadEnabled ?? importedDb.userSettings.dropboxAutoUploadEnabled,
+          lastDropboxUploadTimestamp: userSettings.lastDropboxUploadTimestamp || importedDb.userSettings.lastDropboxUploadTimestamp || 0,
+          lastDropboxUploadStatus: userSettings.lastDropboxUploadStatus || importedDb.userSettings.lastDropboxUploadStatus || '',
+          lastDropboxSlotIndex: userSettings.lastDropboxSlotIndex || importedDb.userSettings.lastDropboxSlotIndex || 1,
+          dropboxSyncCooldownMinutes: userSettings.dropboxSyncCooldownMinutes ?? importedDb.userSettings.dropboxSyncCooldownMinutes ?? 10,
         };
         setUserSettings(finalUserSettings);
         importedKeys.push('Ajustes de Usuario');

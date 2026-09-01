@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   TextInput,
   ScrollView,
-  Switch,
   Platform,
   AppState,
   AppStateStatus,
@@ -34,7 +33,7 @@ export default function DropboxScreen() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [accountInfo, setAccountInfo] = useState<DropboxAccountInfo | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [downloadingSlot, setDownloadingSlot] = useState<number | null>(null);
   const [currentAppState, setCurrentAppState] = useState<AppStateStatus>(AppState.currentState);
 
   useEffect(() => {
@@ -48,6 +47,7 @@ export default function DropboxScreen() {
 
   const cooldownMinutes = store.userSettings.dropboxSyncCooldownMinutes ?? 10;
   const lastUpload = store.userSettings.lastDropboxUploadTimestamp || 0;
+  const lastSlotIndex = store.userSettings.lastDropboxSlotIndex || 1;
   const timeSinceLastSyncMs = lastUpload > 0 ? Date.now() - lastUpload : 0;
   const timeSinceLastSyncMin = Math.floor(timeSinceLastSyncMs / 1000 / 60);
   const cooldownElapsed = lastUpload === 0 || timeSinceLastSyncMs >= cooldownMinutes * 60 * 1000;
@@ -108,7 +108,7 @@ export default function DropboxScreen() {
 
       if (result.success) {
         if (result.uploaded) {
-          Alert.alert('Subida Completada', 'La base de datos se ha subido exitosamente a Dropbox.');
+          Alert.alert('Subida Completada', `La base de datos se ha subido exitosamente a Dropbox.`);
         } else if (result.reason === 'no_local_changes' || result.reason === 'no_changes') {
           Alert.alert('Sin Cambios Pendientes', 'No hay cambios locales pendientes por subir a Dropbox desde la última sincronización.');
         }
@@ -134,37 +134,40 @@ export default function DropboxScreen() {
     }
   };
 
-  const handleManualDownloadRestore = async () => {
+  const handleRestoreSlot = async (slotNum: number, fileName: string) => {
     if (!store.userSettings.dropboxAccessToken) {
       Alert.alert('Configuración Requerida', 'Por favor guarda tu token de acceso a Dropbox antes de descargar.');
       return;
     }
 
-    setDownloading(true);
+    setDownloadingSlot(slotNum);
     try {
-      const fileName = store.userSettings.dropboxFileName || 'rube_remember_backup.json';
       const remoteContent = await DropboxService.downloadBackup(store.userSettings.dropboxAccessToken, fileName);
+      setDownloadingSlot(null);
 
-      setDownloading(false);
       if (!remoteContent) {
-        Alert.alert('No Encontrado', `No se encontró el archivo ${fileName} en tu Dropbox.`);
+        Alert.alert(
+          'Archivo No Encontrado',
+          `No se encontró el archivo "${fileName}" (Archivo #${slotNum}) en tu Dropbox. Es posible que aún no se haya realizado una subida a este slot.`
+        );
         return;
       }
 
       Alert.alert(
-        'Confirmar Restauración',
-        '¿Deseas restaurar la base de datos guardada en Dropbox? Esto sobrescribirá todos tus datos actuales de RubeRemember.',
+        `Restaurar desde Archivo #${slotNum}`,
+        `¿Deseas restaurar la base de datos desde "${fileName}"?\n\nEsta acción sobrescribirá todos tus datos actuales de RubeRemember con la copia de este respaldo.`,
         [
           { text: 'Cancelar', style: 'cancel' },
           {
             text: 'Restaurar y Sobrescribir',
             style: 'destructive',
             onPress: async () => {
-              setDownloading(true);
+              setDownloadingSlot(slotNum);
               const resultObj = await store.importBackupData(remoteContent);
-              setDownloading(false);
+              setDownloadingSlot(null);
+
               if (resultObj.success) {
-                Alert.alert('Éxito', 'La base de datos ha sido restaurada exitosamente desde Dropbox.', [
+                Alert.alert('Éxito', `La base de datos se ha restaurado correctamente desde el Archivo #${slotNum}.`, [
                   { text: 'OK', onPress: () => router.back() }
                 ]);
               } else {
@@ -176,7 +179,7 @@ export default function DropboxScreen() {
         ]
       );
     } catch (e: any) {
-      setDownloading(false);
+      setDownloadingSlot(null);
       Alert.alert('Error al Descargar', e.message || String(e));
     }
   };
@@ -186,6 +189,23 @@ export default function DropboxScreen() {
       ' ' +
       new Date(store.userSettings.lastDropboxUploadTimestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
     : 'Nunca';
+
+  // Build 7 slots array ordered from most recent to oldest
+  const slotsList = Array.from({ length: 7 }, (_, idx) => {
+    const slotNum = idx + 1; // 1..7
+    const cyclesAgo = (lastSlotIndex - slotNum + 7) % 7;
+    const estimatedAgeMinutes = cyclesAgo * cooldownMinutes;
+    const fileName = DropboxService.getSlotFileName(store.userSettings.dropboxFileName, slotNum);
+    return {
+      slotNum,
+      cyclesAgo,
+      estimatedAgeMinutes,
+      fileName,
+      isLatest: cyclesAgo === 0 && lastUpload > 0,
+    };
+  }).sort((a, b) => a.cyclesAgo - b.cyclesAgo);
+
+  const isAutoUploadActive = store.userSettings.dropboxAutoUploadEnabled !== false;
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -209,7 +229,7 @@ export default function DropboxScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>Token de Acceso de Dropbox</Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                  Necesario para subir respaldos a tu cuenta
+                  Necesario para subir respaldos rotatorios a tu cuenta
                 </Text>
               </View>
             </View>
@@ -272,23 +292,50 @@ export default function DropboxScreen() {
               </View>
             )}
 
-            {/* Switch: Auto Upload Enabled */}
-            <View style={styles.switchRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.switchLabel, { color: colors.text }]}>Auto-subida a Dropbox</Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                  Cada 30 seg en primer plano comprueba si pasaron &gt; 10 min y si hay cambios
-                </Text>
-              </View>
-              <Switch
-                value={store.userSettings.dropboxAutoUploadEnabled !== false}
-                onValueChange={async (val) => {
-                  await store.updateUserSettings({ dropboxAutoUploadEnabled: val });
+            {/* Emergency Stop / Re-enable Button */}
+            {isAutoUploadActive ? (
+              <Pressable
+                onPress={async () => {
+                  await store.updateUserSettings({ dropboxAutoUploadEnabled: false });
+                  Alert.alert(
+                    '🛑 AUTO-SUBIDA PAUSADA (EMERGENCIA)',
+                    'Se ha detenido la auto-subida a Dropbox en caso de emergencia para proteger los 7 archivos de respaldo en la nube.'
+                  );
                 }}
-                trackColor={{ false: colors.backgroundSelected, true: '#34C759' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
+                style={styles.emergencyStopBtn}
+              >
+                <Ionicons name="stop-circle" size={26} color="#FF3B30" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.emergencyStopText}>
+                    PARAR AUTO-SUBIDA (EMERGENCIA)
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                    Pulsa para detener inmediatamente la auto-subida y proteger las copias en la nube.
+                  </Text>
+                </View>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={async () => {
+                  await store.updateUserSettings({ dropboxAutoUploadEnabled: true });
+                  Alert.alert(
+                    '▶️ AUTO-SUBIDA REANUDADA',
+                    'La sincronización automática rotatoria de 7 archivos se ha vuelto a activar.'
+                  );
+                }}
+                style={styles.reEnableBtn}
+              >
+                <Ionicons name="play-circle" size={26} color="#34C759" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.reEnableText}>
+                    REANUDAR AUTO-SUBIDA AUTOMÁTICA
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                    La auto-subida está en PAUSA. Pulsa para reactivar la sincronización rotatoria.
+                  </Text>
+                </View>
+              </Pressable>
+            )}
           </View>
         </View>
 
@@ -327,12 +374,17 @@ export default function DropboxScreen() {
                 <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                   {activeTasksCount > 0
                     ? 'Condición de seguridad cumplida (Tareas > 0). Listo para sincronizar.'
-                    : 'La base de datos no contiene tareas. Se ha bloqueado la subida automática a Dropbox para evitar borrar la copia en la nube.'}
+                    : 'La base de datos no contiene tareas. Se ha bloqueado la subida automática a Dropbox.'}
                 </Text>
               </View>
             </View>
 
-
+            <View style={styles.infoRow}>
+              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Rotación de Archivos (1..7):</Text>
+              <Text style={{ color: '#0061FF', fontSize: 13, fontWeight: '700' }}>
+                Archivo #{lastSlotIndex} de 7
+              </Text>
+            </View>
 
             <View style={styles.infoRow}>
               <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Cambios Locales Pendientes:</Text>
@@ -363,17 +415,95 @@ export default function DropboxScreen() {
           </View>
         </View>
 
-        {/* Section 3: DEBUG & CONTROL VARIABLES PANEL */}
+        {/* Section 3: RESTAURACIÓN ROTATORIA DE 7 ARCHIVOS */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>RESTAURAR DESDE DROPBOX (7 RESPALDOS)</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+            Selecciona cuál de los 7 archivos rotatorios deseas restaurar en tu dispositivo:
+          </Text>
+
+          <View style={{ gap: 10 }}>
+            {slotsList.map((item) => (
+              <View
+                key={item.slotNum}
+                style={[
+                  styles.slotCard,
+                  {
+                    backgroundColor: colors.backgroundElement,
+                    borderColor: item.isLatest ? '#34C759' : colors.backgroundSelected,
+                    borderWidth: item.isLatest ? 1.5 : 1,
+                  },
+                ]}
+              >
+                {/* Header Row: Title & Badge */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <Text style={[styles.slotNumText, { color: colors.text }]}>
+                    Archivo #{item.slotNum}
+                  </Text>
+                  {item.isLatest ? (
+                    <View style={[styles.ageBadge, { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderColor: '#34C759' }]}>
+                      <Ionicons name="checkmark-circle" size={12} color="#34C759" />
+                      <Text style={[styles.ageBadgeText, { color: '#34C759' }]}>Más reciente</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.ageBadge, { backgroundColor: 'rgba(255, 149, 0, 0.12)', borderColor: '#FF9500' }]}>
+                      <Ionicons name="time-outline" size={12} color="#FF9500" />
+                      <Text style={[styles.ageBadgeText, { color: '#FF9500' }]}>
+                        Hace {item.cyclesAgo} ciclo(s) (~{item.estimatedAgeMinutes} min)
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Bottom Row: Filename & Restore Action */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', flex: 1 }} numberOfLines={1}>
+                    {item.fileName}
+                  </Text>
+
+                  <Pressable
+                    onPress={() => handleRestoreSlot(item.slotNum, item.fileName)}
+                    disabled={downloadingSlot !== null}
+                    style={[
+                      styles.restoreBtn,
+                      { backgroundColor: item.isLatest ? '#0061FF' : colors.backgroundSelected },
+                    ]}
+                  >
+                    {downloadingSlot === item.slotNum ? (
+                      <ActivityIndicator size="small" color="#FFF" />
+                    ) : (
+                      <>
+                        <Ionicons name="cloud-download-outline" size={15} color={item.isLatest ? '#FFF' : colors.text} />
+                        <Text style={[styles.restoreBtnText, { color: item.isLatest ? '#FFF' : colors.text }]}>
+                          Restaurar
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* Section 4: DEBUG & CONTROL PANEL */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: '#FF9500' }]}>DEPURACIÓN Y VARIABLES DE CONTROL</Text>
 
           <View style={[styles.card, { backgroundColor: colors.backgroundElement, borderLeftWidth: 3, borderLeftColor: '#FF9500' }]}>
             <View style={styles.cardHeader}>
               <Ionicons name="bug-outline" size={24} color="#FF9500" />
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Variables del Proceso de Subida</Text>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Variables del Proceso Rotatorio</Text>
             </View>
 
             <View style={styles.debugGrid}>
+              <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
+                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>lastDropboxSlotIndex</Text>
+                <Text style={[styles.debugVal, { color: '#0061FF' }]}>
+                  Archivo #{lastSlotIndex} / 7
+                </Text>
+              </View>
+
               <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>hasLocalChanges</Text>
                 <Text style={[styles.debugVal, { color: store.userSettings.hasLocalChanges ? '#FF9500' : '#34C759' }]}>
@@ -390,24 +520,8 @@ export default function DropboxScreen() {
 
               <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>dropboxAutoUploadEnabled</Text>
-                <Text style={[styles.debugVal, { color: store.userSettings.dropboxAutoUploadEnabled !== false ? '#34C759' : '#FF3B30' }]}>
-                  {String(store.userSettings.dropboxAutoUploadEnabled !== false)}
-                </Text>
-              </View>
-
-              <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
-                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>dropboxAccessToken</Text>
-                <Text style={[styles.debugVal, { color: colors.text }]}>
-                  {store.userSettings.dropboxAccessToken
-                    ? `Configurado (${store.userSettings.dropboxAccessToken.length} chars)`
-                    : 'Vacío'}
-                </Text>
-              </View>
-
-              <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
-                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>lastDropboxUploadTimestamp</Text>
-                <Text style={[styles.debugVal, { color: colors.text }]}>
-                  {store.userSettings.lastDropboxUploadTimestamp || 0}
+                <Text style={[styles.debugVal, { color: isAutoUploadActive ? '#34C759' : '#FF3B30' }]}>
+                  {String(isAutoUploadActive)}
                 </Text>
               </View>
 
@@ -422,13 +536,6 @@ export default function DropboxScreen() {
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>Condición &gt; {cooldownMinutes} min</Text>
                 <Text style={[styles.debugVal, { color: cooldownElapsed ? '#34C759' : '#FF9500' }]}>
                   {String(cooldownElapsed)}
-                </Text>
-              </View>
-
-              <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
-                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>dropboxFileName</Text>
-                <Text style={[styles.debugVal, { color: colors.text }]}>
-                  {store.userSettings.dropboxFileName || 'rube_remember_backup.json'}
                 </Text>
               </View>
 
@@ -449,7 +556,7 @@ export default function DropboxScreen() {
               <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>Intervalo temporizador</Text>
                 <Text style={[styles.debugVal, { color: colors.text }]}>
-                  Cada 30 seg (30.000 ms)
+                  Cada 1 min (60.000 ms)
                 </Text>
               </View>
             </View>
@@ -524,15 +631,14 @@ export default function DropboxScreen() {
           </View>
         </View>
 
-        {/* Section 4: Manual Sync Actions */}
+        {/* Section 5: MANUAL FORCE UPLOAD BUTTON */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>ACCIONES MANUALES</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>SUBIDA MANUAL DE EMERGENCIA</Text>
 
           <View style={styles.actionsContainer}>
-            {/* Upload Button */}
             <Pressable
               onPress={handleManualUpload}
-              disabled={uploading || downloading}
+              disabled={uploading || downloadingSlot !== null}
               style={[styles.actionBtn, { backgroundColor: '#0061FF' }]}
             >
               {uploading ? (
@@ -540,26 +646,7 @@ export default function DropboxScreen() {
               ) : (
                 <>
                   <Ionicons name="cloud-upload-outline" size={20} color="#FFF" />
-                  <Text style={styles.actionBtnText}>Subir a Dropbox Ahora</Text>
-                </>
-              )}
-            </Pressable>
-
-            {/* Download Button */}
-            <Pressable
-              onPress={handleManualDownloadRestore}
-              disabled={uploading || downloading}
-              style={[
-                styles.actionBtn,
-                { backgroundColor: colors.backgroundElement, borderWidth: 1, borderColor: '#0061FF' },
-              ]}
-            >
-              {downloading ? (
-                <ActivityIndicator size="small" color="#0061FF" />
-              ) : (
-                <>
-                  <Ionicons name="cloud-download-outline" size={20} color="#0061FF" />
-                  <Text style={[styles.actionBtnText, { color: '#0061FF' }]}>Restaurar desde Dropbox</Text>
+                  <Text style={styles.actionBtnText}>Forzar Subida Manual Ahora</Text>
                 </>
               )}
             </Pressable>
@@ -571,12 +658,10 @@ export default function DropboxScreen() {
           <Ionicons name="information-circle-outline" size={22} color="#0061FF" />
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: 'bold' }}>
-              ¿Cómo obtener tu Token de Dropbox?
+              ¿Cómo funciona el Sistema Rotatorio de 7 Archivos?
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
-              1. Entra a <Text style={{ color: '#0061FF' }}>dropbox.com/developers/apps</Text> y crea una App ("Scoped access", "App folder").{'\n'}
-              2. En la pestaña <Text style={{ fontWeight: 'bold', color: colors.text }}>Permissions</Text>, activa <Text style={{ fontFamily: 'monospace' }}>files.content.write</Text> y <Text style={{ fontFamily: 'monospace' }}>files.content.read</Text>.{'\n'}
-              3. En la pestaña <Text style={{ fontWeight: 'bold', color: colors.text }}>Settings</Text>, haz clic en <Text style={{ fontWeight: 'bold' }}>"Generate access token"</Text> y pégalo arriba.
+              Cada subida automática o manual escribe en el siguiente número de archivo rotatorio (1 ➔ 2 ➔ 3 ... ➔ 7 ➔ 1). Esto garantiza que dispongas siempre de hasta 7 respaldos independientes guardados secuencialmente en Dropbox.
             </Text>
           </View>
         </View>
@@ -677,17 +762,37 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
   },
-  switchRow: {
+  emergencyStopBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 12,
+    backgroundColor: 'rgba(255, 59, 48, 0.15)',
+    borderWidth: 1.5,
+    borderColor: '#FF3B30',
+    padding: 14,
+    borderRadius: 12,
+    marginTop: 4,
   },
-  switchLabel: {
+  emergencyStopText: {
+    color: '#FF3B30',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: 'bold',
+  },
+  reEnableBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(52, 199, 89, 0.15)',
+    borderWidth: 1.5,
+    borderColor: '#34C759',
+    padding: 14,
+    borderRadius: 12,
+    marginTop: 4,
+  },
+  reEnableText: {
+    color: '#34C759',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   safetyBadge: {
     flexDirection: 'row',
@@ -697,12 +802,46 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
   },
-
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
+  },
+  slotCard: {
+    flexDirection: 'column',
+    padding: 14,
+    borderRadius: 12,
+    gap: 6,
+  },
+  slotNumText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  ageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  ageBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  restoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  restoreBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   debugGrid: {
     gap: 8,

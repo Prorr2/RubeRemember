@@ -14,6 +14,15 @@ export interface SyncResult {
 
 export const DropboxService = {
   /**
+   * Generates the filename for a specific slot index (1..7)
+   */
+  getSlotFileName(baseName: string = 'rube_remember_backup.json', slotIndex: number): string {
+    const cleanBase = baseName.replace(/(_\d+)?\.json$/i, '');
+    const validSlot = Math.max(1, Math.min(7, slotIndex));
+    return `${cleanBase}_${validSlot}.json`;
+  },
+
+  /**
    * Get Current Account details from Dropbox API v2
    */
   async getAccountInfo(accessToken: string): Promise<DropboxAccountInfo> {
@@ -48,9 +57,9 @@ export const DropboxService = {
   },
 
   /**
-   * Download remote backup file from Dropbox
+   * Download remote backup file from Dropbox by filename
    */
-  async downloadBackup(accessToken: string, fileName: string = 'rube_remember_backup.json'): Promise<string | null> {
+  async downloadBackup(accessToken: string, fileName: string = 'rube_remember_backup_1.json'): Promise<string | null> {
     if (!accessToken || !accessToken.trim()) {
       throw new Error('El token de acceso a Dropbox está vacío.');
     }
@@ -88,7 +97,7 @@ export const DropboxService = {
   /**
    * Upload JSON backup string to Dropbox
    */
-  async uploadBackup(accessToken: string, contentStr: string, fileName: string = 'rube_remember_backup.json'): Promise<void> {
+  async uploadBackup(accessToken: string, contentStr: string, fileName: string = 'rube_remember_backup_1.json'): Promise<void> {
     if (!accessToken || !accessToken.trim()) {
       throw new Error('El token de acceso a Dropbox está vacío.');
     }
@@ -124,11 +133,7 @@ export const DropboxService = {
   },
 
   /**
-   * Performs automated check & sync if conditions are met:
-   * 1. Access token configured & auto sync enabled
-   * 2. > 10 min since last upload
-   * 3. hasLocalChanges === true (flag indicating local DB was modified since last upload)
-   * 4. Safety check: Total tasks count > 0 (prevents overwriting remote with empty/corrupted DB)
+   * Performs automated check & sync using a rotating 7-file scheme (rube_remember_backup_1..7.json)
    */
   async performAutoSync(params: {
     userSettings: UserSettings;
@@ -184,23 +189,30 @@ export const DropboxService = {
 
     try {
       const localJson = await exportBackupData();
-      const fileName = userSettings.dropboxFileName || 'rube_remember_backup.json';
+
+      // Calculate next slot index in 1..7 rotating scheme
+      const currentSlot = userSettings.lastDropboxSlotIndex || 1;
+      const nextSlot = lastUpload ? ((currentSlot % 7) + 1) : currentSlot;
+      const targetFileName = this.getSlotFileName(userSettings.dropboxFileName, nextSlot);
+
+      console.log(`[DropboxSync] Subiendo respaldo al Archivo #${nextSlot} (${targetFileName})...`);
 
       // Upload JSON to Dropbox
-      await this.uploadBackup(token, localJson, fileName);
+      await this.uploadBackup(token, localJson, targetFileName);
 
       const timestamp = Date.now();
       const timeFormatted = new Date(timestamp).toLocaleDateString('es-ES') + ' ' + new Date(timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-      const statusMsg = `Éxito (${timeFormatted})`;
+      const statusMsg = `Éxito en Archivo #${nextSlot} (${timeFormatted})`;
 
-      // Mark hasLocalChanges = false after successful upload
+      // Update settings: mark hasLocalChanges = false and advance lastDropboxSlotIndex = nextSlot
       await updateUserSettings({
         lastDropboxUploadTimestamp: timestamp,
         lastDropboxUploadStatus: statusMsg,
         hasLocalChanges: false,
+        lastDropboxSlotIndex: nextSlot,
       });
 
-      console.log('[DropboxSync] Subida exitosa a Dropbox en', timeFormatted, '- hasLocalChanges reseteado a false');
+      console.log('[DropboxSync] Subida exitosa en slot', nextSlot, '(', targetFileName, ')');
       return { success: true, uploaded: true };
     } catch (e: any) {
       console.error('[DropboxSync] Error de auto-sincronización:', e);
