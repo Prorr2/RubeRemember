@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RememberStoreProvider } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { DropboxAutoSyncHandler } from '@/components/dropbox-auto-sync-handler';
 
 // Patch to prevent "Unable to activate keep awake" unhandled rejections on both Web and Native
 try {
@@ -82,6 +83,7 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="backup" />
+              <Stack.Screen name="dropbox" />
               <Stack.Screen name="sync" />
               <Stack.Screen name="settings" />
               <Stack.Screen name="slots" />
@@ -96,6 +98,7 @@ export default function RootLayout() {
               <Stack.Screen name="statistics" />
               <Stack.Screen name="help" />
             </Stack>
+            <DropboxAutoSyncHandler />
           </View>
         </ThemeProvider>
       </SafeAreaProvider>

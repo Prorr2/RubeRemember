@@ -691,6 +691,7 @@ export default function TasksScreen() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<'score' | 'goals'>('goals');
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
+  const [openFilterDropdown, setOpenFilterDropdown] = useState<'sort' | 'date' | 'goal' | 'priority' | 'weight' | null>(null);
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -1184,6 +1185,22 @@ export default function TasksScreen() {
           )}
 
           <View style={{ flex: 1, marginHorizontal: 8 }}>
+            {/* Roadmap or Category indicator ABOVE title */}
+            {goal ? (
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#FF2D55', marginBottom: 2 }}>
+                {goal.emoji || '🎯'} {goal.title}
+              </Text>
+            ) : item.categoryId ? (
+              (() => {
+                const cat = store.taskCategories.find((c: any) => c.id === item.categoryId);
+                return cat ? (
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#34C759', marginBottom: 2 }}>
+                    {cat.emoji || '📁'} {cat.name}
+                  </Text>
+                ) : null;
+              })()
+            ) : null}
+
             <Text
               style={[
                 styles.taskTitle,
@@ -1195,46 +1212,17 @@ export default function TasksScreen() {
             </Text>
             
             <View style={styles.tagRow}>
-              <Pressable
-                onPress={(e) => {
-                  if (selectedIds.length > 0) return;
-                  e.stopPropagation();
-                  handleChangePriority(item);
-                }}
-                style={({ pressed }) => [
-                  styles.priorityBadge,
-                  { backgroundColor: priorityColor + '20', opacity: pressed && selectedIds.length === 0 ? 0.6 : 1 },
-                ]}
-                disabled={selectedIds.length > 0}
-              >
-                <Text style={{ color: priorityColor, fontSize: 10, fontWeight: '700' }}>
-                  {item.priority === Priority.URGENT ? 'URGENTE' : item.priority.toUpperCase()}
-                </Text>
-              </Pressable>
-
+              {/* Score */}
               <View style={[styles.metaBadge, { backgroundColor: 'rgba(255, 215, 0, 0.15)' }]}>
                 <Text style={{ color: scheme === 'dark' ? '#FFD700' : '#D4AF37', fontSize: 10, fontWeight: '800' }}>
                   ⭐ Score: {ScoreEngine.calculateScore(item, store.hourWeights, store.userSettings?.scoreFormula)}
                 </Text>
               </View>
 
+              {/* Date Badge */}
               {renderDateBadge(item)}
 
-              {item.energyType ? (
-                <View style={[styles.metaBadge, { backgroundColor: 'rgba(88, 86, 214, 0.1)' }]}>
-                  <Text style={{ color: '#5856D6', fontSize: 10, fontWeight: '700' }}>
-                    ⚡ {
-                      item.energyType === EnergyType.CREATIVE ? 'Creativa' :
-                      item.energyType === EnergyType.ANALYTICAL ? 'Analítica' :
-                      item.energyType === EnergyType.ADMINISTRATIVE ? 'Admin' :
-                      item.energyType === EnergyType.SOCIAL ? 'Social' :
-                      item.energyType === EnergyType.PHYSICAL ? 'Física' :
-                      'Aprendizaje'
-                    }
-                  </Text>
-                </View>
-              ) : null}
-
+              {/* Hours & Weight */}
               {item.estimatedHours ? (
                 <>
                   <View style={[styles.metaBadge, { backgroundColor: colors.backgroundSelected }]}>
@@ -1257,26 +1245,6 @@ export default function TasksScreen() {
                   })()}
                 </>
               ) : null}
-
-              {goal ? (
-                <View style={[styles.metaBadge, { backgroundColor: 'rgba(255, 45, 85, 0.1)' }]}>
-                  <Text style={{ color: '#FF2D55', fontSize: 10, fontWeight: '600' }}>
-                    {goal.emoji || '🎯'} {goal.title}
-                  </Text>
-                </View>
-              ) : item.categoryId ? (
-                (() => {
-                  const cat = store.taskCategories.find((c: any) => c.id === item.categoryId);
-                  return cat ? (
-                    <View style={[styles.metaBadge, { backgroundColor: 'rgba(52, 199, 89, 0.15)' }]}>
-                      <Text style={{ color: '#34C759', fontSize: 10, fontWeight: '600' }}>
-                        {cat.emoji || '📁'} {cat.name}
-                      </Text>
-                    </View>
-                  ) : null;
-                })()
-              ) : null}
-
             </View>
             
             <EditableProgressBar
@@ -1519,315 +1487,357 @@ export default function TasksScreen() {
       </Pressable>
 
       {isFiltersExpanded && (
-        <View style={[styles.filterSection, { backgroundColor: colors.backgroundElement }]}>
+        <ScrollView
+          nestedScrollEnabled={true}
+          style={[styles.filterSection, { backgroundColor: colors.backgroundElement, maxHeight: 340, flexGrow: 0, paddingVertical: 0 }]}
+          contentContainerStyle={{ paddingVertical: 0 }}
+          showsVerticalScrollIndicator={true}
+        >
+          {/* Bulk Configuration Mode Indicator */}
+          {selectedIds.length > 0 && (
+            <View style={[styles.bulkEditBanner, { backgroundColor: colors.backgroundSelected, borderColor: '#FF9500', margin: 12 }]}>
+              <Ionicons name="information-circle-outline" size={18} color="#FF9500" />
+              <Text style={[styles.bulkEditText, { color: colors.text }]}>
+                Configuración masiva activa: Toca una opción para asignarla a las tareas seleccionadas.
+              </Text>
+            </View>
+          )}
 
-        {/* Sort Selector */}
-        {selectedIds.length === 0 && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
-            <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>Ordenar por:</Text>
+          {/* 1. Ordenar por */}
+          <View style={[styles.filterRowContainer, { borderBottomColor: colors.backgroundSelected }]}>
             <Pressable
-              onPress={() => setSortBy('score')}
-              style={[
-                styles.filterChip,
-                sortBy === 'score' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement },
-                { marginVertical: 0, marginTop: 0 }
-              ]}
+              onPress={() => setOpenFilterDropdown(openFilterDropdown === 'sort' ? null : 'sort')}
+              style={styles.filterRowHeader}
             >
-              <Text style={[styles.filterChipText, { color: sortBy === 'score' ? '#fff' : colors.text }]}>⭐ Mayor Score</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name={openFilterDropdown === 'sort' ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
+                <Text style={[styles.filterRowTitle, { color: colors.text }]}>Ordenar por:</Text>
+              </View>
+              <Text style={[styles.filterRowValue, { color: '#FF9500' }]} numberOfLines={1}>
+                {sortBy === 'goals' ? 'Objetivos y categorías' : '⭐ Mayor Score'}
+              </Text>
             </Pressable>
-            <Pressable
-              onPress={() => setSortBy('goals')}
-              style={[
-                styles.filterChip,
-                sortBy === 'goals' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement },
-                { marginVertical: 0, marginTop: 0 }
-              ]}
-            >
-              <Text style={[styles.filterChipText, { color: sortBy === 'goals' ? '#fff' : colors.text }]}>🎯 Objetivos y categorías</Text>
-            </Pressable>
+
+            {openFilterDropdown === 'sort' && (
+              <View style={styles.filterOptionsVertical}>
+                <Pressable
+                  onPress={() => { setSortBy('goals'); setOpenFilterDropdown(null); }}
+                  style={[styles.filterOptionItem, sortBy === 'goals' && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                >
+                  <Text style={[styles.filterOptionText, { color: sortBy === 'goals' ? '#FF9500' : colors.text }, sortBy === 'goals' && { fontWeight: '700' }]}>
+                    🎯 Objetivos y categorías
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { setSortBy('score'); setOpenFilterDropdown(null); }}
+                  style={[styles.filterOptionItem, sortBy === 'score' && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                >
+                  <Text style={[styles.filterOptionText, { color: sortBy === 'score' ? '#FF9500' : colors.text }, sortBy === 'score' && { fontWeight: '700' }]}>
+                    ⭐ Mayor Score
+                  </Text>
+                </Pressable>
+              </View>
+            )}
           </View>
-        )}
 
-        {/* Date Filter */}
-        {selectedIds.length === 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters} style={{ marginTop: 8 }}>
+          {/* 2. Finalización */}
+          <View style={[styles.filterRowContainer, { borderBottomColor: colors.backgroundSelected }]}>
             <Pressable
-              onPress={() => setFilterDateRange('ALL')}
-              style={[styles.filterChip, filterDateRange === 'ALL' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
+              onPress={() => setOpenFilterDropdown(openFilterDropdown === 'date' ? null : 'date')}
+              style={styles.filterRowHeader}
             >
-              <Text style={[styles.filterChipText, { color: filterDateRange === 'ALL' ? '#fff' : colors.text }]}>Cualquier finalización</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name={openFilterDropdown === 'date' ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
+                <Text style={[styles.filterRowTitle, { color: colors.text }]}>Finalización:</Text>
+              </View>
+              <Text style={[styles.filterRowValue, { color: filterDateRange !== 'ALL' ? '#FF9500' : colors.textSecondary }]} numberOfLines={1}>
+                {filterDateRange === 'ALL' ? 'Cualquiera' :
+                 filterDateRange === 'TODAY_OVERDUE' ? '🏁 Hoy y Atrasadas' :
+                 filterDateRange === 'WEEK' ? '🗓️ Esta semana' :
+                 filterDateRange === 'MONTH' ? '📅 Este mes' :
+                 filterDateRange === 'FUTURE' ? '🚀 Más adelante' :
+                 '❓ Sin fecha'}
+              </Text>
             </Pressable>
-            <Pressable
-              onPress={() => setFilterDateRange('TODAY_OVERDUE')}
-              style={[styles.filterChip, filterDateRange === 'TODAY_OVERDUE' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
-            >
-              <Text style={[styles.filterChipText, { color: filterDateRange === 'TODAY_OVERDUE' ? '#fff' : colors.text }]}>🏁 Hoy y Atrasadas</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setFilterDateRange('WEEK')}
-              style={[styles.filterChip, filterDateRange === 'WEEK' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
-            >
-              <Text style={[styles.filterChipText, { color: filterDateRange === 'WEEK' ? '#fff' : colors.text }]}>🗓️ Esta semana</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setFilterDateRange('MONTH')}
-              style={[styles.filterChip, filterDateRange === 'MONTH' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
-            >
-              <Text style={[styles.filterChipText, { color: filterDateRange === 'MONTH' ? '#fff' : colors.text }]}>📅 Este mes</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setFilterDateRange('FUTURE')}
-              style={[styles.filterChip, filterDateRange === 'FUTURE' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
-            >
-              <Text style={[styles.filterChipText, { color: filterDateRange === 'FUTURE' ? '#fff' : colors.text }]}>🚀 Más adelante</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setFilterDateRange('UNSCHEDULED')}
-              style={[styles.filterChip, filterDateRange === 'UNSCHEDULED' ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }]}
-            >
-              <Text style={[styles.filterChipText, { color: filterDateRange === 'UNSCHEDULED' ? '#fff' : colors.text }]}>❓ Sin fecha</Text>
-            </Pressable>
-          </ScrollView>
-        )}
 
-        {/* Bulk Configuration Mode Indicator */}
-        {selectedIds.length > 0 && (
-          <View style={[styles.bulkEditBanner, { backgroundColor: colors.backgroundSelected, borderColor: '#FF9500' }]}>
-            <Ionicons name="information-circle-outline" size={18} color="#FF9500" />
-            <Text style={[styles.bulkEditText, { color: colors.text }]}>
-              Configuración masiva activa: Toca un objetivo, prioridad o peso de abajo para asignarlo a las tareas seleccionadas.
-            </Text>
+            {openFilterDropdown === 'date' && (
+              <View style={styles.filterOptionsVertical}>
+                {[
+                  { id: 'ALL', label: 'Cualquiera' },
+                  { id: 'TODAY_OVERDUE', label: '🏁 Hoy y Atrasadas' },
+                  { id: 'WEEK', label: '🗓️ Esta semana' },
+                  { id: 'MONTH', label: '📅 Este mes' },
+                  { id: 'FUTURE', label: '🚀 Más adelante' },
+                  { id: 'UNSCHEDULED', label: '❓ Sin fecha' },
+                ].map((opt) => (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => { setFilterDateRange(opt.id as any); setOpenFilterDropdown(null); }}
+                    style={[styles.filterOptionItem, filterDateRange === opt.id && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                  >
+                    <Text style={[styles.filterOptionText, { color: filterDateRange === opt.id ? '#FF9500' : colors.text }, filterDateRange === opt.id && { fontWeight: '700' }]}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </View>
-        )}
 
-        {/* Goal Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters} style={{ marginTop: 2 }}>
-          <Pressable
-            onPress={() => {
-              if (selectedIds.length > 0) {
-                Alert.alert(
-                  'Desvincular Objetivo',
-                  `¿Deseas desvincular de objetivos las ${selectedIds.length} tareas seleccionadas?`,
-                  [
-                    { text: 'Cancelar', style: 'cancel' },
-                    {
-                      text: 'Confirmar',
-                      onPress: async () => {
-                        await store.updateItems(selectedIds, { goalId: undefined, phaseId: undefined });
-                        setSelectedIds([]);
-                      },
-                    },
-                  ]
-                );
-              } else {
-                setFilterGoalId('ALL');
-              }
-            }}
-            style={[
-              styles.filterChip,
-              filterGoalId === 'ALL' && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
-            ]}
-          >
-            <Text style={[styles.filterChipText, { color: filterGoalId === 'ALL' && selectedIds.length === 0 ? '#fff' : colors.text }]}>
-              {selectedIds.length > 0 ? '❌ Sin Objetivo/Categoría' : 'Todos los objetivos y categorías'}
-            </Text>
-          </Pressable>
-          {store.goals.map((g) => {
-            const isActive = filterGoalId === g.id;
-            return (
-              <Pressable
-                key={g.id}
-                onPress={() => {
-                  if (selectedIds.length > 0) {
-                    Alert.alert(
-                      'Asociar Objetivo',
-                      `¿Deseas asociar las ${selectedIds.length} tareas seleccionadas al objetivo "${g.title}"?`,
-                      [
+          {/* 3. Objetivo / Categoría */}
+          <View style={[styles.filterRowContainer, { borderBottomColor: colors.backgroundSelected }]}>
+            <Pressable
+              onPress={() => setOpenFilterDropdown(openFilterDropdown === 'goal' ? null : 'goal')}
+              style={styles.filterRowHeader}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
+                <Ionicons name={openFilterDropdown === 'goal' ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
+                <Text style={[styles.filterRowTitle, { color: colors.text }]}>Objetivo / Categoría:</Text>
+              </View>
+              <Text style={[styles.filterRowValue, { color: filterGoalId !== 'ALL' ? '#FF9500' : colors.textSecondary }]} numberOfLines={1}>
+                {(() => {
+                  if (filterGoalId === 'ALL') return 'Todos los objetivos y categorías';
+                  const g = store.goals.find((item) => item.id === filterGoalId);
+                  if (g) return `${g.emoji || '🎯'} ${g.title}`;
+                  const c = store.taskCategories.find((item) => item.id === filterGoalId);
+                  if (c) return `${c.emoji || '📁'} ${c.name}`;
+                  return 'Todos los objetivos y categorías';
+                })()}
+              </Text>
+            </Pressable>
+
+            {openFilterDropdown === 'goal' && (
+              <View style={styles.filterOptionsVertical}>
+                <Pressable
+                  onPress={() => {
+                    if (selectedIds.length > 0) {
+                      Alert.alert('Desvincular Objetivo/Categoría', `¿Deseas desvincular las ${selectedIds.length} tareas seleccionadas?`, [
                         { text: 'Cancelar', style: 'cancel' },
                         {
                           text: 'Confirmar',
                           onPress: async () => {
-                            await store.updateItems(selectedIds, { goalId: g.id, phaseId: undefined, categoryId: undefined });
+                            await store.updateItems(selectedIds, { goalId: undefined, phaseId: undefined, categoryId: undefined });
                             setSelectedIds([]);
                           },
                         },
-                      ]
-                    );
-                  } else {
-                    if (isActive) {
+                      ]);
+                    } else {
                       setFilterGoalId('ALL');
-                    } else {
-                      setFilterGoalId(g.id);
                     }
-                  }
-                }}
-                style={[
-                  styles.filterChip,
-                  isActive && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: isActive && selectedIds.length === 0 ? '#fff' : colors.text }]}>
-                  {g.emoji || '🎯'} {g.title}
-                </Text>
-              </Pressable>
-            );
-          })}
-          {store.taskCategories.map((c) => {
-            const isActive = filterGoalId === c.id;
-            return (
-              <Pressable
-                key={c.id}
-                onPress={() => {
-                  if (selectedIds.length > 0) {
-                    Alert.alert(
-                      'Asociar Categoría',
-                      `¿Deseas asociar las ${selectedIds.length} tareas seleccionadas a la categoría "${c.name}"?`,
-                      [
-                        { text: 'Cancelar', style: 'cancel' },
-                        {
-                          text: 'Confirmar',
-                          onPress: async () => {
-                            await store.updateItems(selectedIds, { categoryId: c.id, goalId: undefined, phaseId: undefined });
-                            setSelectedIds([]);
-                          },
-                        },
-                      ]
-                    );
-                  } else {
-                    if (isActive) {
-                      setFilterGoalId('ALL');
-                    } else {
-                      setFilterGoalId(c.id);
-                    }
-                  }
-                }}
-                style={[
-                  styles.filterChip,
-                  isActive && selectedIds.length === 0 ? { backgroundColor: '#34C759' } : { backgroundColor: colors.backgroundElement }
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: isActive && selectedIds.length === 0 ? '#fff' : colors.text }]}>
-                  {c.emoji || '📁'} {c.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+                    setOpenFilterDropdown(null);
+                  }}
+                  style={[styles.filterOptionItem, filterGoalId === 'ALL' && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                >
+                  <Text style={[styles.filterOptionText, { color: filterGoalId === 'ALL' ? '#FF9500' : colors.text }, filterGoalId === 'ALL' && { fontWeight: '700' }]}>
+                    Todos los objetivos y categorías
+                  </Text>
+                </Pressable>
 
-        {/* Priority Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters}>
-          <Pressable
-            onPress={() => {
-              if (selectedIds.length > 0) return;
-              setFilterPriorities([]);
-            }}
-            style={[
-              styles.filterChip,
-              selectedIds.length > 0 && { opacity: 0.5 },
-              filterPriorities.length === 0 && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
-            ]}
-            disabled={selectedIds.length > 0}
-          >
-            <Text style={[styles.filterChipText, { color: filterPriorities.length === 0 && selectedIds.length === 0 ? '#fff' : colors.text }]}>Todas</Text>
-          </Pressable>
-          {([Priority.URGENT, Priority.HIGH, Priority.MEDIUM, Priority.LOW] as Priority[]).map((p) => {
-            const isActive = filterPriorities.includes(p);
-            return (
-              <Pressable
-                key={p}
-                onPress={() => {
-                  if (selectedIds.length > 0) {
-                    Alert.alert(
-                      'Cambiar Prioridad',
-                      `¿Deseas cambiar la prioridad de las ${selectedIds.length} tareas seleccionadas a "${p}"?`,
-                      [
-                        { text: 'Cancelar', style: 'cancel' },
-                        {
-                          text: 'Confirmar',
-                          onPress: async () => {
-                            await store.updateItems(selectedIds, { priority: p });
-                            setSelectedIds([]);
+                {store.goals.map((g) => (
+                  <Pressable
+                    key={g.id}
+                    onPress={() => {
+                      if (selectedIds.length > 0) {
+                        Alert.alert('Asociar Objetivo', `¿Deseas asociar las ${selectedIds.length} tareas seleccionadas al objetivo "${g.title}"?`, [
+                          { text: 'Cancelar', style: 'cancel' },
+                          {
+                            text: 'Confirmar',
+                            onPress: async () => {
+                              await store.updateItems(selectedIds, { goalId: g.id, phaseId: undefined, categoryId: undefined });
+                              setSelectedIds([]);
+                            },
                           },
-                        },
-                      ]
-                    );
-                  } else {
-                    if (isActive) {
-                      setFilterPriorities(filterPriorities.filter((x) => x !== p));
-                    } else {
-                      setFilterPriorities([...filterPriorities, p]);
-                    }
-                  }
-                }}
-                style={[
-                  styles.filterChip,
-                  isActive && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement },
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: isActive && selectedIds.length === 0 ? '#fff' : colors.text }]}>
-                  {p === Priority.URGENT ? 'URGENTE' : p.toUpperCase()}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+                        ]);
+                      } else {
+                        setFilterGoalId(g.id);
+                      }
+                      setOpenFilterDropdown(null);
+                    }}
+                    style={[styles.filterOptionItem, filterGoalId === g.id && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                  >
+                    <Text style={[styles.filterOptionText, { color: filterGoalId === g.id ? '#FF9500' : colors.text }, filterGoalId === g.id && { fontWeight: '700' }]}>
+                      {g.emoji || '🎯'} {g.title}
+                    </Text>
+                  </Pressable>
+                ))}
 
-        {/* Weight Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFilters} style={{ marginTop: -2, marginBottom: 6 }}>
-          <Pressable
-            onPress={() => {
-              if (selectedIds.length > 0) return;
-              setFilterWeightIds([]);
-            }}
-            style={[
-              styles.filterChip,
-              selectedIds.length > 0 && { opacity: 0.5 },
-              filterWeightIds.length === 0 && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
-            ]}
-            disabled={selectedIds.length > 0}
-          >
-            <Text style={[styles.filterChipText, { color: filterWeightIds.length === 0 && selectedIds.length === 0 ? '#fff' : colors.text }]}>Todos los pesos</Text>
-          </Pressable>
-          {store.hourWeights.map((w) => {
-            const isActive = filterWeightIds.includes(w.id);
-            return (
-              <Pressable
-                key={w.id}
-                onPress={() => {
-                  if (selectedIds.length > 0) {
-                    Alert.alert(
-                      'Cambiar Peso/Horas',
-                      `¿Deseas cambiar el peso de las ${selectedIds.length} tareas seleccionadas a "${w.name}" (${w.minHours}h)?`,
-                      [
-                        { text: 'Cancelar', style: 'cancel' },
-                        {
-                          text: 'Confirmar',
-                          onPress: async () => {
-                            await store.updateItems(selectedIds, { estimatedHours: w.minHours });
-                            setSelectedIds([]);
+                {store.taskCategories.map((c) => (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => {
+                      if (selectedIds.length > 0) {
+                        Alert.alert('Asociar Categoría', `¿Deseas asociar las ${selectedIds.length} tareas seleccionadas a la categoría "${c.name}"?`, [
+                          { text: 'Cancelar', style: 'cancel' },
+                          {
+                            text: 'Confirmar',
+                            onPress: async () => {
+                              await store.updateItems(selectedIds, { categoryId: c.id, goalId: undefined, phaseId: undefined });
+                              setSelectedIds([]);
+                            },
                           },
-                        },
-                      ]
-                    );
-                  } else {
-                    if (isActive) {
-                      setFilterWeightIds(filterWeightIds.filter((x) => x !== w.id));
-                    } else {
-                      setFilterWeightIds([...filterWeightIds, w.id]);
+                        ]);
+                      } else {
+                        setFilterGoalId(c.id);
+                      }
+                      setOpenFilterDropdown(null);
+                    }}
+                    style={[styles.filterOptionItem, filterGoalId === c.id && { backgroundColor: 'rgba(52,199,89,0.15)' }]}
+                  >
+                    <Text style={[styles.filterOptionText, { color: filterGoalId === c.id ? '#34C759' : colors.text }, filterGoalId === c.id && { fontWeight: '700' }]}>
+                      {c.emoji || '📁'} {c.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* 4. Prioridad */}
+          <View style={[styles.filterRowContainer, { borderBottomColor: colors.backgroundSelected }]}>
+            <Pressable
+              onPress={() => setOpenFilterDropdown(openFilterDropdown === 'priority' ? null : 'priority')}
+              style={styles.filterRowHeader}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name={openFilterDropdown === 'priority' ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
+                <Text style={[styles.filterRowTitle, { color: colors.text }]}>Prioridad:</Text>
+              </View>
+              <Text style={[styles.filterRowValue, { color: filterPriorities.length > 0 ? '#FF9500' : colors.textSecondary }]} numberOfLines={1}>
+                {filterPriorities.length === 0
+                  ? 'Todas'
+                  : filterPriorities
+                      .map((p) => (p === Priority.URGENT ? 'Urgente' : p === Priority.HIGH ? 'Alta' : p === Priority.MEDIUM ? 'Media' : 'Baja'))
+                      .join(', ')}
+              </Text>
+            </Pressable>
+
+            {openFilterDropdown === 'priority' && (
+              <View style={styles.filterOptionsVertical}>
+                <Pressable
+                  onPress={() => {
+                    if (selectedIds.length === 0) {
+                      setFilterPriorities([]);
                     }
-                  }
-                }}
-                style={[
-                  styles.filterChip,
-                  isActive && selectedIds.length === 0 ? { backgroundColor: '#FF9500' } : { backgroundColor: colors.backgroundElement }
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: isActive && selectedIds.length === 0 ? '#fff' : colors.text }]}>{w.name}</Text>
-              </Pressable>
-            );
-          })}
+                    setOpenFilterDropdown(null);
+                  }}
+                  style={[styles.filterOptionItem, filterPriorities.length === 0 && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                >
+                  <Text style={[styles.filterOptionText, { color: filterPriorities.length === 0 ? '#FF9500' : colors.text }, filterPriorities.length === 0 && { fontWeight: '700' }]}>
+                    Todas
+                  </Text>
+                </Pressable>
+                {([Priority.URGENT, Priority.HIGH, Priority.MEDIUM, Priority.LOW] as Priority[]).map((p) => {
+                  const isActive = filterPriorities.includes(p);
+                  const label = p === Priority.URGENT ? 'Urgente' : p === Priority.HIGH ? 'Alta' : p === Priority.MEDIUM ? 'Media' : 'Baja';
+                  return (
+                    <Pressable
+                      key={p}
+                      onPress={() => {
+                        if (selectedIds.length > 0) {
+                          Alert.alert('Cambiar Prioridad', `¿Deseas cambiar la prioridad de las ${selectedIds.length} tareas seleccionadas a "${label}"?`, [
+                            { text: 'Cancelar', style: 'cancel' },
+                            {
+                              text: 'Confirmar',
+                              onPress: async () => {
+                                await store.updateItems(selectedIds, { priority: p });
+                                setSelectedIds([]);
+                              },
+                            },
+                          ]);
+                        } else {
+                          if (isActive) {
+                            setFilterPriorities(filterPriorities.filter((x) => x !== p));
+                          } else {
+                            setFilterPriorities([p]);
+                          }
+                        }
+                        setOpenFilterDropdown(null);
+                      }}
+                      style={[styles.filterOptionItem, isActive && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                    >
+                      <Text style={[styles.filterOptionText, { color: isActive ? '#FF9500' : colors.text }, isActive && { fontWeight: '700' }]}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+
+          {/* 5. Peso */}
+          <View style={[styles.filterRowContainer, { borderBottomColor: colors.backgroundSelected, borderBottomWidth: 0 }]}>
+            <Pressable
+              onPress={() => setOpenFilterDropdown(openFilterDropdown === 'weight' ? null : 'weight')}
+              style={styles.filterRowHeader}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name={openFilterDropdown === 'weight' ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
+                <Text style={[styles.filterRowTitle, { color: colors.text }]}>Peso:</Text>
+              </View>
+              <Text style={[styles.filterRowValue, { color: filterWeightIds.length > 0 ? '#FF9500' : colors.textSecondary }]} numberOfLines={1}>
+                {filterWeightIds.length === 0
+                  ? 'Todos los pesos'
+                  : store.hourWeights
+                      .filter((w) => filterWeightIds.includes(w.id))
+                      .map((w) => w.name)
+                      .join(', ') || 'Todos los pesos'}
+              </Text>
+            </Pressable>
+
+            {openFilterDropdown === 'weight' && (
+              <View style={styles.filterOptionsVertical}>
+                <Pressable
+                  onPress={() => {
+                    if (selectedIds.length === 0) {
+                      setFilterWeightIds([]);
+                    }
+                    setOpenFilterDropdown(null);
+                  }}
+                  style={[styles.filterOptionItem, filterWeightIds.length === 0 && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                >
+                  <Text style={[styles.filterOptionText, { color: filterWeightIds.length === 0 ? '#FF9500' : colors.text }, filterWeightIds.length === 0 && { fontWeight: '700' }]}>
+                    Todos los pesos
+                  </Text>
+                </Pressable>
+                {store.hourWeights.map((w) => {
+                  const isActive = filterWeightIds.includes(w.id);
+                  return (
+                    <Pressable
+                      key={w.id}
+                      onPress={() => {
+                        if (selectedIds.length > 0) {
+                          Alert.alert('Cambiar Peso/Horas', `¿Deseas cambiar el peso de las ${selectedIds.length} tareas seleccionadas a "${w.name}" (${w.minHours}h)?`, [
+                            { text: 'Cancelar', style: 'cancel' },
+                            {
+                              text: 'Confirmar',
+                              onPress: async () => {
+                                await store.updateItems(selectedIds, { estimatedHours: w.minHours });
+                                setSelectedIds([]);
+                              },
+                            },
+                          ]);
+                        } else {
+                          if (isActive) {
+                            setFilterWeightIds(filterWeightIds.filter((x) => x !== w.id));
+                          } else {
+                            setFilterWeightIds([w.id]);
+                          }
+                        }
+                        setOpenFilterDropdown(null);
+                      }}
+                      style={[styles.filterOptionItem, isActive && { backgroundColor: 'rgba(255,149,0,0.15)' }]}
+                    >
+                      <Text style={[styles.filterOptionText, { color: isActive ? '#FF9500' : colors.text }, isActive && { fontWeight: '700' }]}>
+                        {w.name} ({w.minHours}h)
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </View>
         </ScrollView>
-      </View>
       )}
 
       <KeyboardAvoidingView
@@ -2277,7 +2287,7 @@ export default function TasksScreen() {
             }}>
               <View style={{ flex: 1, paddingRight: 8 }}>
                 <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: 'bold', color: colors.text }}>
-                  🎯 {currentRoadmapTask?.title || 'Historial y Roadmap'}
+                  {currentRoadmapTask?.title}
                 </Text>
                 <Text style={{ fontSize: 11, color: colors.textSecondary }}>
                   Historial, Roadmap y Notas de la Tarea
@@ -2373,9 +2383,6 @@ export default function TasksScreen() {
 
                 {/* History & Roadmap */}
                 <View style={{ borderTopWidth: 1, borderTopColor: colors.backgroundSelected, paddingTop: 16 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text, marginBottom: 8 }}>
-                    🗺️ Historial y Roadmap
-                  </Text>
                   <TaskRoadmap
                     task={currentRoadmapTask}
                     colors={colors}
@@ -2988,5 +2995,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 20,
+  },
+  filterRowContainer: {
+    borderBottomWidth: 1,
+  },
+  filterRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  filterRowTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  filterRowValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    maxWidth: '55%',
+  },
+  filterOptionsVertical: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    flexDirection: 'column',
+    gap: 4,
+  },
+  filterOptionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  filterOptionText: {
+    fontSize: 13,
   },
 });

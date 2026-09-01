@@ -503,6 +503,21 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     try {
       const adjusted = recalculateTaskSlotTimes(newItems, newSlots, currentSeparation);
       
+      const dataChanged =
+        JSON.stringify(adjusted) !== JSON.stringify(items) ||
+        JSON.stringify(newGoals) !== JSON.stringify(goals) ||
+        JSON.stringify(newLists) !== JSON.stringify(lists) ||
+        JSON.stringify(newSlots) !== JSON.stringify(timeSlots) ||
+        JSON.stringify(newSessions) !== JSON.stringify(sessions) ||
+        JSON.stringify(newRecs) !== JSON.stringify(recommendations) ||
+        JSON.stringify(newStats) !== JSON.stringify(statistics);
+
+      const finalHasLocalChanges = (dataChanged || newSettings.hasLocalChanges !== false) ? true : false;
+      const settingsToSave: UserSettings = {
+        ...newSettings,
+        hasLocalChanges: finalHasLocalChanges,
+      };
+
       if (JSON.stringify(adjusted) !== JSON.stringify(items)) {
         setItems(adjusted);
       }
@@ -521,9 +536,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       if (JSON.stringify(newRecs) !== JSON.stringify(recommendations)) {
         setRecommendations(newRecs);
       }
-      if (JSON.stringify(newSettings) !== JSON.stringify(userSettings)) {
-        console.log('[Store] Updating userSettings state from:', JSON.stringify(userSettings), 'to:', JSON.stringify(newSettings));
-        setUserSettings(newSettings);
+      if (JSON.stringify(settingsToSave) !== JSON.stringify(userSettings)) {
+        console.log('[Store] Updating userSettings state from:', JSON.stringify(userSettings), 'to:', JSON.stringify(settingsToSave));
+        setUserSettings(settingsToSave);
       } else {
         console.log('[Store] saveDatabaseState userSettings check skipped (equal stringified settings)');
       }
@@ -539,7 +554,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         timeSlots: newSlots,
         sessions: newSessions,
         recommendations: newRecs,
-        userSettings: newSettings,
+        userSettings: settingsToSave,
         statistics: newStats,
         settings: {
           proximityDays: currentProximity,
@@ -1319,6 +1334,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   // Backup and Restore
   const exportBackupData = useCallback(async (): Promise<string> => {
+    // Sanitize userSettings for backup export (never include sensitive tokens like dropboxAccessToken)
+    const sanitizedUserSettings = {
+      ...userSettings,
+      dropboxAccessToken: '',
+    };
+
     const db: DatabaseV3 = {
       version: 3,
       items,
@@ -1329,7 +1350,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       hourWeights,
       sessions,
       recommendations,
-      userSettings,
+      userSettings: sanitizedUserSettings,
       statistics,
       settings: {
         proximityDays,
@@ -1433,8 +1454,15 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         setRecommendations(importedDb.recommendations);
         importedKeys.push('Recomendaciones');
       }
+
+      let finalUserSettings = userSettings;
       if (importedDb.userSettings) {
-        setUserSettings(importedDb.userSettings);
+        finalUserSettings = {
+          ...importedDb.userSettings,
+          // Preserve local dropboxAccessToken if the imported one is empty
+          dropboxAccessToken: importedDb.userSettings.dropboxAccessToken || userSettings.dropboxAccessToken || '',
+        };
+        setUserSettings(finalUserSettings);
         importedKeys.push('Ajustes de Usuario');
       }
       if (importedDb.statistics) {
@@ -1453,7 +1481,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         hourWeights: importedDb.hourWeights || hourWeights,
         sessions: importedDb.sessions || sessions,
         recommendations: importedDb.recommendations || recommendations,
-        userSettings: importedDb.userSettings || userSettings,
+        userSettings: finalUserSettings,
         statistics: importedDb.statistics || statistics,
         settings: {
           proximityDays: importedDb.settings?.proximityDays ?? proximityDays,
@@ -2291,7 +2319,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const updateUserSettings = useCallback(async (updates: Partial<UserSettings>) => {
-    const nextSettings = { ...userSettings, ...updates };
+    const hasLocalChanges = updates.hasLocalChanges !== undefined ? updates.hasLocalChanges : true;
+    const nextSettings = { ...userSettings, ...updates, hasLocalChanges };
     await saveDatabaseState(
       items,
       goals,

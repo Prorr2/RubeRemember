@@ -41,6 +41,15 @@ export interface UserSettings {
 
   // Custom task priority score formula
   scoreFormula?: string;
+
+  // Dropbox configuration and status
+  dropboxAccessToken?: string;
+  dropboxAutoUploadEnabled?: boolean;
+  lastDropboxUploadTimestamp?: number;
+  lastDropboxUploadStatus?: string;
+  dropboxFileName?: string;
+  hasLocalChanges?: boolean;
+  dropboxSyncCooldownMinutes?: number;
 }
 
 export const DEFAULT_VOICE_KEYWORDS: VoiceKeywords = {
@@ -75,6 +84,13 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   astraDuration: 20,
   voiceKeywords: DEFAULT_VOICE_KEYWORDS,
   scoreFormula: '((hours * (priorityWeight * priorityWeight)) / daysRemaining) / 1000',
+  dropboxAccessToken: '',
+  dropboxAutoUploadEnabled: true,
+  lastDropboxUploadTimestamp: 0,
+  lastDropboxUploadStatus: 'No sincronizado aún',
+  dropboxFileName: 'rube_remember_backup.json',
+  hasLocalChanges: false,
+  dropboxSyncCooldownMinutes: 10,
 };
 
 

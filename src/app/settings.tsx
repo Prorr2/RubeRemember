@@ -357,6 +357,26 @@ export default function SettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
           </Pressable>
+
+          <Pressable
+            onPress={() => router.push('/dropbox')}
+            style={[styles.menuItem, { backgroundColor: colors.backgroundElement, marginTop: 8 }]}
+          >
+            <View style={styles.menuItemLeft}>
+              <View style={[styles.iconContainer, { backgroundColor: 'rgba(0, 97, 255, 0.15)' }]}>
+                <Ionicons name="cloud-done-outline" size={20} color="#0061FF" />
+              </View>
+              <View>
+                <Text style={[styles.menuItemTitle, { color: colors.text }]}>Dropbox y Estado de la BD</Text>
+                <Text style={[styles.menuItemSubtitle, { color: colors.textSecondary }]}>
+                  {store.userSettings.dropboxAccessToken
+                    ? `Auto-subida activa • ${store.userSettings.lastDropboxUploadStatus || 'Listo'}`
+                    : 'Configurar token de Dropbox y ver estado'}
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+          </Pressable>
         </View>
 
         {/* Section 2: Hour Weights Classification */}
