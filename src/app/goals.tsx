@@ -1147,7 +1147,7 @@ export default function GoalsScreen() {
           GOAL EDIT/CREATE MODAL
           ─────────────────────────────────────────────────────────────────────── */}
       <Modal visible={isGoalModalVisible} transparent animationType="fade" onRequestClose={() => setIsGoalModalVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={modalStyles.overlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={modalStyles.overlay}>
           <View style={[modalStyles.container, { backgroundColor: colors.background }]}>
             <Text style={[modalStyles.title, { color: colors.text }]}>
               {editingGoal ? 'Editar Objetivo' : 'Nuevo Objetivo'}
@@ -1223,7 +1223,7 @@ export default function GoalsScreen() {
           PHASE EDIT/CREATE MODAL
           ─────────────────────────────────────────────────────────────────────── */}
       <Modal visible={isPhaseModalVisible} transparent animationType="fade" onRequestClose={() => setIsPhaseModalVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={modalStyles.overlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={modalStyles.overlay}>
           <View style={[modalStyles.container, { backgroundColor: colors.background }]}>
             <Text style={[modalStyles.title, { color: colors.text }]}>
               {editingPhase ? 'Editar Fase' : 'Nueva Fase'}

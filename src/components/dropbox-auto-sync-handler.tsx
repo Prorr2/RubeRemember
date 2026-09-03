@@ -67,7 +67,8 @@ export function DropboxAutoSyncHandler() {
     const currentStore = storeRef.current;
     const settings = currentStore.userSettings;
 
-    if (!settings?.dropboxAccessToken || !settings.dropboxAccessToken.trim()) return;
+    const hasCredentials = !!(settings?.dropboxAccessToken?.trim() || settings?.dropboxRefreshToken?.trim());
+    if (!hasCredentials) return;
     if (settings.dropboxAutoUploadEnabled === false) return;
 
     isSyncingRef.current = true;
@@ -93,11 +94,12 @@ export function DropboxAutoSyncHandler() {
 
   // Immediate check on App Launch as soon as store finishes loading
   useEffect(() => {
-    if (store.userSettings?.dropboxAccessToken && !initialCheckDoneRef.current) {
+    const hasCredentials = !!(store.userSettings?.dropboxAccessToken?.trim() || store.userSettings?.dropboxRefreshToken?.trim());
+    if (hasCredentials && !initialCheckDoneRef.current) {
       initialCheckDoneRef.current = true;
       runSyncCheck('App startup launch check');
     }
-  }, [store.userSettings?.dropboxAccessToken]);
+  }, [store.userSettings?.dropboxAccessToken, store.userSettings?.dropboxRefreshToken]);
 
   useEffect(() => {
     // 1. Initial check when component mounts (if app is active)

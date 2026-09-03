@@ -677,7 +677,7 @@ export default function SearchScreen() {
         onRequestClose={() => setShowProgressRoadmap(null)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.bottomModalOverlay}
         >
           <Pressable 

@@ -44,6 +44,10 @@ export interface UserSettings {
 
   // Dropbox configuration and status
   dropboxAccessToken?: string;
+  dropboxRefreshToken?: string;
+  dropboxAppKey?: string;
+  dropboxAppSecret?: string;
+  dropboxTokenFetchedTimestamp?: number;
   dropboxAutoUploadEnabled?: boolean;
   lastDropboxUploadTimestamp?: number;
   lastDropboxUploadStatus?: string;
@@ -86,6 +90,10 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   voiceKeywords: DEFAULT_VOICE_KEYWORDS,
   scoreFormula: '((hours * (priorityWeight * priorityWeight)) / daysRemaining) / 1000',
   dropboxAccessToken: '',
+  dropboxRefreshToken: '',
+  dropboxAppKey: '',
+  dropboxAppSecret: '',
+  dropboxTokenFetchedTimestamp: 0,
   dropboxAutoUploadEnabled: true,
   lastDropboxUploadTimestamp: 0,
   lastDropboxUploadStatus: 'No sincronizado aún',

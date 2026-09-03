@@ -10,6 +10,8 @@ import {
   useColorScheme,
   Switch,
   Image,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -57,15 +59,19 @@ export default function ItemEditorScreen() {
             try {
               const result = await ImagePicker.launchCameraAsync({
                 allowsEditing: false,
-                quality: 0.2,
+                quality: 0.3,
+                base64: true,
               });
               if (!result.canceled && result.assets && result.assets[0]) {
                 const asset = result.assets[0];
-                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                  encoding: 'base64',
-                });
+                let base64Data = asset.base64;
+                if (!base64Data) {
+                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                    encoding: 'base64',
+                  });
+                }
                 const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
                 onImageSelected(base64Url);
               }
             } catch (err) {
@@ -86,15 +92,19 @@ export default function ItemEditorScreen() {
               const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ['images'],
                 allowsEditing: false,
-                quality: 0.2,
+                quality: 0.3,
+                base64: true,
               });
               if (!result.canceled && result.assets && result.assets[0]) {
                 const asset = result.assets[0];
-                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                  encoding: 'base64',
-                });
+                let base64Data = asset.base64;
+                if (!base64Data) {
+                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                    encoding: 'base64',
+                  });
+                }
                 const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
                 onImageSelected(base64Url);
               }
             } catch (err) {
@@ -640,60 +650,65 @@ export default function ItemEditorScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Type Selector (only on create) */}
-        {!isEditing && (
-          <View style={styles.typeContainer}>
-            <Pressable
-              onPress={() => setItemType(ItemType.TASK)}
-              style={[
-                styles.typeTab,
-                { backgroundColor: colors.backgroundElement },
-                itemType === ItemType.TASK && { backgroundColor: 'rgba(255, 149, 0, 0.15)', borderColor: '#FF9500', borderWidth: 1.5 },
-              ]}
-            >
-              <Ionicons name="checkmark-circle-outline" size={20} color={itemType === ItemType.TASK ? '#FF9500' : colors.textSecondary} />
-              <Text style={[styles.typeText, { color: itemType === ItemType.TASK ? '#FF9500' : colors.textSecondary }]}>Tarea</Text>
-            </Pressable>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* Type Selector (only on create) */}
+          {!isEditing && (
+            <View style={styles.typeContainer}>
+              <Pressable
+                onPress={() => setItemType(ItemType.TASK)}
+                style={[
+                  styles.typeTab,
+                  { backgroundColor: colors.backgroundElement },
+                  itemType === ItemType.TASK && { backgroundColor: 'rgba(255, 149, 0, 0.15)', borderColor: '#FF9500', borderWidth: 1.5 },
+                ]}
+              >
+                <Ionicons name="checkmark-circle-outline" size={20} color={itemType === ItemType.TASK ? '#FF9500' : colors.textSecondary} />
+                <Text style={[styles.typeText, { color: itemType === ItemType.TASK ? '#FF9500' : colors.textSecondary }]}>Tarea</Text>
+              </Pressable>
 
 
-            <Pressable
-              onPress={() => setItemType(ItemType.MEMO)}
-              style={[
-                styles.typeTab,
-                { backgroundColor: colors.backgroundElement },
-                itemType === ItemType.MEMO && { backgroundColor: 'rgba(0, 199, 190, 0.15)', borderColor: '#00C7BE', borderWidth: 1.5 },
-              ]}
-            >
-              <Ionicons name="bookmark-outline" size={20} color={itemType === ItemType.MEMO ? '#00C7BE' : colors.textSecondary} />
-              <Text style={[styles.typeText, { color: itemType === ItemType.MEMO ? '#00C7BE' : colors.textSecondary }]}>Recordatorio</Text>
-            </Pressable>
+              <Pressable
+                onPress={() => setItemType(ItemType.MEMO)}
+                style={[
+                  styles.typeTab,
+                  { backgroundColor: colors.backgroundElement },
+                  itemType === ItemType.MEMO && { backgroundColor: 'rgba(0, 199, 190, 0.15)', borderColor: '#00C7BE', borderWidth: 1.5 },
+                ]}
+              >
+                <Ionicons name="bookmark-outline" size={20} color={itemType === ItemType.MEMO ? '#00C7BE' : colors.textSecondary} />
+                <Text style={[styles.typeText, { color: itemType === ItemType.MEMO ? '#00C7BE' : colors.textSecondary }]}>Recordatorio</Text>
+              </Pressable>
 
-            <Pressable
-              onPress={() => setItemType(ItemType.ACTIVITY)}
-              style={[
-                styles.typeTab,
-                { backgroundColor: colors.backgroundElement },
-                itemType === ItemType.ACTIVITY && { backgroundColor: 'rgba(88, 86, 214, 0.15)', borderColor: '#5856D6', borderWidth: 1.5 },
-              ]}
-            >
-              <Ionicons name="sparkles-outline" size={20} color={itemType === ItemType.ACTIVITY ? '#5856D6' : colors.textSecondary} />
-              <Text style={[styles.typeText, { color: itemType === ItemType.ACTIVITY ? '#5856D6' : colors.textSecondary }]}>Ocio</Text>
-            </Pressable>
+              <Pressable
+                onPress={() => setItemType(ItemType.ACTIVITY)}
+                style={[
+                  styles.typeTab,
+                  { backgroundColor: colors.backgroundElement },
+                  itemType === ItemType.ACTIVITY && { backgroundColor: 'rgba(88, 86, 214, 0.15)', borderColor: '#5856D6', borderWidth: 1.5 },
+                ]}
+              >
+                <Ionicons name="sparkles-outline" size={20} color={itemType === ItemType.ACTIVITY ? '#5856D6' : colors.textSecondary} />
+                <Text style={[styles.typeText, { color: itemType === ItemType.ACTIVITY ? '#5856D6' : colors.textSecondary }]}>Ocio</Text>
+              </Pressable>
 
-            <Pressable
-              onPress={() => setItemType(ItemType.PLAN)}
-              style={[
-                styles.typeTab,
-                { backgroundColor: colors.backgroundElement },
-                itemType === ItemType.PLAN && { backgroundColor: 'rgba(191, 90, 242, 0.15)', borderColor: '#BF5AF2', borderWidth: 1.5 },
-              ]}
-            >
-              <Ionicons name="compass-outline" size={20} color={itemType === ItemType.PLAN ? '#BF5AF2' : colors.textSecondary} />
-              <Text style={[styles.typeText, { color: itemType === ItemType.PLAN ? '#BF5AF2' : colors.textSecondary }]}>Plan</Text>
-            </Pressable>
-          </View>
-        )}
+              <Pressable
+                onPress={() => setItemType(ItemType.PLAN)}
+                style={[
+                  styles.typeTab,
+                  { backgroundColor: colors.backgroundElement },
+                  itemType === ItemType.PLAN && { backgroundColor: 'rgba(191, 90, 242, 0.15)', borderColor: '#BF5AF2', borderWidth: 1.5 },
+                ]}
+              >
+                <Ionicons name="compass-outline" size={20} color={itemType === ItemType.PLAN ? '#BF5AF2' : colors.textSecondary} />
+                <Text style={[styles.typeText, { color: itemType === ItemType.PLAN ? '#BF5AF2' : colors.textSecondary }]}>Plan</Text>
+              </Pressable>
+            </View>
+          )}
 
         {/* Core details card */}
         <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
@@ -1376,7 +1391,8 @@ export default function ItemEditorScreen() {
           />
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </KeyboardAvoidingView>
+  </SafeAreaView>
   );
 
 

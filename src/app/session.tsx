@@ -75,15 +75,19 @@ export default function SessionScreen() {
             try {
               const result = await ImagePicker.launchCameraAsync({
                 allowsEditing: false,
-                quality: 0.2,
+                quality: 0.3,
+                base64: true,
               });
               if (!result.canceled && result.assets && result.assets[0]) {
                 const asset = result.assets[0];
-                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                  encoding: 'base64',
-                });
+                let base64Data = asset.base64;
+                if (!base64Data) {
+                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                    encoding: 'base64',
+                  });
+                }
                 const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
                 onImageSelected(base64Url);
               }
             } catch (err) {
@@ -104,15 +108,19 @@ export default function SessionScreen() {
               const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ['images'],
                 allowsEditing: false,
-                quality: 0.2,
+                quality: 0.3,
+                base64: true,
               });
               if (!result.canceled && result.assets && result.assets[0]) {
                 const asset = result.assets[0];
-                const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                  encoding: 'base64',
-                });
+                let base64Data = asset.base64;
+                if (!base64Data) {
+                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+                    encoding: 'base64',
+                  });
+                }
                 const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = `data:${mimeType};base64,${base64Data}`;
+                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
                 onImageSelected(base64Url);
               }
             } catch (err) {

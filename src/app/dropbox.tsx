@@ -29,18 +29,31 @@ export default function DropboxScreen() {
   const colors = Colors[scheme];
 
   const [tokenInput, setTokenInput] = useState(store.userSettings.dropboxAccessToken || '');
+  const [refreshTokenInput, setRefreshTokenInput] = useState(store.userSettings.dropboxRefreshToken || '');
+  const [appKeyInput, setAppKeyInput] = useState(store.userSettings.dropboxAppKey || '');
+  const [appSecretInput, setAppSecretInput] = useState(store.userSettings.dropboxAppSecret || '');
   const [showToken, setShowToken] = useState(false);
+  const [showSecrets, setShowSecrets] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [refreshingToken, setRefreshingToken] = useState(false);
   const [accountInfo, setAccountInfo] = useState<DropboxAccountInfo | null>(null);
   const [uploading, setUploading] = useState(false);
   const [downloadingSlot, setDownloadingSlot] = useState<number | null>(null);
   const [currentAppState, setCurrentAppState] = useState<AppStateStatus>(AppState.currentState);
 
+  const [, setTick] = useState(0);
+
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       setCurrentAppState(nextState);
     });
-    return () => subscription.remove();
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 10000);
+    return () => {
+      subscription.remove();
+      clearInterval(interval);
+    };
   }, []);
 
   const activeTasksCount = store.items.filter(i => i.type === 'TASK' && !i.trash).length;
@@ -52,19 +65,88 @@ export default function DropboxScreen() {
   const timeSinceLastSyncMin = Math.floor(timeSinceLastSyncMs / 1000 / 60);
   const cooldownElapsed = lastUpload === 0 || timeSinceLastSyncMs >= cooldownMinutes * 60 * 1000;
 
-  const handleSaveToken = async () => {
+  const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+  const tokenFetchedAt = store.userSettings.dropboxTokenFetchedTimestamp || 0;
+  const timeSinceTokenFetchMs = tokenFetchedAt > 0 ? Date.now() - tokenFetchedAt : 0;
+  const timeSinceTokenFetchHours = (timeSinceTokenFetchMs / (1000 * 60 * 60)).toFixed(1);
+  const isTokenOlderThan4Hours = timeSinceTokenFetchMs >= FOUR_HOURS_MS;
+
+  const hasAccessToken = !!(tokenInput.trim() || store.userSettings.dropboxAccessToken);
+  const remainingLifetimeMs = Math.max(0, FOUR_HOURS_MS - timeSinceTokenFetchMs);
+  const remainingHours = Math.floor(remainingLifetimeMs / (1000 * 60 * 60));
+  const remainingMinutes = Math.floor((remainingLifetimeMs % (1000 * 60 * 60)) / (1000 * 60));
+
+  let remainingLifetimeText = '';
+  if (!hasAccessToken) {
+    remainingLifetimeText = 'Sin token de acceso configurado';
+  } else if (tokenFetchedAt === 0) {
+    remainingLifetimeText = 'Tiempo de vida restante: ~4h 0m (Ingresado manualmente)';
+  } else if (remainingLifetimeMs > 0) {
+    remainingLifetimeText = `Tiempo de vida restante: ${remainingHours}h ${remainingMinutes}m`;
+  } else {
+    remainingLifetimeText = 'Token expirado (Han pasado > 4h)';
+  }
+
+  const handleSaveCredentials = async () => {
     try {
-      await store.updateUserSettings({ dropboxAccessToken: tokenInput.trim() });
-      Alert.alert('Éxito', 'Token de acceso de Dropbox guardado correctamente.');
+      const cleanToken = DropboxService.cleanToken(tokenInput);
+      const cleanRefToken = DropboxService.cleanToken(refreshTokenInput);
+      const cleanKey = DropboxService.cleanToken(appKeyInput);
+      const cleanSec = DropboxService.cleanToken(appSecretInput);
+
+      await store.updateUserSettings({
+        dropboxAccessToken: cleanToken,
+        dropboxRefreshToken: cleanRefToken,
+        dropboxAppKey: cleanKey,
+        dropboxAppSecret: cleanSec,
+      });
+      setTokenInput(cleanToken);
+      setRefreshTokenInput(cleanRefToken);
+      setAppKeyInput(cleanKey);
+      setAppSecretInput(cleanSec);
+      Alert.alert('Éxito', 'Configuración de Dropbox guardada correctamente.');
     } catch (e: any) {
-      Alert.alert('Error', `No se pudo guardar el token: ${e.message || String(e)}`);
+      Alert.alert('Error', `No se pudo guardar la configuración: ${e.message || String(e)}`);
+    }
+  };
+
+  const handleForceRefreshToken = async () => {
+    const rfToken = DropboxService.cleanToken(refreshTokenInput) || DropboxService.cleanToken(store.userSettings.dropboxRefreshToken);
+    if (!rfToken) {
+      Alert.alert('Refresh Token Requerido', 'Por favor ingresa un Refresh Token en la configuración.');
+      return;
+    }
+
+    setRefreshingToken(true);
+    try {
+      const newToken = await DropboxService.refreshAccessTokenIfNeeded(
+        {
+          ...store.userSettings,
+          dropboxAccessToken: DropboxService.cleanToken(tokenInput) || store.userSettings.dropboxAccessToken,
+          dropboxRefreshToken: rfToken,
+          dropboxAppKey: DropboxService.cleanToken(appKeyInput) || store.userSettings.dropboxAppKey,
+          dropboxAppSecret: DropboxService.cleanToken(appSecretInput) || store.userSettings.dropboxAppSecret,
+        },
+        store.updateUserSettings,
+        true
+      );
+      if (newToken) {
+        setTokenInput(newToken);
+        Alert.alert('Token Renovado', 'Se ha obtenido exitosamente un nuevo Access Token de 4 horas usando el Refresh Token.');
+      } else {
+        Alert.alert('Error', 'No se pudo generar un nuevo Access Token.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error al Renovar Token', e.message || String(e));
+    } finally {
+      setRefreshingToken(false);
     }
   };
 
   const handleTestConnection = async () => {
-    const tokenToTest = tokenInput.trim() || store.userSettings.dropboxAccessToken;
+    const tokenToTest = DropboxService.cleanToken(tokenInput) || DropboxService.cleanToken(store.userSettings.dropboxAccessToken);
     if (!tokenToTest) {
-      Alert.alert('Token Requerido', 'Por favor ingresa tu token de acceso de Dropbox.');
+      Alert.alert('Token Requerido', 'Por favor ingresa tu Token de Acceso de Dropbox.');
       return;
     }
 
@@ -82,8 +164,9 @@ export default function DropboxScreen() {
   };
 
   const handleManualUpload = async () => {
-    if (!store.userSettings.dropboxAccessToken) {
-      Alert.alert('Configuración Requerida', 'Por favor guarda tu token de acceso a Dropbox antes de realizar una subida.');
+    const hasCreds = !!(store.userSettings.dropboxAccessToken || store.userSettings.dropboxRefreshToken || tokenInput.trim() || refreshTokenInput.trim());
+    if (!hasCreds) {
+      Alert.alert('Configuración Requerida', 'Por favor guarda tu token de acceso o refresh token antes de realizar una subida.');
       return;
     }
 
@@ -135,14 +218,21 @@ export default function DropboxScreen() {
   };
 
   const handleRestoreSlot = async (slotNum: number, fileName: string) => {
-    if (!store.userSettings.dropboxAccessToken) {
-      Alert.alert('Configuración Requerida', 'Por favor guarda tu token de acceso a Dropbox antes de descargar.');
+    let tokenToUse = store.userSettings.dropboxAccessToken;
+    if (!tokenToUse) {
+      try {
+        tokenToUse = (await DropboxService.refreshAccessTokenIfNeeded(store.userSettings, store.updateUserSettings)) || '';
+      } catch (err) {}
+    }
+
+    if (!tokenToUse) {
+      Alert.alert('Configuración Requerida', 'Por favor guarda tu token de acceso o refresh token antes de descargar.');
       return;
     }
 
     setDownloadingSlot(slotNum);
     try {
-      const remoteContent = await DropboxService.downloadBackup(store.userSettings.dropboxAccessToken, fileName);
+      const remoteContent = await DropboxService.downloadBackup(tokenToUse, fileName);
       setDownloadingSlot(null);
 
       if (!remoteContent) {
@@ -190,6 +280,12 @@ export default function DropboxScreen() {
       new Date(store.userSettings.lastDropboxUploadTimestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
     : 'Nunca';
 
+  const formattedTokenFetchedDate = tokenFetchedAt > 0
+    ? new Date(tokenFetchedAt).toLocaleDateString('es-ES') +
+      ' ' +
+      new Date(tokenFetchedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    : 'No registrado aún';
+
   // Build 7 slots array ordered from most recent to oldest
   const slotsList = Array.from({ length: 7 }, (_, idx) => {
     const slotNum = idx + 1; // 1..7
@@ -221,50 +317,149 @@ export default function DropboxScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {/* Section 1: Connection & Access Token */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CONFIGURACIÓN DE DROPBOX</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CONFIGURACIÓN DE DROPBOX (OAUTH2)</Text>
           
           <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
             <View style={styles.cardHeader}>
               <Ionicons name="cloud-outline" size={28} color="#0061FF" />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Token de Acceso de Dropbox</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Credenciales y Refresh Token</Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                  Necesario para subir respaldos rotatorios a tu cuenta
+                  Permite renovar automáticamente el token de acceso cada 4 horas
                 </Text>
               </View>
             </View>
 
-            <View style={styles.tokenInputRow}>
-              <TextInput
-                value={tokenInput}
-                onChangeText={setTokenInput}
-                placeholder="Pega aquí tu Token de Acceso"
-                placeholderTextColor={colors.textSecondary + '80'}
-                secureTextEntry={!showToken}
-                style={[
-                  styles.tokenInput,
-                  {
-                    color: colors.text,
-                    backgroundColor: colors.background,
-                    borderColor: colors.backgroundSelected,
-                  },
-                ]}
-              />
-              <Pressable
-                onPress={() => setShowToken(!showToken)}
-                style={[styles.iconEyeBtn, { backgroundColor: colors.backgroundSelected }]}
-              >
-                <Ionicons name={showToken ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.text} />
-              </Pressable>
+            {/* Refresh Token Input */}
+            <View style={{ gap: 4 }}>
+              <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>Refresh Token (Ilimitado):</Text>
+              <View style={styles.tokenInputRow}>
+                <TextInput
+                  value={refreshTokenInput}
+                  onChangeText={setRefreshTokenInput}
+                  placeholder="Pega aquí tu Refresh Token"
+                  placeholderTextColor={colors.textSecondary + '80'}
+                  secureTextEntry={!showSecrets}
+                  style={[
+                    styles.tokenInput,
+                    {
+                      color: colors.text,
+                      backgroundColor: colors.background,
+                      borderColor: colors.backgroundSelected,
+                    },
+                  ]}
+                />
+                <Pressable
+                  onPress={() => setShowSecrets(!showSecrets)}
+                  style={[styles.iconEyeBtn, { backgroundColor: colors.backgroundSelected }]}
+                >
+                  <Ionicons name={showSecrets ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.text} />
+                </Pressable>
+              </View>
             </View>
 
+            {/* App Key & App Secret Inputs */}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>App Key (Client ID):</Text>
+                <TextInput
+                  value={appKeyInput}
+                  onChangeText={setAppKeyInput}
+                  placeholder="App Key"
+                  placeholderTextColor={colors.textSecondary + '80'}
+                  style={[
+                    styles.tokenInput,
+                    {
+                      color: colors.text,
+                      backgroundColor: colors.background,
+                      borderColor: colors.backgroundSelected,
+                    },
+                  ]}
+                />
+              </View>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>App Secret (Opcional):</Text>
+                <TextInput
+                  value={appSecretInput}
+                  onChangeText={setAppSecretInput}
+                  placeholder="App Secret"
+                  placeholderTextColor={colors.textSecondary + '80'}
+                  secureTextEntry={!showSecrets}
+                  style={[
+                    styles.tokenInput,
+                    {
+                      color: colors.text,
+                      backgroundColor: colors.background,
+                      borderColor: colors.backgroundSelected,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+
+            {/* Short-Lived Access Token Input */}
+            <View style={{ gap: 4, marginTop: 4 }}>
+              <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>Access Token Actual (Caduca en 4h):</Text>
+              <View style={styles.tokenInputRow}>
+                <TextInput
+                  value={tokenInput}
+                  onChangeText={setTokenInput}
+                  placeholder="Access Token (sl...)"
+                  placeholderTextColor={colors.textSecondary + '80'}
+                  secureTextEntry={!showToken}
+                  style={[
+                    styles.tokenInput,
+                    {
+                      color: colors.text,
+                      backgroundColor: colors.background,
+                      borderColor: colors.backgroundSelected,
+                    },
+                  ]}
+                />
+                <Pressable
+                  onPress={() => setShowToken(!showToken)}
+                  style={[styles.iconEyeBtn, { backgroundColor: colors.backgroundSelected }]}
+                >
+                  <Ionicons name={showToken ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.text} />
+                </Pressable>
+              </View>
+              {hasAccessToken && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 }}>
+                  <Ionicons
+                    name={remainingLifetimeMs > 0 || tokenFetchedAt === 0 ? "checkmark-circle-outline" : "alert-circle-outline"}
+                    size={14}
+                    color={remainingLifetimeMs > 0 || tokenFetchedAt === 0 ? "#34C759" : "#FF9500"}
+                  />
+                  <Text style={{ color: remainingLifetimeMs > 0 || tokenFetchedAt === 0 ? '#34C759' : '#FF9500', fontSize: 12, fontWeight: '600' }}>
+                    {remainingLifetimeText}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Action Buttons */}
             <View style={styles.btnRow}>
               <Pressable
-                onPress={handleSaveToken}
+                onPress={handleSaveCredentials}
                 style={[styles.smallBtn, { backgroundColor: '#0061FF' }]}
               >
                 <Ionicons name="save-outline" size={16} color="#FFF" />
-                <Text style={styles.smallBtnText}>Guardar Token</Text>
+                <Text style={styles.smallBtnText}>Guardar</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleForceRefreshToken}
+                disabled={refreshingToken}
+                style={[styles.smallBtn, { backgroundColor: '#5856D6' }]}
+              >
+                {refreshingToken ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh-outline" size={16} color="#FFF" />
+                    <Text style={styles.smallBtnText}>Renovar Token</Text>
+                  </>
+                )}
               </Pressable>
 
               <Pressable
@@ -277,7 +472,7 @@ export default function DropboxScreen() {
                 ) : (
                   <>
                     <Ionicons name="checkmark-circle-outline" size={16} color="#0061FF" />
-                    <Text style={[styles.smallBtnText, { color: '#0061FF' }]}>Probar Conexión</Text>
+                    <Text style={[styles.smallBtnText, { color: '#0061FF' }]}>Probar</Text>
                   </>
                 )}
               </Pressable>
@@ -550,6 +745,20 @@ export default function DropboxScreen() {
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>AppState de la App</Text>
                 <Text style={[styles.debugVal, { color: currentAppState === 'active' ? '#34C759' : '#FF9500' }]}>
                   {currentAppState}
+                </Text>
+              </View>
+
+              <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
+                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>Refresh Token Configurado</Text>
+                <Text style={[styles.debugVal, { color: store.userSettings.dropboxRefreshToken ? '#34C759' : '#FF9500' }]}>
+                  {store.userSettings.dropboxRefreshToken ? 'Sí (Auto-renovación)' : 'No (Manual)'}
+                </Text>
+              </View>
+
+              <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
+                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>Antigüedad del Access Token</Text>
+                <Text style={[styles.debugVal, { color: isTokenOlderThan4Hours ? '#FF9500' : '#34C759' }]}>
+                  {tokenFetchedAt > 0 ? `${timeSinceTokenFetchHours}h (${isTokenOlderThan4Hours ? 'Caducado >4h' : '< 4h Válido'})` : 'Sin registro'}
                 </Text>
               </View>
 

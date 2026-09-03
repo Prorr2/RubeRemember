@@ -1331,10 +1331,14 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   // Backup and Restore
   const exportBackupData = useCallback(async (): Promise<string> => {
-    // Sanitize userSettings for backup export (never include sensitive tokens like dropboxAccessToken)
+    // Sanitize userSettings for backup export (never include sensitive tokens, refresh tokens, app keys/secrets, or timestamps)
     const sanitizedUserSettings = {
       ...userSettings,
       dropboxAccessToken: '',
+      dropboxRefreshToken: '',
+      dropboxAppKey: '',
+      dropboxAppSecret: '',
+      dropboxTokenFetchedTimestamp: 0,
     };
 
     const db: DatabaseV3 = {
@@ -1456,8 +1460,12 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       if (importedDb.userSettings) {
         finalUserSettings = {
           ...importedDb.userSettings,
-          // Preserve local dropboxAccessToken and local sync rotation state
+          // Preserve local dropboxAccessToken, refresh token, app credentials and local sync rotation state
           dropboxAccessToken: userSettings.dropboxAccessToken || importedDb.userSettings.dropboxAccessToken || '',
+          dropboxRefreshToken: userSettings.dropboxRefreshToken || importedDb.userSettings.dropboxRefreshToken || '',
+          dropboxAppKey: userSettings.dropboxAppKey || importedDb.userSettings.dropboxAppKey || '',
+          dropboxAppSecret: userSettings.dropboxAppSecret || importedDb.userSettings.dropboxAppSecret || '',
+          dropboxTokenFetchedTimestamp: userSettings.dropboxTokenFetchedTimestamp || importedDb.userSettings.dropboxTokenFetchedTimestamp || 0,
           dropboxAutoUploadEnabled: userSettings.dropboxAutoUploadEnabled ?? importedDb.userSettings.dropboxAutoUploadEnabled,
           lastDropboxUploadTimestamp: userSettings.lastDropboxUploadTimestamp || importedDb.userSettings.lastDropboxUploadTimestamp || 0,
           lastDropboxUploadStatus: userSettings.lastDropboxUploadStatus || importedDb.userSettings.lastDropboxUploadStatus || '',
