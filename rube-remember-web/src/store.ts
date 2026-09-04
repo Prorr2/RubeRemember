@@ -14,6 +14,7 @@ import {
   Phase,
   Session,
   Recommendation,
+  Comment,
   DEFAULT_USER_SETTINGS,
   DEFAULT_HOUR_WEIGHTS,
   DEFAULT_ACTIVITY_CATEGORIES,
@@ -421,7 +422,8 @@ export const rememberStore = {
       phaseId: data.phaseId || undefined,
       timeSlotId: data.timeSlotId || undefined,
       favourite: data.favourite || false,
-      tags: data.tags || []
+      tags: data.tags || [],
+      comments: []
     };
     saveState({
       ...storeState,
@@ -533,6 +535,44 @@ export const rememberStore = {
           : item
       )
     });
+  },
+
+  addComment(taskId: string, text: string, images?: string[]) {
+    if (!text.trim() && (!images || images.length === 0)) return;
+    const newComment: Comment = {
+      id: Math.random().toString(36).substring(7),
+      text: text.trim(),
+      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      images,
+    };
+    const task = storeState.items.find((i) => i.id === taskId);
+    if (!task || task.type !== ItemType.TASK) return;
+    const t = task as any;
+    this.updateItem(taskId, {
+      comments: [...(t.comments || []), newComment],
+    } as any);
+  },
+
+  updateComment(taskId: string, commentId: string, text: string) {
+    if (!text.trim()) return;
+    const task = storeState.items.find((i) => i.id === taskId);
+    if (!task || task.type !== ItemType.TASK) return;
+    const t = task as any;
+    const updatedComments = (t.comments || []).map((c: any) => {
+      if (c.id === commentId) {
+        return { ...c, text: text.trim() };
+      }
+      return c;
+    });
+    this.updateItem(taskId, { comments: updatedComments } as any);
+  },
+
+  deleteComment(taskId: string, commentId: string) {
+    const task = storeState.items.find((i) => i.id === taskId);
+    if (!task || task.type !== ItemType.TASK) return;
+    const t = task as any;
+    const filteredComments = (t.comments || []).filter((c: any) => c.id !== commentId);
+    this.updateItem(taskId, { comments: filteredComments } as any);
   },
 
   deleteItem(id: string) {

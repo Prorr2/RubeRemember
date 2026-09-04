@@ -44,6 +44,13 @@ export interface BaseItem {
   favourite?: boolean;
 }
 
+export interface Comment {
+  id: string;
+  text: string;
+  createdAt: string;
+  images?: string[];
+}
+
 export interface Task extends BaseItem {
   type: ItemType.TASK;
   taskState: TaskState;
@@ -64,6 +71,7 @@ export interface Task extends BaseItem {
   sessionsCount?: number;
   lastSession?: string;
   images?: string[];
+  comments?: Comment[];
   active?: boolean;
   habit?: boolean;
   habitTime?: string;

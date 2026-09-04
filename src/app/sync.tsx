@@ -173,18 +173,18 @@ export default function SyncScreen() {
             const itemCount = Array.isArray(incomingDb.items) ? incomingDb.items.length : 0;
 
             Alert.alert(
-              'Confirmar Recepción',
-              `Se han recibido datos del ordenador (${itemCount} elementos). ¿Aceptar e importarlos directamente?`,
+              '⚠️ SOLICITUD DE SOBRESCRITURA DEL ORDENADOR',
+              `El ordenador ha enviado una copia de su base de datos (${itemCount} elementos).\n\nATENCIÓN: Si autorizas esta operación, la base de datos actual del móvil se SOBRESCRIBIRÁ con la información recibida del ordenador.\n\n¿Deseas autorizar expresamente esta importación?`,
               [
                 {
-                  text: 'Rechazar',
+                  text: 'Rechazar (Recomendado)',
                   style: 'cancel',
                   onPress: () => {
                     alertOutShown = false;
                   },
                 },
                 {
-                  text: 'Recibir y Sobrescribir',
+                  text: 'Autorizar y Sobrescribir',
                   style: 'destructive',
                   onPress: async () => {
                     setSyncLoading(true);

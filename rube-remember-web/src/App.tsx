@@ -647,6 +647,15 @@ export default function App() {
       return;
     }
 
+    const count = Array.isArray(db.items) ? db.items.length : 0;
+    const confirmSend = window.confirm(
+      `⚠️ ATENCIÓN: Estás a punto de enviar la base de datos del ordenador (${count} elementos) al móvil.\n\nPara evitar pérdidas accidentales, el móvil requerirá tu autorización explícita antes de aplicar los cambios.\n\n¿Deseas continuar y enviar los datos al servidor para el móvil?`
+    );
+    if (!confirmSend) {
+      setSyncBanner('ℹ️ Envío cancelado por el usuario.');
+      return;
+    }
+
     setSyncBusy(true);
     try {
       const res = await fetch('/api/outgoing', {
@@ -658,7 +667,7 @@ export default function App() {
       });
       const json = await res.json();
       if (json.ok) {
-        setSyncBanner('✅ Datos enviados al servidor. Se sincronizarán automáticamente en el móvil.');
+        setSyncBanner('✅ Datos enviados al servidor local. Requerirán autorización explícita en la app móvil.');
       } else {
         setSyncBanner('❌ El servidor no confirmó la recepción: ' + (json.error || ''));
       }

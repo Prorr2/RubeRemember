@@ -14,11 +14,11 @@ export interface SyncResult {
 
 export const DropboxService = {
   /**
-   * Generates the filename for a specific slot index (1..7)
+   * Generates the filename for a specific slot index (1..8)
    */
   getSlotFileName(baseName: string = 'rube_remember_backup.json', slotIndex: number): string {
     const cleanBase = baseName.replace(/(_\d+)?\.json$/i, '');
-    const validSlot = Math.max(1, Math.min(7, slotIndex));
+    const validSlot = Math.max(1, Math.min(8, slotIndex));
     return `${cleanBase}_${validSlot}.json`;
   },
 
@@ -269,7 +269,7 @@ export const DropboxService = {
 
     const lastUpload = userSettings.lastDropboxUploadTimestamp || 0;
     const now = Date.now();
-    const cooldownMinutes = userSettings.dropboxSyncCooldownMinutes ?? 10;
+    const cooldownMinutes = userSettings.dropboxSyncCooldownMinutes ?? 60;
     const cooldownMs = cooldownMinutes * 60 * 1000;
 
     // Check if cooldown period has passed since last upload (skipped if forceManual or skipTenMinCheck)
@@ -303,9 +303,9 @@ export const DropboxService = {
     try {
       const localJson = await exportBackupData();
 
-      // Calculate next slot index in 1..7 rotating scheme
+      // Calculate next slot index in 1..8 rotating scheme
       const currentSlot = userSettings.lastDropboxSlotIndex || 1;
-      const nextSlot = lastUpload ? ((currentSlot % 7) + 1) : currentSlot;
+      const nextSlot = lastUpload ? ((currentSlot % 8) + 1) : currentSlot;
       const targetFileName = this.getSlotFileName(userSettings.dropboxFileName, nextSlot);
 
       console.log(`[DropboxSync] Subiendo respaldo al Archivo #${nextSlot} (${targetFileName})...`);

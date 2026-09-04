@@ -58,7 +58,7 @@ export default function DropboxScreen() {
 
   const activeTasksCount = store.items.filter(i => i.type === 'TASK' && !i.trash).length;
 
-  const cooldownMinutes = store.userSettings.dropboxSyncCooldownMinutes ?? 10;
+  const cooldownMinutes = store.userSettings.dropboxSyncCooldownMinutes ?? 60;
   const lastUpload = store.userSettings.lastDropboxUploadTimestamp || 0;
   const lastSlotIndex = store.userSettings.lastDropboxSlotIndex || 1;
   const timeSinceLastSyncMs = lastUpload > 0 ? Date.now() - lastUpload : 0;
@@ -286,10 +286,10 @@ export default function DropboxScreen() {
       new Date(tokenFetchedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
     : 'No registrado aún';
 
-  // Build 7 slots array ordered from most recent to oldest
-  const slotsList = Array.from({ length: 7 }, (_, idx) => {
-    const slotNum = idx + 1; // 1..7
-    const cyclesAgo = (lastSlotIndex - slotNum + 7) % 7;
+  // Build 8 slots array ordered from most recent to oldest
+  const slotsList = Array.from({ length: 8 }, (_, idx) => {
+    const slotNum = idx + 1; // 1..8
+    const cyclesAgo = (lastSlotIndex - slotNum + 8) % 8;
     const estimatedAgeMinutes = cyclesAgo * cooldownMinutes;
     const fileName = DropboxService.getSlotFileName(store.userSettings.dropboxFileName, slotNum);
     return {
@@ -494,7 +494,7 @@ export default function DropboxScreen() {
                   await store.updateUserSettings({ dropboxAutoUploadEnabled: false });
                   Alert.alert(
                     '🛑 AUTO-SUBIDA PAUSADA (EMERGENCIA)',
-                    'Se ha detenido la auto-subida a Dropbox en caso de emergencia para proteger los 7 archivos de respaldo en la nube.'
+                    'Se ha detenido la auto-subida a Dropbox en caso de emergencia para proteger los 8 archivos de respaldo en la nube.'
                   );
                 }}
                 style={styles.emergencyStopBtn}
@@ -515,7 +515,7 @@ export default function DropboxScreen() {
                   await store.updateUserSettings({ dropboxAutoUploadEnabled: true });
                   Alert.alert(
                     '▶️ AUTO-SUBIDA REANUDADA',
-                    'La sincronización automática rotatoria de 7 archivos se ha vuelto a activar.'
+                    'La sincronización automática rotatoria de 8 archivos se ha vuelto a activar.'
                   );
                 }}
                 style={styles.reEnableBtn}
@@ -575,9 +575,9 @@ export default function DropboxScreen() {
             </View>
 
             <View style={styles.infoRow}>
-              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Rotación de Archivos (1..7):</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Rotación de Archivos (1..8):</Text>
               <Text style={{ color: '#0061FF', fontSize: 13, fontWeight: '700' }}>
-                Archivo #{lastSlotIndex} de 7
+                Archivo #{lastSlotIndex} de 8
               </Text>
             </View>
 
@@ -610,11 +610,11 @@ export default function DropboxScreen() {
           </View>
         </View>
 
-        {/* Section 3: RESTAURACIÓN ROTATORIA DE 7 ARCHIVOS */}
+        {/* Section 3: RESTAURACIÓN ROTATORIA DE 8 ARCHIVOS */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>RESTAURAR DESDE DROPBOX (7 RESPALDOS)</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>RESTAURAR DESDE DROPBOX (8 RESPALDOS)</Text>
           <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
-            Selecciona cuál de los 7 archivos rotatorios deseas restaurar en tu dispositivo:
+            Selecciona cuál de los 8 archivos rotatorios deseas restaurar en tu dispositivo:
           </Text>
 
           <View style={{ gap: 10 }}>
@@ -695,7 +695,7 @@ export default function DropboxScreen() {
               <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>lastDropboxSlotIndex</Text>
                 <Text style={[styles.debugVal, { color: '#0061FF' }]}>
-                  Archivo #{lastSlotIndex} / 7
+                  Archivo #{lastSlotIndex} / 8
                 </Text>
               </View>
 
@@ -765,7 +765,7 @@ export default function DropboxScreen() {
               <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>Intervalo temporizador</Text>
                 <Text style={[styles.debugVal, { color: colors.text }]}>
-                  Cada 1 min (60.000 ms)
+                  Cada 30 min (1.800.000 ms)
                 </Text>
               </View>
             </View>

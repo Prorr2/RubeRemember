@@ -2342,7 +2342,7 @@ export default function TasksScreen() {
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={{ flex: 1 }}
           >
             {/* Header section (closeable at all times) */}
@@ -2399,6 +2399,7 @@ export default function TasksScreen() {
                 style={{ flex: 1 }}
                 contentContainerStyle={{ padding: 16, gap: 16 }}
                 showsVerticalScrollIndicator={true}
+                keyboardShouldPersistTaps="handled"
               >
                 {/* Description & metadata if present */}
                 {currentRoadmapTask.description ? (

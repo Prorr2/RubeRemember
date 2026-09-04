@@ -107,13 +107,13 @@ export function DropboxAutoSyncHandler() {
       runSyncCheck('Initial app mount');
     }
 
-    // 2. Set interval to check every 1 minute (60,000 ms) while in foreground
-    const ONE_MINUTE_MS = 60 * 1000;
+    // 2. Set interval to check every 30 minutes while in foreground
+    const THIRTY_MINUTES_MS = 30 * 60 * 1000;
     const intervalId = setInterval(() => {
       if (appStateRef.current === 'active') {
-        runSyncCheck('1-minute interval timer');
+        runSyncCheck('30-minute interval timer');
       }
-    }, ONE_MINUTE_MS);
+    }, THIRTY_MINUTES_MS);
 
     // 3. Listen to AppState foreground changes ('active')
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
