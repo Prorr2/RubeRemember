@@ -19,7 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useRememberStore } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/screen-header';
 import { DropboxService, DropboxAccountInfo } from '@/services/DropboxService';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,8 +171,8 @@ function SnapshotDateFilter({
         <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Filtrar respaldos por fecha</Text>
         {active && (
           <Pressable onPress={clear} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 2 }}>
-            <Ionicons name="close-circle-outline" size={14} color="#0061FF" />
-            <Text style={{ color: '#0061FF', fontSize: 12, fontWeight: '600' }}>Limpiar filtro</Text>
+            <Ionicons name="close-circle-outline" size={14} color={Accent} />
+            <Text style={{ color: Accent, fontSize: 12, fontWeight: '600' }}>Limpiar filtro</Text>
           </Pressable>
         )}
       </View>
@@ -188,7 +189,7 @@ function SnapshotDateFilter({
             onPress={() => applyPreset(p.days)}
             style={[styles.filterChip, { backgroundColor: 'rgba(0, 97, 255, 0.12)' }]}
           >
-            <Text style={{ color: '#0061FF', fontSize: 11, fontWeight: '600' }}>{p.label}</Text>
+            <Text style={{ color: Accent, fontSize: 11, fontWeight: '600' }}>{p.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -204,7 +205,7 @@ function SnapshotDateFilter({
             justifyContent: 'space-between',
             borderWidth: 1,
             borderRadius: 10,
-            borderColor: from ? '#0061FF' : colors.backgroundSelected,
+            borderColor: from ? Accent : colors.backgroundSelected,
             paddingVertical: 9,
             paddingHorizontal: 12,
             backgroundColor: colors.background,
@@ -214,7 +215,7 @@ function SnapshotDateFilter({
             <Text style={{ color: colors.textSecondary, fontSize: 10 }}>Desde</Text>
             <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>{formatDisplay(from)}</Text>
           </View>
-          <Ionicons name="calendar-outline" size={16} color="#0061FF" />
+          <Ionicons name="calendar-outline" size={16} color={Accent} />
         </Pressable>
 
         <Pressable
@@ -226,7 +227,7 @@ function SnapshotDateFilter({
             justifyContent: 'space-between',
             borderWidth: 1,
             borderRadius: 10,
-            borderColor: to ? '#0061FF' : colors.backgroundSelected,
+            borderColor: to ? Accent : colors.backgroundSelected,
             paddingVertical: 9,
             paddingHorizontal: 12,
             backgroundColor: colors.background,
@@ -236,7 +237,7 @@ function SnapshotDateFilter({
             <Text style={{ color: colors.textSecondary, fontSize: 10 }}>Hasta</Text>
             <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>{formatDisplay(to)}</Text>
           </View>
-          <Ionicons name="calendar-outline" size={16} color="#0061FF" />
+          <Ionicons name="calendar-outline" size={16} color={Accent} />
         </Pressable>
       </View>
 
@@ -257,7 +258,7 @@ function SnapshotDateFilter({
                 onPress={() => setCurrentMonthDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
                 style={{ padding: 6 }}
               >
-                <Ionicons name="chevron-back" size={18} color="#0061FF" />
+                <Ionicons name="chevron-back" size={18} color={Accent} />
               </Pressable>
               <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>
                 {getMonthNameSpanish(currentMonthDate)}
@@ -266,7 +267,7 @@ function SnapshotDateFilter({
                 onPress={() => setCurrentMonthDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
                 style={{ padding: 6 }}
               >
-                <Ionicons name="chevron-forward" size={18} color="#0061FF" />
+                <Ionicons name="chevron-forward" size={18} color={Accent} />
               </Pressable>
             </View>
 
@@ -292,7 +293,7 @@ function SnapshotDateFilter({
                       alignItems: 'center',
                       justifyContent: 'center',
                       borderRadius: 18,
-                      backgroundColor: selected ? '#0061FF' : 'transparent',
+                      backgroundColor: selected ? Accent : 'transparent',
                     }}
                   >
                     <Text
@@ -821,13 +822,7 @@ await store.updateUserSettings({
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.backgroundSelected }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Dropbox y Estado de la BD</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader title="Dropbox y Estado de la BD" />
 
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {/* Section 1: Connection & Access Token */}
@@ -836,7 +831,7 @@ await store.updateUserSettings({
           
           <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
             <View style={styles.cardHeader}>
-              <Ionicons name="cloud-outline" size={28} color="#0061FF" />
+              <Ionicons name="cloud-outline" size={28} color={Accent} />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>Credenciales y Refresh Token</Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
@@ -956,7 +951,7 @@ await store.updateUserSettings({
             <View style={styles.btnRow}>
               <Pressable
                 onPress={handleSaveCredentials}
-                style={[styles.smallBtn, { backgroundColor: '#0061FF' }]}
+                style={[styles.smallBtn, { backgroundColor: Accent }]}
               >
                 <Ionicons name="save-outline" size={16} color="#FFF" />
                 <Text style={styles.smallBtnText}>Guardar</Text>
@@ -983,11 +978,11 @@ await store.updateUserSettings({
                 style={[styles.smallBtn, { backgroundColor: colors.backgroundSelected }]}
               >
                 {testingConnection ? (
-                  <ActivityIndicator size="small" color="#0061FF" />
+                  <ActivityIndicator size="small" color={Accent} />
                 ) : (
                   <>
-                    <Ionicons name="checkmark-circle-outline" size={16} color="#0061FF" />
-                    <Text style={[styles.smallBtnText, { color: '#0061FF' }]}>Probar</Text>
+                    <Ionicons name="checkmark-circle-outline" size={16} color={Accent} />
+                    <Text style={[styles.smallBtnText, { color: Accent }]}>Probar</Text>
                   </>
                 )}
               </Pressable>
@@ -1091,7 +1086,7 @@ await store.updateUserSettings({
 
             <View style={styles.infoRow}>
               <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Presupuesto de Almacenamiento:</Text>
-              <Text style={{ color: '#0061FF', fontSize: 13, fontWeight: '700' }}>
+              <Text style={{ color: Accent, fontSize: 13, fontWeight: '700' }}>
                 {storageBudgetMB} MB
               </Text>
             </View>
@@ -1133,8 +1128,8 @@ await store.updateUserSettings({
               onPress={() => refreshRemoteSnapshots()}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4 }}
             >
-              <Ionicons name="refresh" size={16} color="#0061FF" />
-              <Text style={{ color: '#0061FF', fontSize: 12, fontWeight: '600' }}>Actualizar</Text>
+              <Ionicons name="refresh" size={16} color={Accent} />
+              <Text style={{ color: Accent, fontSize: 12, fontWeight: '600' }}>Actualizar</Text>
             </Pressable>
           </View>
           <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
@@ -1243,7 +1238,7 @@ await store.updateUserSettings({
                         disabled={downloadingKey !== null || deletingKey !== null}
                         style={[
                           styles.restoreBtn,
-                          { backgroundColor: item.isLatest ? '#0061FF' : colors.backgroundSelected },
+                          { backgroundColor: item.isLatest ? Accent : colors.backgroundSelected },
                         ]}
                       >
                         {downloadingKey === item.key ? (
@@ -1309,7 +1304,7 @@ await store.updateUserSettings({
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>MB</Text>
               <Pressable
                 onPress={handleSetStorageBudget}
-                style={[styles.creditApplyBtn, { backgroundColor: '#0061FF' }]}
+                style={[styles.creditApplyBtn, { backgroundColor: Accent }]}
               >
                 <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>Guardar</Text>
               </Pressable>
@@ -1338,12 +1333,12 @@ await store.updateUserSettings({
                       {
                         backgroundColor: active ? 'rgba(0, 97, 255, 0.2)' : colors.background,
                         borderWidth: 1,
-                        borderColor: active ? '#0061FF' : colors.backgroundSelected,
+                        borderColor: active ? Accent : colors.backgroundSelected,
                       },
                     ]}
                   >
-                    <Ionicons name="time-outline" size={16} color={active ? '#0061FF' : colors.textSecondary} />
-                    <Text style={[styles.smallBtnText, { color: active ? '#0061FF' : colors.textSecondary }]}>
+                    <Ionicons name="time-outline" size={16} color={active ? Accent : colors.textSecondary} />
+                    <Text style={[styles.smallBtnText, { color: active ? Accent : colors.textSecondary }]}>
                       {opt.label}
                     </Text>
                   </Pressable>
@@ -1366,7 +1361,7 @@ await store.updateUserSettings({
             <View style={styles.debugGrid}>
               <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
                 <Text style={[styles.debugKey, { color: colors.textSecondary }]}>dropboxStorageBudgetMB</Text>
-                <Text style={[styles.debugVal, { color: '#0061FF' }]}>
+                <Text style={[styles.debugVal, { color: Accent }]}>
                   {storageBudgetMB} MB
                 </Text>
               </View>
@@ -1479,7 +1474,7 @@ await store.updateUserSettings({
             <Pressable
               onPress={handleManualUpload}
               disabled={uploading || downloadingKey !== null}
-              style={[styles.actionBtn, { backgroundColor: '#0061FF' }]}
+              style={[styles.actionBtn, { backgroundColor: Accent }]}
             >
               {uploading ? (
                 <ActivityIndicator size="small" color="#FFF" />
@@ -1495,7 +1490,7 @@ await store.updateUserSettings({
 
         {/* Help Guide */}
         <View style={[styles.helpCard, { backgroundColor: colors.backgroundElement }]}>
-          <Ionicons name="information-circle-outline" size={22} color="#0061FF" />
+          <Ionicons name="information-circle-outline" size={22} color={Accent} />
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: 'bold' }}>
               ¿Cómo funciona el sistema de rotación por presupuesto?

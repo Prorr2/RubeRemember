@@ -32,6 +32,7 @@ export function useTaskService() {
       archived: false,
       completed: false,
       favourite: false,
+      trash: false,
       tags: [],
       comments: [],
       priority,

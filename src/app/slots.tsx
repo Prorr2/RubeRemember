@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useRememberStore, TimeSlot } from '../hooks/use-remember-store';
 import { useColorScheme } from '../hooks/use-color-scheme';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent, ThemeColors } from '@/constants/theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Small time-input helper (HH:MM)
@@ -27,7 +27,7 @@ function TimeInput({
   label: string;
   value: string;
   onChange: (v: string) => void;
-  colors: typeof Colors.dark;
+  colors: ThemeColors;
 }) {
   // Local editing buffers so each field is fully independent
   const [hText, setHText] = React.useState(() => value.split(':')[0] ?? '00');
@@ -110,7 +110,7 @@ function SlotFormModal({
   initial: Partial<TimeSlot> | null;
   onSave: (name: string, start: string, end: string) => void;
   onClose: () => void;
-  colors: typeof Colors.dark;
+  colors: ThemeColors;
 }) {
   const [name, setName] = useState(initial?.name ?? '');
   const [start, setStart] = useState(initial?.startTime ?? '09:00');
@@ -167,7 +167,7 @@ function SlotFormModal({
             <Pressable style={[modalStyles.btn, { backgroundColor: colors.backgroundSelected }]} onPress={onClose}>
               <Text style={{ color: colors.text, fontWeight: '600' }}>Cancelar</Text>
             </Pressable>
-            <Pressable style={[modalStyles.btn, { backgroundColor: '#007AFF' }]} onPress={handleSave}>
+            <Pressable style={[modalStyles.btn, { backgroundColor: Accent }]} onPress={handleSave}>
               <Text style={{ color: '#fff', fontWeight: '700' }}>Guardar</Text>
             </Pressable>
           </View>
@@ -253,7 +253,7 @@ export default function SlotsScreen() {
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Franjas Horarias</Text>
         <Pressable onPress={openNew} style={styles.addBtn}>
-          <Ionicons name="add" size={24} color="#007AFF" />
+          <Ionicons name="add" size={24} color={Accent} />
         </Pressable>
       </View>
 
@@ -307,7 +307,7 @@ export default function SlotsScreen() {
             <View key={slot.id} style={[styles.slotCard, { backgroundColor: colors.backgroundElement }]}>
               <View style={styles.slotLeft}>
                 <Text style={[styles.slotName, { color: colors.text }]}>{slot.name}</Text>
-                <Text style={[styles.slotRange, { color: '#007AFF' }]}>
+                <Text style={[styles.slotRange, { color: Accent }]}>
                   {slot.startTime} – {slot.endTime}
                 </Text>
                 <Text style={[styles.slotMeta, { color: colors.textSecondary }]}>
@@ -316,7 +316,7 @@ export default function SlotsScreen() {
               </View>
               <View style={styles.slotActions}>
                 <Pressable onPress={() => openEdit(slot)} style={styles.slotBtn}>
-                  <Ionicons name="create-outline" size={20} color="#007AFF" />
+                  <Ionicons name="create-outline" size={20} color={Accent} />
                 </Pressable>
                 <Pressable onPress={() => handleDelete(slot)} style={styles.slotBtn}>
                   <Ionicons name="trash-outline" size={20} color="#FF3B30" />

@@ -24,9 +24,11 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { useRememberStore, ItemType, Priority, Task, EnergyType, getLocalDateStr, TaskState } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
 import { ScoreEngine, getTaskWeightLabel } from '@/engines/ScoreEngine';
 import { RichText } from '@/components/rich-text';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { PressableScale } from '@/components/ui/pressable-scale';
 import { useRecommendationService } from '@/services/RecommendationService';
 import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { MaskableTextInput, maskTextContent } from '@/components/maskable-text-input';
@@ -88,7 +90,7 @@ const EditableProgressBar: React.FC<EditableProgressBarProps> = ({ task, colors,
             ({task.workedTime || 0}m de {Math.round((task.estimatedHours || 0) * 60)}m est.)
           </Text>
         </View>
-        <Text style={{ color: '#34C759', fontSize: 11, fontWeight: '700' }}>{taskProgress}%</Text>
+        <Text style={{ color: Accent, fontSize: 11, fontWeight: '700' }}>{taskProgress}%</Text>
       </View>
       
       <Pressable
@@ -110,7 +112,7 @@ const EditableProgressBar: React.FC<EditableProgressBarProps> = ({ task, colors,
           <View style={{
             height: '100%',
             width: `${taskProgress}%`,
-            backgroundColor: '#34C759',
+            backgroundColor: Accent,
             borderRadius: 4
           }} />
         </View>
@@ -190,7 +192,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                   </Text>
                   {isNoteOnly ? (
                     <View style={{ backgroundColor: 'rgba(0, 122, 255, 0.12)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                      <Text style={{ color: '#007AFF', fontSize: 9, fontWeight: '800' }}>
+                      <Text style={{ color: Accent, fontSize: 9, fontWeight: '800' }}>
                         📝 Nota
                       </Text>
                     </View>
@@ -363,7 +365,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                     )}
 
                     <View style={{ gap: 3 }}>
-                      <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '800' }}>PROGRESO DE LA TAREA (%)</Text>
+                      <Text style={{ color: Accent, fontSize: 10, fontWeight: '800' }}>PROGRESO DE LA TAREA (%)</Text>
                       <TextInput
                         value={editProgress}
                         onChangeText={(val) => {
@@ -485,7 +487,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                     {/* Progress Percentage */}
                     {!isNoteOnly && (
                       <View style={{ gap: 3 }}>
-                        <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>
+                        <Text style={{ color: Accent, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>
                           📈 Progreso de la tarea:
                         </Text>
                         <Text style={{ color: colors.text, fontSize: 12 }}>
@@ -548,7 +550,6 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
 export default function TasksScreen() {
   const store = useRememberStore();
   const router = useRouter();
-  console.log('[TasksScreen] userSettings:', JSON.stringify(store.userSettings));
   
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
@@ -1193,7 +1194,7 @@ export default function TasksScreen() {
                     if (!label) return null;
                     return (
                       <View style={[styles.metaBadge, { backgroundColor: 'rgba(0, 122, 255, 0.1)' }]}>
-                        <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '700' }}>
+                        <Text style={{ color: Accent, fontSize: 10, fontWeight: '700' }}>
                           {label}
                         </Text>
                       </View>
@@ -1408,18 +1409,14 @@ export default function TasksScreen() {
           </View>
         </View>
       ) : (
-        <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-          <Pressable onPress={() => router.back()} style={styles.headerButton}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Tareas</Text>
-          <Pressable
-            onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.TASK } })}
-            style={styles.headerButton}
-          >
-            <Ionicons name="add" size={26} color="#FF9500" />
-          </Pressable>
-        </View>
+        <ScreenHeader
+          title="Mis Tareas"
+          right={
+            <PressableScale onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.TASK } })} style={styles.headerButton}>
+              <Ionicons name="add" size={26} color="#FF9500" />
+            </PressableScale>
+          }
+        />
       )}
 
       {/* Search Bar */}
@@ -1936,7 +1933,7 @@ export default function TasksScreen() {
                     style={[styles.modalOptionBtn, { backgroundColor: colors.background }]}
                   >
                     <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 120, 246, 0.15)' }]}>
-                      <Ionicons name="play" size={22} color="#007AFF" />
+                      <Ionicons name="play" size={22} color={Accent} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.modalOptionTitle, { color: colors.text }]}>Iniciar Enfoque ({dur}m)</Text>

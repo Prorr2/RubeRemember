@@ -2,16 +2,18 @@
   "expo": {
     "name": "RubeRemember",
     "slug": "RubeRemember",
-    "version": "1.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "ruberemember",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "icon": "./assets/images/icon.png"
+      "icon": "./assets/images/icon.png",
+      "buildNumber": "3"
     },
     "android": {
+      "versionCode": 3,
       "backgroundColor": "#E6F4FE",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

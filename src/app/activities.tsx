@@ -19,6 +19,8 @@ import { useRouter } from 'expo-router';
 import { useRememberStore, ItemType, Activity } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { RichText } from '@/components/rich-text';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { PressableScale } from '@/components/ui/pressable-scale';
 
 export default function ActivitiesScreen() {
   const store = useRememberStore();
@@ -173,18 +175,14 @@ export default function ActivitiesScreen() {
           </View>
         </View>
       ) : (
-        <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-          <Pressable onPress={() => router.back()} style={styles.headerButton}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Ocio / Tiempo Libre</Text>
-          <Pressable
-            onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.ACTIVITY } })}
-            style={styles.headerButton}
-          >
-            <Ionicons name="add" size={26} color="#5856D6" />
-          </Pressable>
-        </View>
+        <ScreenHeader
+          title="Ocio / Tiempo Libre"
+          right={
+            <PressableScale onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.ACTIVITY } })} style={styles.headerButton}>
+              <Ionicons name="add" size={26} color="#5856D6" />
+            </PressableScale>
+          }
+        />
       )}
 
       {/* Search Bar */}

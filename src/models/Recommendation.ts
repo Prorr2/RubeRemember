@@ -10,7 +10,7 @@ export interface Recommendation {
   energyAdjustment?: number;
   transitionAdjustment?: number;
   confidenceLevel?: number; // 0 to 100
-  sessionType?: 'COMPLETAR' | 'AVANZAR' | 'PASO' | 'MANTENER';
+  sessionType?: 'COMPLETAR' | 'AVANZAR' | 'PASO' | 'MANTENER' | 'SIGUIENTE_PASO' | 'HABITO';
   actionSuggested?: string;
   alternatives?: string[]; // array of alternative Task IDs
 }

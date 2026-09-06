@@ -17,7 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useRememberStore, HourWeight, CustomCategory, TaskCategory, VoiceKeywords, DEFAULT_VOICE_KEYWORDS } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/screen-header';
 import { useSettingsService } from '@/services/SettingsService';
 import { ScoreEngine } from '@/engines/ScoreEngine';
 
@@ -323,13 +324,7 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.backgroundSelected }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Configuración</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader title="Configuración" />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -364,7 +359,7 @@ export default function SettingsScreen() {
           >
             <View style={styles.menuItemLeft}>
               <View style={[styles.iconContainer, { backgroundColor: 'rgba(0, 97, 255, 0.15)' }]}>
-                <Ionicons name="cloud-done-outline" size={20} color="#0061FF" />
+                <Ionicons name="cloud-done-outline" size={20} color={Accent} />
               </View>
               <View>
                 <Text style={[styles.menuItemTitle, { color: colors.text }]}>Dropbox y Estado de la BD</Text>

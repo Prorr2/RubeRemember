@@ -20,7 +20,7 @@ export const ProgressEngine = {
     const taskSessions = sessions.filter(s => s.taskId === task.id);
 
     // Calculate total time worked in hours and minutes
-    const totalMinutes = task.workedTime || taskSessions.reduce((acc, s) => acc + (s.duration || 0), 0);
+    const totalMinutes = task.workedTime || taskSessions.reduce((acc, s) => acc + (s.realDuration || s.plannedDuration || 0), 0);
     const totalHours = (totalMinutes / 60).toFixed(1);
 
     if (weightLabel === 'terra') {

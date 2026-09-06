@@ -16,6 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { openBrowserAsync } from 'expo-web-browser';
 import { resolveImageUri } from '@/services/image-store';
+import { Accent } from '@/constants/theme';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -383,7 +384,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   link: {
-    color: '#007AFF',
+    color: Accent,
     textDecorationLine: 'underline',
     fontWeight: '600',
   },

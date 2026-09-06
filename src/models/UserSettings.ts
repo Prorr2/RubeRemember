@@ -23,6 +23,7 @@ export interface VoiceKeywords {
 
 export interface UserSettings {
   maxFocusTasks: number;
+  defaultFocusDuration: number; // in minutes (default 30)
   defaultCooldown: number; // in minutes (default 120 = 2 hours)
   notificationsEnabled: boolean;
   sleepSchedule?: TimeRange;
@@ -83,6 +84,7 @@ export const DEFAULT_VOICE_KEYWORDS: VoiceKeywords = {
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   maxFocusTasks: 3,
+  defaultFocusDuration: 30,
   defaultCooldown: 120, // 2 hours
   notificationsEnabled: true,
   sleepSchedule: { start: '23:00', end: '07:00' },

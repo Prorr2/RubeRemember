@@ -21,6 +21,7 @@ import { getNotifications } from '@/services/notification-service';
 import { useSessionService } from '@/services/SessionService';
 import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { Colors } from '@/constants/theme';
+import { Accent } from '@/constants/theme';
 
 export default function SessionScreen() {
   const router = useRouter();
@@ -266,7 +267,7 @@ export default function SessionScreen() {
   if (isInitializing || !task) {
     return (
       <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color="#FF9500" />
+        <ActivityIndicator size="large" color={Accent} />
         <Text style={{ color: colors.textSecondary, marginTop: 12 }}>Preparando sesión de enfoque...</Text>
       </SafeAreaView>
     );
@@ -309,7 +310,7 @@ export default function SessionScreen() {
             </Pressable>
 
             <Pressable onPress={handleForceComplete} style={[styles.btnCircle, { backgroundColor: 'rgba(52, 199, 89, 0.15)' }]}>
-              <Ionicons name="checkmark-outline" size={24} color="#34C759" />
+              <Ionicons name="checkmark-outline" size={24} color={Accent} />
             </Pressable>
           </View>
         </View>
@@ -329,7 +330,7 @@ export default function SessionScreen() {
                 onPress={() => handleAddImage((img) => setNoteImages((prev) => [...prev, img]))}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, backgroundColor: colors.backgroundSelected }}
               >
-                <Ionicons name="image-outline" size={16} color="#FF9500" />
+                <Ionicons name="image-outline" size={16} color={Accent} />
                 <Text style={{ fontSize: 12, color: '#FF9500', fontWeight: '700' }}>Adjuntar Imagen</Text>
               </Pressable>
             </View>
@@ -421,7 +422,7 @@ export default function SessionScreen() {
 
       {completedState === 'done' && (
         <View style={styles.loadingContainer}>
-          <Ionicons name="ribbon-outline" size={80} color="#FF9500" />
+          <Ionicons name="ribbon-outline" size={80} color={Accent} />
           <Text style={[styles.title, { color: colors.text, marginTop: 16 }]}>¡Buen Trabajo!</Text>
           <Text style={{ color: colors.textSecondary, marginTop: 8 }}>Progreso y estadísticas actualizadas.</Text>
         </View>

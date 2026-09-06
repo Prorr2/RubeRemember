@@ -13,7 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useRememberStore, Item, ItemType } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { PressableScale } from '@/components/ui/pressable-scale';
 
 export default function TrashScreen() {
   const store = useRememberStore();
@@ -71,7 +73,7 @@ export default function TrashScreen() {
 
   const getItemTypeIcon = (type: ItemType) => {
     if (type === ItemType.TASK) return { name: 'checkbox-outline', color: '#FF9500' };
-    if (type === ItemType.REMINDER) return { name: 'notifications-outline', color: '#007AFF' };
+    if (type === ItemType.REMINDER) return { name: 'notifications-outline', color: Accent };
     return { name: 'sparkles-outline', color: '#5856D6' };
   };
 
@@ -87,19 +89,18 @@ export default function TrashScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-        <Pressable onPress={() => router.back()} style={styles.headerButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Papelera</Text>
-        <Pressable
-          onPress={handleEmptyTrash}
-          style={[styles.headerButton, trashedItems.length === 0 && { opacity: 0.5 }]}
-          disabled={trashedItems.length === 0}
-        >
-          <Text style={{ color: '#FF3B30', fontWeight: '700', fontSize: 14 }}>Vaciar</Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Papelera"
+        right={
+          <PressableScale
+            onPress={handleEmptyTrash}
+            style={[styles.headerButton, trashedItems.length === 0 && { opacity: 0.5 }]}
+            disabled={trashedItems.length === 0}
+          >
+            <Text style={{ color: '#FF3B30', fontWeight: '700', fontSize: 14 }}>Vaciar</Text>
+          </PressableScale>
+        }
+      />
 
       <View style={[styles.infoBanner, { backgroundColor: colors.backgroundElement }]}>
         <Ionicons name="information-circle-outline" size={18} color={colors.textSecondary} />

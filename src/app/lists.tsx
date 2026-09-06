@@ -22,6 +22,8 @@ import { useRememberStore } from '@/hooks/use-remember-store';
 import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { Colors } from '@/constants/theme';
 import { RichText } from '@/components/rich-text';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { PressableScale } from '@/components/ui/pressable-scale';
 import { MaskableTextInput, maskTextContent } from '@/components/maskable-text-input';
 
 export default function ListsScreen() {
@@ -291,26 +293,25 @@ export default function ListsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header bar */}
-      <View style={[styles.header, { borderBottomColor: colors.backgroundSelected }]}>
-        <Pressable onPress={() => router.back()} style={styles.headerButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Listas</Text>
-        <Pressable
-          onPress={() => setIsListsMasked(!isListsMasked)}
-          style={{
-            padding: 6,
-            borderRadius: 20,
-            backgroundColor: isListsMasked ? 'rgba(255, 149, 0, 0.2)' : colors.backgroundSelected,
-          }}
-        >
-          <Ionicons
-            name={isListsMasked ? 'eye-off-outline' : 'eye-outline'}
-            size={22}
-            color={isListsMasked ? '#FF9500' : colors.text}
-          />
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Mis Listas"
+        right={
+          <PressableScale
+            onPress={() => setIsListsMasked(!isListsMasked)}
+            style={{
+              padding: 6,
+              borderRadius: 20,
+              backgroundColor: isListsMasked ? 'rgba(255, 149, 0, 0.2)' : colors.backgroundSelected,
+            }}
+          >
+            <Ionicons
+              name={isListsMasked ? 'eye-off-outline' : 'eye-outline'}
+              size={22}
+              color={isListsMasked ? '#FF9500' : colors.text}
+            />
+          </PressableScale>
+        }
+      />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

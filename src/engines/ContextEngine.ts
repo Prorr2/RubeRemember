@@ -1,6 +1,13 @@
 import { TimeSlot } from '../models/TimeSlot';
 import { Task, Reminder as ReminderV2, Memo, UserSettings, EnergyType, Session, Item, ItemType } from '../models/Item';
 
+function toLocalDateStr(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export interface CognitiveContext {
   currentTime: string; // "HH:MM"
   dayOfWeek: number; // 0-6 (0 is Sunday, 6 is Saturday)
@@ -48,15 +55,15 @@ export const ContextEngine = {
     }
 
     // 3. Active Reminders (Memos with alarm or legacy reminders scheduled for today or earlier that are not completed)
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = toLocalDateStr(now);
     const activeReminders = items.filter(i => {
-      if (i.completed || i.archived || i.trash) return false;
-      
       if (i.type === ItemType.REMINDER) {
         const rem = i as ReminderV2;
+        if (rem.completed || rem.archived || rem.trash) return false;
         if (!rem.remindAt) return false;
         
-        const hasTodayOrPastDate = rem.remindAt.dates.some(dateStr => {
+        const dates = rem.remindAt.dates || (rem.remindAt.date ? [rem.remindAt.date] : []);
+        const hasTodayOrPastDate = dates.some(dateStr => {
           return dateStr <= todayStr;
         });
 
@@ -66,7 +73,7 @@ export const ContextEngine = {
         if (rem.remindAt.time) {
           const [remH, remM] = rem.remindAt.time.split(':').map(Number);
           const remTotal = remH * 60 + remM;
-          const isPastOrEqualTime = rem.remindAt.dates.includes(todayStr) 
+          const isPastOrEqualTime = dates.includes(todayStr) 
             ? currentTotalMinutes >= remTotal 
             : true;
           return isPastOrEqualTime;
@@ -76,6 +83,7 @@ export const ContextEngine = {
       
       if (i.type === ItemType.MEMO) {
         const memo = i as Memo;
+        if (memo.completed || memo.archived || memo.trash) return false;
         if (!memo.hasAlarm) return false;
         
         const start = memo.startDate || '';

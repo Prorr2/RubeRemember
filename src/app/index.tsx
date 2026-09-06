@@ -17,9 +17,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useRememberStore, ItemType, Priority, Task, Reminder as ReminderV2, Activity, getLocalDateStr, Memo, Plan, VoiceKeywords, EnergyType, DEFAULT_VOICE_KEYWORDS, TaskState } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
 import { useRecommendationService } from '@/services/RecommendationService';
 import { getTaskWeightLabel } from '@/engines/ScoreEngine';
+import { EmptyState } from '@/components/ui/empty-state';
+import { AnimatedCheck } from '@/components/ui/animated-check';
+import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '@/utils/haptics';
 
 const speak = (text: string) => {
   try {
@@ -483,7 +486,7 @@ const EditableProgressBar: React.FC<EditableProgressBarProps> = ({ task, colors,
             ({task.workedTime || 0}m de {Math.round((task.estimatedHours || 0) * 60)}m est.)
           </Text>
         </View>
-        <Text style={{ color: '#34C759', fontSize: 11, fontWeight: '700' }}>{taskProgress}%</Text>
+        <Text style={{ color: Accent, fontSize: 11, fontWeight: '700' }}>{taskProgress}%</Text>
       </View>
       
       <Pressable
@@ -505,7 +508,7 @@ const EditableProgressBar: React.FC<EditableProgressBarProps> = ({ task, colors,
           <View style={{
             height: '100%',
             width: `${taskProgress}%`,
-            backgroundColor: '#34C759',
+            backgroundColor: Accent,
             borderRadius: 4
           }} />
         </View>
@@ -1332,6 +1335,11 @@ export default function DecisionCenterScreen() {
                   task={recommendedTask}
                   colors={colors}
                   onUpdate={async (newProgress) => {
+                    if (newProgress >= 100) {
+                      hapticSuccess();
+                    } else {
+                      hapticLight();
+                    }
                     await store.updateItems([recommendedTask.id], {
                       progress: newProgress,
                       taskState: newProgress === 100 ? TaskState.COMPLETED : recommendedTask.taskState
@@ -1357,12 +1365,13 @@ export default function DecisionCenterScreen() {
                   <Pressable
                     onPress={(e) => {
                       e.stopPropagation();
+                      hapticLight();
                       router.push({
                         pathname: '/session',
                         params: { taskId: recommendedTask.id, duration: primaryRec.recommendedDuration }
                       });
                     }}
-                    style={[styles.completeButton, { backgroundColor: '#34C759' }]}
+                    style={[styles.completeButton, { backgroundColor: Accent }]}
                   >
                     <Ionicons name="play" size={16} color="#fff" />
                     <Text style={styles.completeButtonText}>{primaryRec.actionSuggested || 'Comenzar'}</Text>
@@ -1371,6 +1380,7 @@ export default function DecisionCenterScreen() {
                   <Pressable
                     onPress={(e) => {
                       e.stopPropagation();
+                      hapticWarning();
                       rejectRecommendation(primaryRec.id);
                     }}
                     style={[styles.completeButton, { backgroundColor: 'rgba(255, 59, 48, 0.15)' }]}
@@ -1382,10 +1392,10 @@ export default function DecisionCenterScreen() {
               </Pressable>
             ) : (
               // Active Reminder Card
-              <View style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: '#007AFF' }]}>
+              <View style={[styles.focusCard, { backgroundColor: colors.backgroundElement, borderColor: Accent }]}>
                 <View style={styles.focusHeader}>
                   <View style={[styles.priorityBadge, { backgroundColor: 'rgba(0, 122, 255, 0.15)' }]}>
-                    <Text style={[styles.priorityBadgeText, { color: '#007AFF' }]}>ATENCIÓN</Text>
+                    <Text style={[styles.priorityBadgeText, { color: Accent }]}>ATENCIÓN</Text>
                   </View>
                 </View>
 
@@ -1461,12 +1471,13 @@ export default function DecisionCenterScreen() {
                         const newTime = `${hh}:${mm}`;
                         await store.updateItem(rId, { alarmTime: newTime });
                         triggerRecalculate();
+                        hapticMedium();
                         Alert.alert('Pospuesto', 'El recordatorio se ha pospuesto 15 minutos.');
                       } else {
                         Alert.alert('Error', 'No se encontró el recordatorio a posponer.');
                       }
                     }}
-                    style={[styles.completeButton, { backgroundColor: '#FF9500', flex: 1, justifyContent: 'center', height: 40, borderRadius: 10 }]}
+                    style={[styles.completeButton, { backgroundColor: Accent, flex: 1, justifyContent: 'center', height: 40, borderRadius: 10 }]}
                   >
                     <Ionicons name="timer-outline" size={16} color="#fff" />
                     <Text style={styles.completeButtonText}>Posponer (15m)</Text>
@@ -1475,18 +1486,18 @@ export default function DecisionCenterScreen() {
               </View>
             )
           ) : (
-            <View style={[styles.emptyCard, { backgroundColor: colors.backgroundElement }]}>
-              <Ionicons name="sparkles-outline" size={32} color={colors.textSecondary} />
-              <Text style={[styles.emptyCardText, { color: colors.textSecondary }]}>
-                No hay recomendaciones listas.
-              </Text>
-              <Pressable
-                onPress={() => triggerRecalculate()}
-                style={[styles.emptyCardBtn, { borderColor: '#FF9500' }]}
-              >
-                <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 13 }}>Calcular</Text>
-              </Pressable>
-            </View>
+            <EmptyState
+              icon="sparkles-outline"
+              title="No hay recomendaciones listas."
+              action={
+                <Pressable
+                  onPress={() => triggerRecalculate()}
+                  style={[styles.emptyCardBtn, { borderColor: Accent }]}
+                >
+                  <Text style={{ color: Accent, fontWeight: '700', fontSize: 13 }}>Calcular</Text>
+                </Pressable>
+              }
+            />
           )}
         </View>
 
@@ -1495,7 +1506,7 @@ export default function DecisionCenterScreen() {
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>📌 Tareas en Enfoque (Focus)</Text>
             <Pressable onPress={() => router.push('/tasks')}>
-              <Text style={{ color: '#FF9500', fontWeight: '600', fontSize: 13 }}>Gestionar</Text>
+              <Text style={{ color: Accent, fontWeight: '600', fontSize: 13 }}>Gestionar</Text>
             </Pressable>
           </View>
 
@@ -1519,6 +1530,7 @@ export default function DecisionCenterScreen() {
                     <Pressable
                       onPress={(e) => {
                         e.stopPropagation();
+                        hapticLight();
                         handleOpenAlarmDialog(task);
                       }}
                       style={{ padding: 4 }}
@@ -1528,6 +1540,7 @@ export default function DecisionCenterScreen() {
                     <Pressable
                       onPress={(e) => {
                         e.stopPropagation();
+                        hapticLight();
                         const weightLabel = getTaskWeightLabel(task.estimatedHours, store.hourWeights).toLowerCase();
                         let dur = 30;
                         if (weightLabel === 'luna') {
@@ -1552,23 +1565,27 @@ export default function DecisionCenterScreen() {
                     <Pressable
                       onPress={async (e) => {
                         e.stopPropagation();
+                        if (!task.completed) {
+                          hapticSuccess();
+                        } else {
+                          hapticLight();
+                        }
                         await store.toggleItemCompleted(task.id);
                         triggerRecalculate();
                       }}
                       style={styles.reminderCheckBtn}
                     >
-                      <Ionicons name="ellipse-outline" size={24} color={colors.textSecondary} />
+                      <AnimatedCheck done={!!task.completed} size={24} color={'#34C759'} inactiveColor={colors.textSecondary} />
                     </Pressable>
                   </View>
                 </Pressable>
               ))}
             </View>
           ) : (
-            <View style={[styles.emptyCard, { backgroundColor: colors.backgroundElement }]}>
-              <Text style={[styles.emptyCardText, { color: colors.textSecondary }]}>
-                No tienes tareas marcadas como Focus. El motor seleccionará las mejores automáticamente.
-              </Text>
-            </View>
+            <EmptyState
+              icon="star-outline"
+              title="No tienes tareas marcadas como Focus. El motor seleccionará las mejores automáticamente."
+            />
           )}
         </View>
 
@@ -1638,12 +1655,10 @@ export default function DecisionCenterScreen() {
               ))}
             </View>
           ) : (
-            <View style={[styles.emptyCard, { backgroundColor: colors.backgroundElement }]}>
-              <Ionicons name="bookmark-outline" size={32} color={colors.textSecondary} />
-              <Text style={[styles.emptyCardText, { color: colors.textSecondary }]}>
-                No hay recordatorios activos para hoy.
-              </Text>
-            </View>
+            <EmptyState
+              icon="bookmark-outline"
+              title="No hay recordatorios activos para hoy."
+            />
           )}
         </View>
 
@@ -1690,18 +1705,18 @@ export default function DecisionCenterScreen() {
               </View>
             </View>
           ) : (
-            <View style={[styles.emptyCard, { backgroundColor: colors.backgroundElement }]}>
-              <Ionicons name="sparkles-outline" size={32} color={colors.textSecondary} />
-              <Text style={[styles.emptyCardText, { color: colors.textSecondary }]}>
-                Agrega ideas de ocio (libros, pelis, deportes) para recibir recomendaciones.
-              </Text>
-              <Pressable
-                onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.ACTIVITY } })}
-                style={[styles.emptyCardBtn, { borderColor: '#5856D6' }]}
-              >
-                <Text style={{ color: '#5856D6', fontWeight: '700', fontSize: 13 }}>Nueva Idea</Text>
-              </Pressable>
-            </View>
+            <EmptyState
+              icon="sparkles-outline"
+              title="Agrega ideas de ocio (libros, pelis, deportes) para recibir recomendaciones."
+              action={
+                <Pressable
+                  onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.ACTIVITY } })}
+                  style={[styles.emptyCardBtn, { borderColor: '#5856D6' }]}
+                >
+                  <Text style={{ color: '#5856D6', fontWeight: '700', fontSize: 13 }}>Nueva Idea</Text>
+                </Pressable>
+              }
+            />
           )}
         </View>
 
@@ -1864,8 +1879,8 @@ export default function DecisionCenterScreen() {
             </Text>
           </View>
           <Pressable onPress={handleUndo} style={styles.undoBtn}>
-            <Ionicons name="arrow-undo-outline" size={16} color="#007AFF" />
-            <Text style={[styles.undoBtnText, { color: '#007AFF' }]}>Deshacer</Text>
+            <Ionicons name="arrow-undo-outline" size={16} color={Accent} />
+            <Text style={[styles.undoBtnText, { color: Accent }]}>Deshacer</Text>
           </Pressable>
           <Pressable onPress={() => setLastCreatedItem(null)} style={{ padding: 4 }}>
             <Ionicons name="close" size={18} color={colors.textSecondary} />
@@ -1948,7 +1963,7 @@ export default function DecisionCenterScreen() {
                 style={[styles.bottomModalOptionBtn, { backgroundColor: colors.background }]}
               >
                 <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(0, 122, 255, 0.15)' }]}>
-                  <Ionicons name="create" size={22} color="#007AFF" />
+                  <Ionicons name="create" size={22} color={Accent} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.bottomModalOptionTitle, { color: colors.text }]}>Editar Tarea</Text>
@@ -2193,7 +2208,7 @@ export default function DecisionCenterScreen() {
                             setNewNoteText('');
                             setShowAddNote(false);
                           }}
-                          style={{ flex: 1, backgroundColor: '#FF9500', padding: 12, borderRadius: 10, alignItems: 'center' }}
+                          style={{ flex: 1, backgroundColor: Accent, padding: 12, borderRadius: 10, alignItems: 'center' }}
                         >
                           <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>Guardar Nota</Text>
                         </Pressable>
@@ -2216,16 +2231,16 @@ export default function DecisionCenterScreen() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: 8,
-                        backgroundColor: 'rgba(255, 149, 0, 0.12)',
+                        backgroundColor: colors.accentSoft,
                         borderWidth: 1,
-                        borderColor: 'rgba(255, 149, 0, 0.4)',
+                        borderColor: 'rgba(0, 122, 255, 0.4)',
                         borderStyle: 'dashed',
                         borderRadius: 12,
                         paddingVertical: 12
                       }}
                     >
-                      <Ionicons name="add-circle-outline" size={18} color="#FF9500" />
-                      <Text style={{ color: '#FF9500', fontSize: 13, fontWeight: '700' }}>Añadir Nota</Text>
+                      <Ionicons name="add-circle-outline" size={18} color={Accent} />
+                      <Text style={{ color: Accent, fontSize: 13, fontWeight: '700' }}>Añadir Nota</Text>
                     </Pressable>
                   )}
                 </View>
@@ -2285,7 +2300,7 @@ export default function DecisionCenterScreen() {
                               </Text>
                               {isNoteOnly ? (
                                 <View style={{ backgroundColor: 'rgba(0, 122, 255, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                                  <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '800' }}>
+                                  <Text style={{ color: Accent, fontSize: 10, fontWeight: '800' }}>
                                     📝 Nota
                                   </Text>
                                 </View>
@@ -2338,7 +2353,7 @@ export default function DecisionCenterScreen() {
                                 </View>
 
                                 <View style={{ gap: 4 }}>
-                                  <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800' }}>PROGRESO DE LA TAREA (%)</Text>
+                                  <Text style={{ color: Accent, fontSize: 11, fontWeight: '800' }}>PROGRESO DE LA TAREA (%)</Text>
                                   <TextInput
                                     value={editProgress}
                                     onChangeText={(val) => {
@@ -2452,7 +2467,7 @@ export default function DecisionCenterScreen() {
                                 {/* Progress Percentage */}
                                 {!isNoteOnly && (
                                   <View style={{ gap: 4 }}>
-                                    <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                                    <Text style={{ color: Accent, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
                                       📈 Progreso de la tarea:
                                     </Text>
                                     <Text style={{ color: colors.text, fontSize: 13 }}>
@@ -2993,7 +3008,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: Accent,
     gap: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },

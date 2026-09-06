@@ -3,6 +3,7 @@ import { AppState, AppStateStatus, Animated, StyleSheet, Text, View, Platform } 
 import { Ionicons } from '@expo/vector-icons';
 import { useRememberStore } from '@/hooks/use-remember-store';
 import { DropboxService } from '@/services/DropboxService';
+import { Accent } from '@/constants/theme';
 
 export function DropboxAutoSyncHandler() {
   const store = useRememberStore();
@@ -164,7 +165,7 @@ export function DropboxAutoSyncHandler() {
       ]}
     >
       <View style={styles.toastCard}>
-        <Ionicons name="cloud-done-outline" size={26} color="#0061FF" />
+        <Ionicons name="cloud-done-outline" size={26} color={Accent} />
         <Text style={styles.toastText}>{toastMessage}</Text>
       </View>
     </Animated.View>

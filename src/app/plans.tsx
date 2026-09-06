@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
 
 import { useRememberStore, ItemType, Plan, getLocalDateStr } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { PressableScale } from '@/components/ui/pressable-scale';
 
 const formatPlanDates = (plan: Plan) => {
   const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -347,18 +349,14 @@ export default function PlansScreen() {
           </View>
         </View>
       ) : (
-        <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-          <Pressable onPress={() => router.back()} style={styles.headerButton}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Planes a Largo Plazo</Text>
-          <Pressable
-            onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.PLAN } })}
-            style={styles.headerButton}
-          >
-            <Ionicons name="add" size={26} color={themeColor} />
-          </Pressable>
-        </View>
+        <ScreenHeader
+          title="Planes a Largo Plazo"
+          right={
+            <PressableScale onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.PLAN } })} style={styles.headerButton}>
+              <Ionicons name="add" size={26} color={themeColor} />
+            </PressableScale>
+          }
+        />
       )}
 
       {/* Search Bar */}

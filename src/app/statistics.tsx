@@ -13,7 +13,8 @@ import { useRouter } from 'expo-router';
 
 import { useStatisticsService } from '@/services/StatisticsService';
 import { useRememberStore } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/screen-header';
 
 export default function StatisticsScreen() {
   const router = useRouter();
@@ -139,13 +140,7 @@ export default function StatisticsScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.backgroundSelected }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Estadísticas</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader title="Estadísticas" />
 
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {/* Core Summary Cards Grid */}
@@ -216,7 +211,7 @@ export default function StatisticsScreen() {
               {renderProgressBar('🌙 Luna (Completar)', stats.weightCounts.LUNA || 0, maxWeightCount, '#AF52DE')}
               {renderProgressBar('🌍 Terra (Avanzar)', stats.weightCounts.TERRA || 0, maxWeightCount, '#34C759')}
               {renderProgressBar('☀️ Sol (Hito)', stats.weightCounts.SOL || 0, maxWeightCount, '#FF9500')}
-              {renderProgressBar('⭐ Astra (Hábito)', stats.weightCounts.ASTRA || 0, maxWeightCount, '#007AFF')}
+              {renderProgressBar('⭐ Astra (Hábito)', stats.weightCounts.ASTRA || 0, maxWeightCount, Accent)}
             </View>
           )}
         </View>
@@ -369,7 +364,7 @@ export default function StatisticsScreen() {
                                         Sesión {group.sessions.length - index} {timeLabel ? `a las ${timeLabel}` : ''}
                                       </Text>
                                       {session.progress !== undefined && (
-                                        <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '700' }}>
+                                        <Text style={{ color: Accent, fontSize: 10, fontWeight: '700' }}>
                                           📈 {session.progress}%
                                         </Text>
                                       )}

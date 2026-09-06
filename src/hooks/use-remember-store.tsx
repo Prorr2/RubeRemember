@@ -25,6 +25,16 @@ export { TimeSlot } from '@/models/TimeSlot';
 export { ReminderList, ListItem } from '@/models/ReminderList';
 export { Item, ItemType, Priority, Task, TaskState, Reminder as ReminderV2, Activity, ActivityCategory, ReminderTriggerType, CustomCategory, DEFAULT_ACTIVITY_CATEGORIES, HourWeight, DEFAULT_HOUR_WEIGHTS, Session, Recommendation, UserSettings, DEFAULT_USER_SETTINGS, Statistics, DEFAULT_STATISTICS, EnergyType, Memo, Plan, VoiceKeywords, DEFAULT_VOICE_KEYWORDS, TaskCategory, DEFAULT_TASK_CATEGORIES } from '@/models/Item';
 
+async function cancelAlarmsForItem(item: Item) {
+  if (item.type === ItemType.REMINDER) {
+    const rem = item as ReminderV2;
+    const dates = rem.remindAt?.dates || (rem.remindAt?.date ? [rem.remindAt.date] : []);
+    await NotificationService.cancelNotification(rem.id, dates);
+  } else if (item.type === ItemType.MEMO) {
+    await NotificationService.cancelNotification(item.id, []);
+  }
+}
+
 
 
 
@@ -76,7 +86,8 @@ interface RememberStore {
     phaseId?: string,
     timeSlotId?: string,
     energyType?: EnergyType,
-    images?: string[]
+    images?: string[],
+    categoryId?: string
   ) => Promise<string>;
   createReminder: (
     title: string,
@@ -120,6 +131,7 @@ interface RememberStore {
   convertItem: (id: string, targetType: ItemType) => Promise<void>;
   emptyTrash: () => Promise<void>;
   deleteItemPermanently: (id: string) => Promise<void>;
+  saveItems: (newItems: Item[], currentSlots?: TimeSlot[], currentSeparation?: number) => Promise<void>;
 
 
   // Legacy CRUD Actions (Wrappers for compatibility)
@@ -451,6 +463,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   // Initialize notifications handler
   useEffect(() => {
     NotificationService.initialize();
+    NotificationService.requestPermissions().catch(() => {});
   }, []);
 
   // Load and migrate database
@@ -1107,11 +1120,21 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [items, saveItems, syncCalendarAndAlarms]);
 
   const emptyTrash = useCallback(async () => {
+    const trashed = items.filter((i) => i.trash);
+    for (const t of trashed) {
+      if (t.type === ItemType.REMINDER || t.type === ItemType.MEMO) {
+        await cancelAlarmsForItem(t);
+      }
+    }
     const updated = items.filter((i) => !i.trash);
     await saveItems(updated);
   }, [items, saveItems]);
 
   const deleteItemPermanently = useCallback(async (id: string) => {
+    const target = items.find((i) => i.id === id);
+    if (target && (target.type === ItemType.REMINDER || target.type === ItemType.MEMO)) {
+      await cancelAlarmsForItem(target);
+    }
     const updated = items.filter((i) => i.id !== id);
     await saveItems(updated);
   }, [items, saveItems]);
@@ -2536,6 +2559,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         convertItem,
         emptyTrash,
         deleteItemPermanently,
+        saveItems,
         addReminder,
         updateReminder,
         deleteReminder,

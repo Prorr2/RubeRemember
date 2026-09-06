@@ -16,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useRememberStore, Goal, Phase, Reminder, getReminderActiveDate } from '../hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent, ThemeColors } from '@/constants/theme';
 import { useColorScheme } from 'react-native';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ function DateCalendarInput({
   label: string;
   value: string; // "YYYY-MM-DD"
   onChange: (v: string) => void;
-  colors: typeof Colors.dark;
+  colors: ThemeColors;
 }) {
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
   const initialDate = value ? new Date(value) : new Date();
@@ -1050,7 +1050,7 @@ export default function GoalsScreen() {
             {/* Upcoming Events Sub-section */}
             <View style={[styles.subSectionWrapper, { marginTop: 20 }]}>
               <View style={styles.subSectionHeader}>
-                <Ionicons name="calendar-outline" size={16} color="#007AFF" />
+                <Ionicons name="calendar-outline" size={16} color={Accent} />
                 <Text style={[styles.subSectionTitle, { color: colors.text }]}>
                   Próximos Eventos ({filteredUpcomingReminders.length})
                 </Text>
@@ -1107,7 +1107,7 @@ export default function GoalsScreen() {
                           <Text
                             style={[
                               styles.gridCardDiff,
-                              { color: useYellow ? '#FFCC00' : isToday ? '#FF3B30' : '#007AFF' },
+                              { color: useYellow ? '#FFCC00' : isToday ? '#FF3B30' : Accent },
                             ]}
                           >
                             {diffLabel}
@@ -1117,12 +1117,12 @@ export default function GoalsScreen() {
                               <Ionicons
                                 name="time-outline"
                                 size={10}
-                                color={useYellow ? '#FFCC00' : isToday ? '#FF3B30' : '#007AFF'}
+                                color={useYellow ? '#FFCC00' : isToday ? '#FF3B30' : Accent}
                               />
                               <Text
                                 style={[
                                   styles.gridCardTime,
-                                  { color: useYellow ? '#FFCC00' : isToday ? '#FF3B30' : '#007AFF' },
+                                  { color: useYellow ? '#FFCC00' : isToday ? '#FF3B30' : Accent },
                                 ]}
                               >
                                 {item.time}
@@ -1512,7 +1512,7 @@ const styles = StyleSheet.create({
   adjusterBtnText: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#007AFF',
+    color: Accent,
   },
 });
 

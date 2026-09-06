@@ -24,6 +24,7 @@ export function useReminderService() {
       archived: false,
       completed: false,
       favourite: false,
+      trash: false,
       tags: [],
       remindAt,
       autoArchive

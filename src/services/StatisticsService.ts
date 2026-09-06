@@ -3,6 +3,17 @@ import { useRememberStore } from '../hooks/use-remember-store';
 import { StatisticsRepository } from '../repositories/StatisticsRepository';
 import { Statistics } from '../models/Item';
 
+function toLocalDateStr(dateStr: string | Date): string {
+  const d = dateStr instanceof Date ? dateStr : new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    return typeof dateStr === 'string' ? dateStr.split('T')[0] : '';
+  }
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function useStatisticsService() {
   const store = useRememberStore();
 
@@ -60,7 +71,7 @@ export function useStatisticsService() {
 
       // Group by date
       if (session.endTime) {
-        const dateStr = session.endTime.split('T')[0];
+        const dateStr = toLocalDateStr(session.endTime);
         dailyMinutes[dateStr] = (dailyMinutes[dateStr] || 0) + (session.realDuration || 0);
       }
     });
@@ -85,10 +96,10 @@ export function useStatisticsService() {
       }
       if (tempStreak > longestStreak) longestStreak = tempStreak;
 
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = toLocalDateStr(new Date());
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const yesterdayStr = toLocalDateStr(yesterday);
       if (dates.includes(todayStr) || dates.includes(yesterdayStr)) {
         currentStreak = tempStreak;
       }

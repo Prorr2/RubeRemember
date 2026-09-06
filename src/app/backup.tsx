@@ -18,6 +18,8 @@ import * as DocumentPicker from 'expo-document-picker';
 
 import { useRememberStore } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
+import { Accent } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/screen-header';
 
 export default function BackupScreen() {
   const store = useRememberStore();
@@ -117,19 +119,13 @@ export default function BackupScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.backgroundSelected }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Copia de Seguridad</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader title="Copia de Seguridad" />
 
       {/* Main Content */}
       <View style={styles.container}>
         <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
           <View style={styles.iconContainer}>
-            <Ionicons name="cloud-upload-outline" size={80} color="#FF9500" />
+            <Ionicons name="cloud-upload-outline" size={80} color={Accent} />
           </View>
           
           <Text style={[styles.title, { color: colors.text }]}>Resguardar tus Datos</Text>
@@ -138,7 +134,7 @@ export default function BackupScreen() {
           </Text>
 
           {loading ? (
-            <ActivityIndicator size="large" color="#FF9500" style={styles.loader} />
+            <ActivityIndicator size="large" color={Accent} style={styles.loader} />
           ) : (
             <View style={styles.btnGroup}>
               {/* Export */}
@@ -155,7 +151,7 @@ export default function BackupScreen() {
                 onPress={handleImportBackup}
                 style={[styles.actionBtn, { backgroundColor: colors.backgroundSelected, borderWidth: 1, borderColor: '#FF9500' }]}
               >
-                <Ionicons name="cloud-download-outline" size={20} color="#FF9500" />
+                <Ionicons name="cloud-download-outline" size={20} color={Accent} />
                 <Text style={[styles.actionBtnText, { color: '#FF9500' }]}>Importar desde JSON</Text>
               </Pressable>
             </View>

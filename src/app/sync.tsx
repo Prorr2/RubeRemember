@@ -19,7 +19,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 import { useRememberStore, Task } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/screen-header';
 
 const getDefaultServerUrl = (): string => {
   try {
@@ -362,13 +363,7 @@ export default function SyncScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.backgroundSelected }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Sincronización Local</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader title="Sincronización Local" />
 
       {/* Main Content */}
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -376,7 +371,7 @@ export default function SyncScreen() {
           {/* Local network sync */}
           <View style={styles.syncSection}>
             <View style={styles.syncHeader}>
-              <Ionicons name="swap-horizontal" size={22} color="#34C759" />
+              <Ionicons name="swap-horizontal" size={22} color={Accent} />
               <Text style={[styles.syncTitle, { color: colors.text }]}>Sincronización por Red Local</Text>
             </View>
             <Text style={[styles.syncDescription, { color: colors.textSecondary }]}>
@@ -399,7 +394,7 @@ export default function SyncScreen() {
                 onPress={handleOpenScanner}
                 style={[styles.scanBtn, { backgroundColor: colors.backgroundSelected, borderColor: colors.backgroundSelected }]}
               >
-                <Ionicons name="qr-code-outline" size={22} color="#FF9500" />
+                <Ionicons name="qr-code-outline" size={22} color={Accent} />
               </Pressable>
             </View>
 
@@ -442,7 +437,7 @@ export default function SyncScreen() {
                   : 'Conéctate para que el ordenador pueda solicitar tu información.'}
               </Text>
               {isConnecting ? (
-                <ActivityIndicator size="small" color="#34C759" style={styles.loader} />
+                <ActivityIndicator size="small" color={Accent} style={styles.loader} />
               ) : connected ? (
                 <Pressable
                   onPress={handleDisconnect}
@@ -454,7 +449,7 @@ export default function SyncScreen() {
               ) : (
                 <Pressable
                   onPress={handleConnect}
-                  style={[styles.actionBtn, { backgroundColor: '#0A84FF' }]}
+                  style={[styles.actionBtn, { backgroundColor: Accent }]}
                 >
                   <Ionicons name="link-outline" size={20} color="#FFFFFF" />
                   <Text style={styles.actionBtnText}>Conectar al servidor</Text>
@@ -463,7 +458,7 @@ export default function SyncScreen() {
             </View>
 
             {syncLoading ? (
-              <ActivityIndicator size="small" color="#34C759" style={styles.loader} />
+              <ActivityIndicator size="small" color={Accent} style={styles.loader} />
             ) : (
               <Pressable
                 onPress={handleSendToComputer}
@@ -527,7 +522,7 @@ export default function SyncScreen() {
                     Alert.alert('Permiso Denegado', 'No se puede escanear sin acceso a la cámara.');
                   }
                 }}
-                style={[styles.actionBtn, { backgroundColor: '#0A84FF', marginTop: 20 }]}
+                style={[styles.actionBtn, { backgroundColor: Accent, marginTop: 20 }]}
               >
                 <Text style={styles.actionBtnText}>Conceder Permiso</Text>
               </Pressable>

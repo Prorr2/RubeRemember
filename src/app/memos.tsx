@@ -17,6 +17,8 @@ import { useRouter } from 'expo-router';
 import { useRememberStore, ItemType, Memo, getLocalDateStr } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { RichText } from '@/components/rich-text';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { PressableScale } from '@/components/ui/pressable-scale';
 
 export default function MemosScreen() {
   const store = useRememberStore();
@@ -293,18 +295,14 @@ export default function MemosScreen() {
           </View>
         </View>
       ) : (
-        <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-          <Pressable onPress={() => router.back()} style={styles.headerButton}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Mis Recordatorios</Text>
-          <Pressable
-            onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.MEMO } })}
-            style={styles.headerButton}
-          >
-            <Ionicons name="add" size={26} color={themeColor} />
-          </Pressable>
-        </View>
+        <ScreenHeader
+          title="Mis Recordatorios"
+          right={
+            <PressableScale onPress={() => router.push({ pathname: '/editor', params: { type: ItemType.MEMO } })} style={styles.headerButton}>
+              <Ionicons name="add" size={26} color={themeColor} />
+            </PressableScale>
+          }
+        />
       )}
 
       {/* Search Bar */}

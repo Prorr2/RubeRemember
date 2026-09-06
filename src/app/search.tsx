@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useRememberStore, Item, ItemType, Task, TaskState } from '@/hooks/use-remember-store';
-import { Colors } from '@/constants/theme';
+import { Colors, Accent } from '@/constants/theme';
 import { getTaskWeightLabel } from '@/engines/ScoreEngine';
 
 export default function SearchScreen() {
@@ -219,11 +219,11 @@ export default function SearchScreen() {
           onPress={() => setIncludeArchived(!includeArchived)}
           style={[
             styles.toggleChip,
-            includeArchived && { backgroundColor: 'rgba(0, 122, 255, 0.15)', borderColor: '#007AFF' },
+            includeArchived && { backgroundColor: 'rgba(0, 122, 255, 0.15)', borderColor: Accent },
           ]}
         >
-          <Ionicons name="archive" size={14} color={includeArchived ? '#007AFF' : colors.textSecondary} />
-          <Text style={[styles.toggleText, { color: includeArchived ? '#007AFF' : colors.text }]}>
+          <Ionicons name="archive" size={14} color={includeArchived ? Accent : colors.textSecondary} />
+          <Text style={[styles.toggleText, { color: includeArchived ? Accent : colors.text }]}>
             Incluir Archivados
           </Text>
         </Pressable>
@@ -465,7 +465,7 @@ export default function SearchScreen() {
                     style={[styles.bottomModalOptionBtn, { backgroundColor: colors.background }]}
                   >
                     <View style={[styles.bottomModalIconCircle, { backgroundColor: 'rgba(52, 120, 246, 0.15)' }]}>
-                      <Ionicons name="play" size={22} color="#007AFF" />
+                      <Ionicons name="play" size={22} color={Accent} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.bottomModalOptionTitle, { color: colors.text }]}>Iniciar Enfoque ({dur}m)</Text>
@@ -826,7 +826,7 @@ export default function SearchScreen() {
                               </Text>
                               {isNoteOnly ? (
                                 <View style={{ backgroundColor: 'rgba(0, 122, 255, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                                  <Text style={{ color: '#007AFF', fontSize: 10, fontWeight: '800' }}>
+                                  <Text style={{ color: Accent, fontSize: 10, fontWeight: '800' }}>
                                     📝 Nota
                                   </Text>
                                 </View>
@@ -879,7 +879,7 @@ export default function SearchScreen() {
                                 </View>
 
                                 <View style={{ gap: 4 }}>
-                                  <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800' }}>PROGRESO DE LA TAREA (%)</Text>
+                                  <Text style={{ color: Accent, fontSize: 11, fontWeight: '800' }}>PROGRESO DE LA TAREA (%)</Text>
                                   <TextInput
                                     value={editProgress}
                                     onChangeText={(val) => {
@@ -993,7 +993,7 @@ export default function SearchScreen() {
                                 {/* Progress Percentage */}
                                 {!isNoteOnly && (
                                   <View style={{ gap: 4 }}>
-                                    <Text style={{ color: '#007AFF', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                                    <Text style={{ color: Accent, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
                                       📈 Progreso de la tarea:
                                     </Text>
                                     <Text style={{ color: colors.text, fontSize: 13 }}>

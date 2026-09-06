@@ -17,10 +17,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr, EnergyType, Memo, Plan, Task, TaskState } from '@/hooks/use-remember-store';
+import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr, EnergyType, Memo, Plan, Task, TaskState, ReminderTriggerType } from '@/hooks/use-remember-store';
 import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
-import { Colors, Spacing } from '@/constants/theme';
+import { Colors, Spacing, Accent } from '@/constants/theme';
 import { ScoreEngine, getTaskWeightLabel } from '@/engines/ScoreEngine';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { PressableScale } from '@/components/ui/pressable-scale';
 
 export default function ItemEditorScreen() {
   const store = useRememberStore();
@@ -91,6 +93,7 @@ export default function ItemEditorScreen() {
     const parsedHours = isNaN(hoursNum) || hoursNum <= 0 ? undefined : hoursNum;
 
     // Construct a temporary task object from form state
+    const editingTask = editingItem as Task | null;
     const tempTask: Task = {
       id: params.id || 'temp-id',
       type: ItemType.TASK,
@@ -100,18 +103,18 @@ export default function ItemEditorScreen() {
       estimatedHours: parsedHours,
       dueDate: taskDueDate || undefined,
       startDate: taskStartDate || undefined,
-      time: editingItem?.time || undefined,
+      time: editingTask?.time || undefined,
       energyType,
-      completed: editingItem?.completed || false,
-      archived: editingItem?.archived || false,
-      trash: editingItem?.trash || false,
-      focusLocked: editingItem?.focusLocked || false,
-      taskState: editingItem?.taskState || TaskState.THINKING,
+      completed: editingTask?.completed || false,
+      archived: editingTask?.archived || false,
+      trash: editingTask?.trash || false,
+      focusLocked: editingTask?.focusLocked || false,
+      taskState: editingTask?.taskState || TaskState.THINKING,
       goalId: selectedGoalId || undefined,
       phaseId: selectedPhaseId || undefined,
-      createdAt: editingItem?.createdAt || new Date().toISOString(),
+      createdAt: editingTask?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      comments: (editingItem as any)?.comments || [],
+      comments: editingTask?.comments || [],
       tags: tagsInput.split(',').map(t => t.trim()).filter(Boolean),
       favourite: favourite,
     };
@@ -547,7 +550,7 @@ export default function ItemEditorScreen() {
   // Styling helpers
   const getThemeColor = () => {
     if (itemType === ItemType.TASK) return '#FF9500'; // Orange
-    if (itemType === ItemType.REMINDER) return '#007AFF'; // Blue
+    if (itemType === ItemType.REMINDER) return Accent; // Blue
     if (itemType === ItemType.MEMO) return '#00C7BE'; // Teal
     if (itemType === ItemType.PLAN) return '#BF5AF2'; // Violet
     return '#5856D6'; // Indigo
@@ -557,24 +560,21 @@ export default function ItemEditorScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.backgroundElement }]}>
-        <Pressable onPress={() => router.back()} style={styles.headerButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>
-          {isEditing ? 'Editar' : 'Nuevo'} {itemType === ItemType.TASK ? 'Tarea' : itemType === ItemType.REMINDER ? 'Alarma' : itemType === ItemType.MEMO ? 'Recordatorio' : itemType === ItemType.PLAN ? 'Plan' : 'Actividad'}
-        </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-          {isEditing && (
-            <Pressable onPress={handleDelete} style={styles.headerButton}>
-              <Ionicons name="trash-outline" size={24} color="#FF3B30" />
-            </Pressable>
-          )}
-          <Pressable onPress={handleSave} style={styles.headerButton}>
-            <Ionicons name="checkmark-done" size={24} color={themeColor} />
-          </Pressable>
-        </View>
-      </View>
+      <ScreenHeader
+        title={`${isEditing ? 'Editar' : 'Nuevo'} ${itemType === ItemType.TASK ? 'Tarea' : itemType === ItemType.REMINDER ? 'Alarma' : itemType === ItemType.MEMO ? 'Recordatorio' : itemType === ItemType.PLAN ? 'Plan' : 'Actividad'}`}
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            {isEditing && (
+              <PressableScale onPress={handleDelete} style={styles.headerButton}>
+                <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+              </PressableScale>
+            )}
+            <PressableScale onPress={handleSave} style={styles.headerButton}>
+              <Ionicons name="checkmark-done" size={24} color={themeColor} />
+            </PressableScale>
+          </View>
+        }
+      />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -805,7 +805,7 @@ export default function ItemEditorScreen() {
                     const label = matched ? matched.name : (sortedWeights.length > 0 ? sortedWeights[sortedWeights.length - 1].name : null);
                     if (!label) return null;
                     return (
-                      <Text style={{ fontSize: 11, color: '#007AFF', fontWeight: 'bold', textAlign: 'center', marginTop: 4 }}>
+                      <Text style={{ fontSize: 11, color: Accent, fontWeight: 'bold', textAlign: 'center', marginTop: 4 }}>
                         {label}
                       </Text>
                     );
@@ -831,7 +831,7 @@ export default function ItemEditorScreen() {
                         onPress={() => setEstimatedHours(String(w.minHours))}
                         style={[
                           styles.priorityButton,
-                          isActive ? { backgroundColor: '#007AFF' } : { backgroundColor: colors.backgroundSelected },
+                          isActive ? { backgroundColor: Accent } : { backgroundColor: colors.backgroundSelected },
                           { paddingVertical: 8 }
                         ]}
                       >
