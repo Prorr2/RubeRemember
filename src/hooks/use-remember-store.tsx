@@ -234,6 +234,7 @@ interface RememberStore {
   updateUserSettings: (updates: Partial<UserSettings>) => Promise<void>;
   updateStatistics: (updates: Partial<Statistics>) => Promise<void>;
   saveRecommendations: (recs: Recommendation[]) => Promise<void>;
+  flushPendingSave: () => Promise<void>;
 }
 
 const V2_DB_KEY = 'rube_v2_database';
@@ -486,6 +487,14 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         setRecommendations(db.recommendations || []);
         setUserSettings(db.userSettings || DEFAULT_USER_SETTINGS);
         setStatistics(db.statistics || DEFAULT_STATISTICS);
+
+        // If the local DB file was corrupt and we had to recover from a backup
+        // (or start empty), warn the user about it with the details recorded by
+        // the migration engine during load.
+        const recoveryNotice = MigrationEngine.takeRecoveryNotice();
+        if (recoveryNotice) {
+          Alert.alert('Aviso importante', recoveryNotice);
+        }
       } catch (e) {
         console.error('Error loading database in store:', e);
       } finally {
@@ -496,6 +505,22 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, []);
 
   const saveTimeoutRef = useRef<any>(null);
+  const pendingSaveRef = useRef<(() => void) | null>(null);
+
+  // Immediately persist any debounced save that is still waiting to be flushed.
+  // Used when the app is closed / goes to background, so we never lose the last
+  // edits made within the 300ms debounce window.
+  const flushPendingSave = useCallback(async () => {
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    if (pending) {
+      await pending();
+    }
+  }, []);
 
   // General V3 Database Persist Helper
   const saveDatabaseState = useCallback(async (
@@ -566,6 +591,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       };
 
       const executeSave = () => {
+        pendingSaveRef.current = null;
         MigrationEngine.saveDatabase(db).catch((e) =>
           console.error('Error saving database state:', e)
         );
@@ -576,11 +602,13 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           clearTimeout(saveTimeoutRef.current);
           saveTimeoutRef.current = null;
         }
+        pendingSaveRef.current = null;
         await MigrationEngine.saveDatabase(db);
       } else {
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
         }
+        pendingSaveRef.current = executeSave;
         saveTimeoutRef.current = setTimeout(executeSave, 300);
       }
     } catch (e) {
@@ -1301,11 +1329,31 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [getMemos]);
 
   const clearAll = useCallback(async () => {
-    await saveDatabaseState([], [], [], [], [], [], DEFAULT_USER_SETTINGS, DEFAULT_STATISTICS);
-    setLists([]);
-    await AsyncStorage.setItem(V2_DB_KEY, ''); // Empty storage key
-    await AsyncStorage.setItem('rube_v3_database', '');
+    // Clear ALL legacy AsyncStorage keys (V1/V2/V3) first, so stale data can never
+    // be re-migrated ("resurrected") by getDatabase later.
+    await MigrationEngine.clearLegacyStorage();
     await MigrationEngine.clearDatabaseFile();
+    // Persist a pristine empty DB immediately (with clean defaults for every section,
+    // including categories/weights) so no pending debounced write can recreate the
+    // file with leftover config.
+    await saveDatabaseState(
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      DEFAULT_USER_SETTINGS,
+      DEFAULT_STATISTICS,
+      20,
+      30,
+      true,
+      true,
+      DEFAULT_ACTIVITY_CATEGORIES,
+      DEFAULT_TASK_CATEGORIES,
+      DEFAULT_HOUR_WEIGHTS
+    );
+    setLists([]);
     await NotificationService.cancelAll();
   }, [saveDatabaseState]);
 
@@ -2556,6 +2604,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         updateUserSettings,
         updateStatistics,
         saveRecommendations,
+        flushPendingSave,
       }}
     >
       {children}

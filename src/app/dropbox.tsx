@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,6 +13,7 @@ import {
   Platform,
   AppState,
   AppStateStatus,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -20,6 +21,303 @@ import { useRouter } from 'expo-router';
 import { useRememberStore } from '@/hooks/use-remember-store';
 import { Colors } from '@/constants/theme';
 import { DropboxService, DropboxAccountInfo } from '@/services/DropboxService';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar date helpers (same pattern as goals.tsx)
+// ─────────────────────────────────────────────────────────────────────────────
+const getLocalDateStr = (date: Date = new Date()): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const getDaysInMonth = (date: Date): { dayNum: number; dateStr: string; isCurrentMonth: boolean }[] => {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+
+  const days = [];
+
+  let startDayOfWeek = firstDay.getDay() - 1;
+  if (startDayOfWeek < 0) startDayOfWeek = 6; // Sunday becomes index 6
+
+  const prevMonthLastDay = new Date(year, month, 0).getDate();
+  for (let i = startDayOfWeek - 1; i >= 0; i--) {
+    const prevDay = prevMonthLastDay - i;
+    const prevDate = new Date(year, month - 1, prevDay);
+    days.push({
+      dayNum: prevDay,
+      dateStr: getLocalDateStr(prevDate),
+      isCurrentMonth: false,
+    });
+  }
+
+  for (let i = 1; i <= lastDay.getDate(); i++) {
+    const curDate = new Date(year, month, i);
+    days.push({
+      dayNum: i,
+      dateStr: getLocalDateStr(curDate),
+      isCurrentMonth: true,
+    });
+  }
+
+  const remainingDays = 42 - days.length;
+  for (let i = 1; i <= remainingDays; i++) {
+    const nextDate = new Date(year, month + 1, i);
+    days.push({
+      dayNum: i,
+      dateStr: getLocalDateStr(nextDate),
+      isCurrentMonth: false,
+    });
+  }
+
+  return days;
+};
+
+const getMonthNameSpanish = (date: Date): string => {
+  const months = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+  const m = date.getMonth();
+  const y = date.getFullYear();
+  return `${months[m]} ${y}`;
+};
+
+const calModalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  container: {
+    width: '100%',
+    maxWidth: 290,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+});
+
+// Date-range filter panel for the restore list
+function SnapshotDateFilter({
+  from,
+  to,
+  onChange,
+  colors,
+}: {
+  from: string | null;
+  to: string | null;
+  onChange: (next: { from: string | null; to: string | null }) => void;
+  colors: typeof Colors.light | typeof Colors.dark;
+}) {
+  const [pickingEdge, setPickingEdge] = useState<'from' | 'to'>('from');
+  const [isCalendarVisible, setIsCalendarVisible] = useState(false);
+  const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
+  const todayStr = getLocalDateStr();
+
+  const formatDisplay = (dStr: string | null): string => {
+    if (!dStr) return 'Cualquier día';
+    const parts = dStr.split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return dStr;
+  };
+
+  const openPicker = (edge: 'from' | 'to') => {
+    setPickingEdge(edge);
+    setCurrentMonthDate(new Date());
+    setIsCalendarVisible(true);
+  };
+
+  const handleDaySelect = (dateStr: string) => {
+    if (pickingEdge === 'from') {
+      const next = { from: dateStr, to };
+      if (to && dateStr > to) next.to = dateStr;
+      onChange(next);
+    } else {
+      const next = { from, to: dateStr };
+      if (from && dateStr < from) next.from = dateStr;
+      onChange(next);
+    }
+    setIsCalendarVisible(false);
+  };
+
+  const applyPreset = (days: number) => {
+    const toDate = new Date();
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - days);
+    onChange({ from: getLocalDateStr(fromDate), to: getLocalDateStr(toDate) });
+  };
+
+  const clear = () => onChange({ from: null, to: null });
+
+  const active = from !== null || to !== null;
+
+  const dayHeaders = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+  return (
+    <View style={[styles.card, { backgroundColor: colors.backgroundElement }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Filtrar respaldos por fecha</Text>
+        {active && (
+          <Pressable onPress={clear} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 2 }}>
+            <Ionicons name="close-circle-outline" size={14} color="#0061FF" />
+            <Text style={{ color: '#0061FF', fontSize: 12, fontWeight: '600' }}>Limpiar filtro</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {/* Presets */}
+      <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+        {[
+          { label: '7 días', days: 7 },
+          { label: '30 días', days: 30 },
+          { label: '90 días', days: 90 },
+        ].map((p) => (
+          <Pressable
+            key={p.label}
+            onPress={() => applyPreset(p.days)}
+            style={[styles.filterChip, { backgroundColor: 'rgba(0, 97, 255, 0.12)' }]}
+          >
+            <Text style={{ color: '#0061FF', fontSize: 11, fontWeight: '600' }}>{p.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* From / To buttons */}
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+        <Pressable
+          onPress={() => openPicker('from')}
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderWidth: 1,
+            borderRadius: 10,
+            borderColor: from ? '#0061FF' : colors.backgroundSelected,
+            paddingVertical: 9,
+            paddingHorizontal: 12,
+            backgroundColor: colors.background,
+          }}
+        >
+          <View>
+            <Text style={{ color: colors.textSecondary, fontSize: 10 }}>Desde</Text>
+            <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>{formatDisplay(from)}</Text>
+          </View>
+          <Ionicons name="calendar-outline" size={16} color="#0061FF" />
+        </Pressable>
+
+        <Pressable
+          onPress={() => openPicker('to')}
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderWidth: 1,
+            borderRadius: 10,
+            borderColor: to ? '#0061FF' : colors.backgroundSelected,
+            paddingVertical: 9,
+            paddingHorizontal: 12,
+            backgroundColor: colors.background,
+          }}
+        >
+          <View>
+            <Text style={{ color: colors.textSecondary, fontSize: 10 }}>Hasta</Text>
+            <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>{formatDisplay(to)}</Text>
+          </View>
+          <Ionicons name="calendar-outline" size={16} color="#0061FF" />
+        </Pressable>
+      </View>
+
+      <Modal visible={isCalendarVisible} transparent animationType="fade" onRequestClose={() => setIsCalendarVisible(false)}>
+        <Pressable onPress={() => setIsCalendarVisible(false)} style={calModalStyles.overlay}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={[calModalStyles.container, { backgroundColor: colors.background }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }}>
+                {pickingEdge === 'from' ? 'Desde (día de inicio)' : 'Hasta (día de fin)'}
+              </Text>
+              <Pressable onPress={() => setIsCalendarVisible(false)}>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Pressable
+                onPress={() => setCurrentMonthDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
+                style={{ padding: 6 }}
+              >
+                <Ionicons name="chevron-back" size={18} color="#0061FF" />
+              </Pressable>
+              <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>
+                {getMonthNameSpanish(currentMonthDate)}
+              </Text>
+              <Pressable
+                onPress={() => setCurrentMonthDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
+                style={{ padding: 6 }}
+              >
+                <Ionicons name="chevron-forward" size={18} color="#0061FF" />
+              </Pressable>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+              {dayHeaders.map((h, idx) => (
+                <Text key={idx} style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 'bold', color: colors.textSecondary }}>
+                  {h}
+                </Text>
+              ))}
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {getDaysInMonth(currentMonthDate).map((day, idx) => {
+                const selected = day.dateStr === (pickingEdge === 'from' ? from : to);
+                const isToday = day.dateStr === todayStr;
+                return (
+                  <Pressable
+                    key={idx}
+                    onPress={() => handleDaySelect(day.dateStr)}
+                    style={{
+                      width: '14.28%',
+                      aspectRatio: 1,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 18,
+                      backgroundColor: selected ? '#0061FF' : 'transparent',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: selected || isToday ? 'bold' : 'normal',
+                        color: selected
+                          ? '#FFF'
+                          : day.isCurrentMonth
+                            ? colors.text
+                            : colors.textSecondary,
+                      }}
+                    >
+                      {day.dayNum}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
 
 export default function DropboxScreen() {
   const store = useRememberStore();
@@ -39,6 +337,7 @@ export default function DropboxScreen() {
   const [accountInfo, setAccountInfo] = useState<DropboxAccountInfo | null>(null);
   const [uploading, setUploading] = useState(false);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [remoteSnapshots, setRemoteSnapshots] = useState<Array<{
     key: string;
     label: string;
@@ -50,6 +349,8 @@ export default function DropboxScreen() {
     timestamp: number;
   }>>([]);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [filterFrom, setFilterFrom] = useState<string | null>(null);
+  const [filterTo, setFilterTo] = useState<string | null>(null);
   const [budgetInput, setBudgetInput] = useState('1500');
   const [currentAppState, setCurrentAppState] = useState<AppStateStatus>(AppState.currentState);
 
@@ -161,6 +462,17 @@ export default function DropboxScreen() {
   }, [store.userSettings, store.updateUserSettings]);
 
   const activeTasksCount = store.items.filter(i => i.type === 'TASK' && !i.trash).length;
+
+  // Filter the remote snapshots by the selected date range (start of from-day to
+  // end of to-day, inclusive). Legacy files (no timestamp) are hidden while a
+  // filter is active since they have no date to match.
+  const filterActive = filterFrom !== null || filterTo !== null;
+  const filteredSnapshots = useMemo(() => {
+    if (!filterActive) return remoteSnapshots;
+    const fromMs = filterFrom ? new Date(filterFrom + 'T00:00:00').getTime() : -Infinity;
+    const toMs = filterTo ? new Date(filterTo + 'T23:59:59.999').getTime() : Infinity;
+    return remoteSnapshots.filter((s) => s.timestamp > 0 && s.timestamp >= fromMs && s.timestamp <= toMs);
+  }, [remoteSnapshots, filterFrom, filterTo, filterActive]);
 
   const cooldownMinutes = store.userSettings.dropboxSyncCooldownMinutes ?? 60;
   const lastUpload = store.userSettings.lastDropboxUploadTimestamp || 0;
@@ -422,6 +734,54 @@ await store.updateUserSettings({
       setDownloadingKey(null);
       Alert.alert('Error al Descargar', e.message || String(e));
     }
+  };
+
+  const handleDeleteSnapshot = async (snapshot: { key: string; label: string; textFile: string; imagesFile?: string }) => {
+    Alert.alert(
+      'Borrar respaldo',
+      `¿Está seguro de que desea borrar este respaldo?\n\n"${snapshot.label}"`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sí, borrar',
+          style: 'destructive',
+          onPress: async () => {
+            let tokenToUse = store.userSettings.dropboxAccessToken;
+            if (!tokenToUse) {
+              try {
+                tokenToUse = (await DropboxService.refreshAccessTokenIfNeeded(store.userSettings, store.updateUserSettings)) || '';
+              } catch (err) {}
+            }
+            if (!tokenToUse) {
+              Alert.alert('Configuración Requerida', 'Por favor guarda tu token de acceso o refresh token antes de borrar.');
+              return;
+            }
+
+            const filesToDelete = [snapshot.textFile, snapshot.imagesFile || ''].filter(Boolean);
+            setDeletingKey(snapshot.key);
+            try {
+              const outcome = await DropboxService.deleteFilesWithRetry(tokenToUse, filesToDelete);
+              const failedCount = outcome.failed.length;
+              if (outcome.deleted.length > 0) {
+                await refreshRemoteSnapshots(true);
+              }
+              if (failedCount === 0) {
+                Alert.alert('Respaldo eliminado', `Se borró correctamente el respaldo "${snapshot.label}" de Dropbox.`);
+              } else {
+                Alert.alert(
+                  'Borrado incompleto',
+                  `Se borraron ${outcome.deleted.length} archivo(s), pero ${failedCount} archivo(s) no pudieron borrarse (${outcome.failed.join(', ')}).`
+                );
+              }
+            } catch (e: any) {
+              Alert.alert('Error al Borrar', e.message || String(e));
+            } finally {
+              setDeletingKey(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleSetStorageBudget = async () => {
@@ -787,6 +1147,17 @@ await store.updateUserSettings({
             </Text>
           )}
 
+          {/* Date-range filter for the restore list */}
+          <SnapshotDateFilter
+            from={filterFrom}
+            to={filterTo}
+            onChange={(next) => {
+              setFilterFrom(next.from);
+              setFilterTo(next.to);
+            }}
+            colors={colors}
+          />
+
           <View style={{ gap: 10 }}>
             {remoteSnapshots.length === 0 && !snapshotError ? (
               <View style={[styles.slotCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
@@ -797,8 +1168,24 @@ await store.updateUserSettings({
                   </Text>
                 </View>
               </View>
+            ) : filteredSnapshots.length === 0 ? (
+              <View style={[styles.slotCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="filter-outline" size={18} color={colors.textSecondary} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1 }}>
+                    No hay respaldos en el rango seleccionado. Ajusta las fechas o pulsa "Limpiar filtro".
+                  </Text>
+                </View>
+              </View>
             ) : (
-              remoteSnapshots.map((item) => (
+              <>
+                {/* Result count while filtering */}
+                {filterActive && (
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                    Mostrando {filteredSnapshots.length} de {remoteSnapshots.length} respaldo(s)
+                  </Text>
+                )}
+                {filteredSnapshots.map((item) => (
                 <View
                   key={item.key}
                   style={[
@@ -843,34 +1230,58 @@ await store.updateUserSettings({
                     )}
                   </View>
 
-                  {/* Bottom Row: Filename & Restore Action */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', flex: 1 }} numberOfLines={1}>
+                  {/* Bottom: Filename */}
+                  <View style={{ marginTop: 4 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }} numberOfLines={1}>
                       {item.textFile}{item.imagesFile ? ` + ${item.imagesFile}` : ''}
                     </Text>
 
-                    <Pressable
-                      onPress={() => handleRestoreSnapshot(item)}
-                      disabled={downloadingKey !== null}
-                      style={[
-                        styles.restoreBtn,
-                        { backgroundColor: item.isLatest ? '#0061FF' : colors.backgroundSelected },
-                      ]}
-                    >
-                      {downloadingKey === item.key ? (
-                        <ActivityIndicator size="small" color="#FFF" />
-                      ) : (
-                        <>
-                          <Ionicons name="cloud-download-outline" size={15} color={item.isLatest ? '#FFF' : colors.text} />
-                          <Text style={[styles.restoreBtnText, { color: item.isLatest ? '#FFF' : colors.text }]}>
-                            Restaurar
-                          </Text>
-                        </>
-                      )}
-                    </Pressable>
+                    {/* Actions: Restore + Delete */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+                      <Pressable
+                        onPress={() => handleRestoreSnapshot(item)}
+                        disabled={downloadingKey !== null || deletingKey !== null}
+                        style={[
+                          styles.restoreBtn,
+                          { backgroundColor: item.isLatest ? '#0061FF' : colors.backgroundSelected },
+                        ]}
+                      >
+                        {downloadingKey === item.key ? (
+                          <ActivityIndicator size="small" color="#FFF" />
+                        ) : (
+                          <>
+                            <Ionicons name="cloud-download-outline" size={15} color={item.isLatest ? '#FFF' : colors.text} />
+                            <Text style={[styles.restoreBtnText, { color: item.isLatest ? '#FFF' : colors.text }]}>
+                              Restaurar
+                            </Text>
+                          </>
+                        )}
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => handleDeleteSnapshot(item)}
+                        disabled={deletingKey !== null || downloadingKey !== null}
+                        style={[
+                          styles.restoreBtn,
+                          { backgroundColor: deletingKey === item.key ? '#FF3B30' : 'rgba(255, 59, 48, 0.12)' },
+                        ]}
+                      >
+                        {deletingKey === item.key ? (
+                          <ActivityIndicator size="small" color="#FFF" />
+                        ) : (
+                          <>
+                            <Ionicons name="trash-outline" size={15} color="#FF3B30" />
+                            <Text style={[styles.restoreBtnText, { color: '#FF3B30' }]}>
+                              Borrar
+                            </Text>
+                          </>
+                        )}
+                      </Pressable>
+                    </View>
                   </View>
                 </View>
-              ))
+              ))}
+                </>
             )}
           </View>
 
@@ -1137,6 +1548,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     gap: 14,
+  },
+  filterChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 12,
   },
   cardHeader: {
     flexDirection: 'row',

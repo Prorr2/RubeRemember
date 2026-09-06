@@ -122,6 +122,16 @@ export function DropboxAutoSyncHandler() {
 
     // 3. Listen to AppState foreground changes ('active')
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      // When the app goes to background/inactive, immediately flush any pending
+      // debounced save so the last edits are persisted before the app is killed.
+      if (
+        appStateRef.current?.match(/active|inactive/) &&
+        nextAppState.match(/background|inactive/)
+      ) {
+        storeRef.current.flushPendingSave().catch((e) =>
+          console.warn('[DropboxAutoSyncHandler] Flush on background failed:', e)
+        );
+      }
       if (
         appStateRef.current.match(/inactive|background/) &&
         nextAppState === 'active'

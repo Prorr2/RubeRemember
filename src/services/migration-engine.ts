@@ -60,6 +60,21 @@ const V3_DB_KEY = 'rube_v3_database';
 let saveQueue: Promise<void> = Promise.resolve();
 const V2_DB_KEY = 'rube_v2_database';
 
+// Holds a one-shot notice shown to the user when the local DB file was corrupt
+// and the app had to recover from a backup (or start empty). Consumed (and
+// cleared) by the store right after loading.
+let recoveryNotice: string | null = null;
+
+function setRecoveryNotice(message: string): void {
+  recoveryNotice = message;
+}
+
+export function takeRecoveryNotice(): string | null {
+  const notice = recoveryNotice;
+  recoveryNotice = null;
+  return notice;
+}
+
 const DB_FILE_NAME = 'rube_database_v3.json';
 
 function getDbFileUri(): string | null {
@@ -97,7 +112,11 @@ async function writeDbFile(content: string): Promise<void> {
       const dir = FileSystem.documentDirectory!;
       await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
     }
-    await FileSystem.writeAsStringAsync(uri, content);
+    // Atomic write: write to a temp file first, then rename over the real file so a
+    // crash mid-write can never leave a truncated/corrupt DB file behind.
+    const tmpUri = `${uri}.tmp`;
+    await FileSystem.writeAsStringAsync(tmpUri, content);
+    await FileSystem.moveAsync({ from: tmpUri, to: uri });
   } catch (e) {
     console.warn('[MigrationEngine] writeDbFile error:', e);
     throw e;
@@ -112,6 +131,26 @@ export async function clearDatabaseFile(): Promise<void> {
     }
   } catch (e) {
     console.warn('[MigrationEngine] clearDatabaseFile error:', e);
+  }
+}
+
+// Clears all legacy AsyncStorage keys (V1/V2/V3) so stale data can never be
+// re-migrated ("resurrected") after a clearAll or a corrupt-file recovery.
+export async function clearLegacyStorage(): Promise<void> {
+  const legacyKeys = [
+    STORAGE_KEY,
+    PROXIMITY_DAYS_KEY,
+    STORAGE_KEY_LISTS,
+    STORAGE_KEY_SLOTS,
+    STORAGE_KEY_SEPARATION,
+    STORAGE_KEY_GOALS,
+    V2_DB_KEY,
+    V3_DB_KEY,
+  ];
+  try {
+    await AsyncStorage.multiRemove(legacyKeys);
+  } catch (e) {
+    console.warn('[MigrationEngine] clearLegacyStorage error:', e);
   }
 }
 
@@ -282,18 +321,46 @@ export const MigrationEngine = {
     return clearDatabaseFile();
   },
 
+  async clearLegacyStorage(): Promise<void> {
+    return clearLegacyStorage();
+  },
+
+  takeRecoveryNotice(): string | null {
+    return takeRecoveryNotice();
+  },
+
   async getDatabase(): Promise<DatabaseV3> {
     try {
       // 0. Try to load V3 database from the filesystem (primary source).
       const fileData = await readDbFile();
       if (fileData) {
-        const parsed = JSON.parse(fileData);
-        const sanitized = sanitizeDatabase(parsed);
-        const migrated = await materializeDatabaseImages(sanitized);
-        if (migrated !== parsed) {
-          await writeDbFile(JSON.stringify(migrated));
+        try {
+          const parsed = JSON.parse(fileData);
+          const sanitized = sanitizeDatabase(parsed);
+          const migrated = await materializeDatabaseImages(sanitized);
+          // Only rewrite when the DB actually changed (by content), so we avoid
+          // unnecessary writes that could race with other saves. Serialize through
+          // the saveQueue for safety.
+          const serialized = JSON.stringify(migrated);
+          if (fileData !== serialized) {
+            saveQueue = saveQueue.then(() => writeDbFile(serialized)).catch((e) =>
+              console.error('[MigrationEngine] getDatabase rewrite error:', e)
+            );
+          }
+          return migrated;
+        } catch (parseErr) {
+          // The file exists but is corrupt (truncated / invalid JSON). Don't let it
+          // brick the app: quarantine it and fall through to the AsyncStorage fallbacks.
+          console.error('[MigrationEngine] Database file corrupt, trying fallbacks:', parseErr);
+          await FileSystem.moveAsync({
+            from: getDbFileUri()!,
+            to: `${getDbFileUri()}.corrupt-${Date.now()}`,
+          }).catch(() => {});
+          setRecoveryNotice(
+            'Se detectó que el archivo de la base de datos estaba dañado. ' +
+            'Se buscó en los respaldos guardados en este dispositivo.'
+          );
         }
-        return migrated;
       }
 
       // 1. Try to load V3 database (legacy AsyncStorage storage)
@@ -304,6 +371,14 @@ export const MigrationEngine = {
           const sanitized = sanitizeDatabase(parsed);
           const migrated = await materializeDatabaseImages(sanitized);
           await writeDbFile(JSON.stringify(migrated));
+          if (recoveryNotice) {
+            setRecoveryNotice(
+              'Se detectó que el archivo de la base de datos estaba dañado y se recuperaron ' +
+              'tus datos de un respaldo anterior guardado en el dispositivo. Es posible que los ' +
+              'cambios más recientes no estén incluidos. Revisa tus datos; si falta algo, restaura ' +
+              'un respaldo desde "Copia de seguridad" o desde Dropbox.'
+            );
+          }
           return migrated;
         }
       } catch (e) {
@@ -320,6 +395,14 @@ export const MigrationEngine = {
           const sanitized = sanitizeDatabase(v3Db);
           const migrated = await materializeDatabaseImages(sanitized);
           await writeDbFile(JSON.stringify(migrated));
+          if (recoveryNotice) {
+            setRecoveryNotice(
+              'Se detectó que el archivo de la base de datos estaba dañado y se recuperaron ' +
+              'tus datos de un respaldo anterior guardado en el dispositivo. Es posible que los ' +
+              'cambios más recientes no estén incluidos. Revisa tus datos; si falta algo, restaura ' +
+              'un respaldo desde "Copia de seguridad" o desde Dropbox.'
+            );
+          }
           return migrated;
         }
       } catch (e) {
@@ -336,6 +419,14 @@ export const MigrationEngine = {
           const sanitized = sanitizeDatabase(v3Db);
           const migrated = await materializeDatabaseImages(sanitized);
           await writeDbFile(JSON.stringify(migrated));
+          if (recoveryNotice) {
+            setRecoveryNotice(
+              'Se detectó que el archivo de la base de datos estaba dañado y se recuperaron ' +
+              'tus datos de un respaldo anterior guardado en el dispositivo. Es posible que los ' +
+              'cambios más recientes no estén incluidos. Revisa tus datos; si falta algo, restaura ' +
+              'un respaldo desde "Copia de seguridad" o desde Dropbox.'
+            );
+          }
           return migrated;
         }
       } catch (e) {
@@ -344,6 +435,14 @@ export const MigrationEngine = {
 
       // 4. Return default empty V3 database
       console.log('MigrationEngine: No database found. Initializing default database V3...');
+      if (recoveryNotice) {
+        setRecoveryNotice(
+          'Se detectó que el archivo de la base de datos estaba dañado y no se encontró ningún ' +
+          'respaldo en el dispositivo. Se abrió la aplicación con una base de datos vacía. ' +
+          'Tus datos anteriores podrían recuperarse desde Dropbox o desde un archivo de ' +
+          'respaldo en "Copia de seguridad".'
+        );
+      }
       const defaultDb: DatabaseV3 = {
         version: 3,
         items: [],
@@ -354,6 +453,9 @@ export const MigrationEngine = {
           { id: 'slot-afternoon', name: 'Tarde', startTime: '16:00', endTime: '18:00' },
           { id: 'slot-night', name: 'Noche', startTime: '20:00', endTime: '23:00' },
         ],
+        activityCategories: [],
+        taskCategories: [],
+        hourWeights: [],
         sessions: [],
         recommendations: [],
         userSettings: DEFAULT_USER_SETTINGS,
