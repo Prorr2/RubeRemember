@@ -20,6 +20,7 @@ import { ReminderList } from '../models/ReminderList';
 import { CustomCategory } from '../models/Activity';
 import { HourWeight } from '../models/HourWeight';
 import { TaskCategory } from '../models/TaskCategory';
+import { materializeDatabaseImages } from './image-store';
 
 export interface DatabaseV2 {
   version: number;
@@ -228,10 +229,11 @@ export const MigrationEngine = {
       if (v3Data) {
         const parsed = JSON.parse(v3Data);
         const sanitized = sanitizeDatabase(parsed);
-        if (sanitized !== parsed) {
-          await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(sanitized));
+        const migrated = await materializeDatabaseImages(sanitized);
+        if (migrated !== parsed) {
+          await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(migrated));
         }
-        return sanitized;
+        return migrated;
       }
 
       // 2. Try to load V2 database and migrate to V3
@@ -241,8 +243,9 @@ export const MigrationEngine = {
         const v2Db = JSON.parse(v2Data);
         const v3Db = this.migrateV2ToV3(v2Db);
         const sanitized = sanitizeDatabase(v3Db);
-        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(sanitized));
-        return sanitized;
+        const migrated = await materializeDatabaseImages(sanitized);
+        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(migrated));
+        return migrated;
       }
 
       // 3. Try to load V1 database, migrate to V2, then V3
@@ -252,8 +255,9 @@ export const MigrationEngine = {
         const v2Db = await this.migrateV1ToV2();
         const v3Db = this.migrateV2ToV3(v2Db);
         const sanitized = sanitizeDatabase(v3Db);
-        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(sanitized));
-        return sanitized;
+        const migrated = await materializeDatabaseImages(sanitized);
+        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(migrated));
+        return migrated;
       }
 
       // 4. Return default empty V3 database
@@ -285,13 +289,18 @@ export const MigrationEngine = {
     }
   },
 
-  async saveDatabase(db: DatabaseV3): Promise<void> {
+  async saveDatabase(db: DatabaseV3, options?: { skipIntegrityGuard?: boolean }): Promise<void> {
     db.version = 3; // Always ensure version is correct V3
     
     // Add to sequential save queue to eliminate race conditions
     saveQueue = saveQueue.then(async () => {
       try {
-        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
+        if (options?.skipIntegrityGuard) {
+          await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
+        } else {
+          // The integrity guard blocks writes that would catastrophically wipe task comments.
+          await this.persistDatabaseWithIntegrityGuard(db);
+        }
       } catch (e) {
         console.error('MigrationEngine save error:', e);
         throw e;
@@ -301,6 +310,62 @@ export const MigrationEngine = {
     });
 
     return saveQueue;
+  },
+
+  /**
+   * Persists the database to AsyncStorage, guarding against catastrophic loss of task comments.
+   *
+   * The guard compares the comment count of the DB being saved against the one already on disk.
+   * It only blocks when the SAME set of active (non-trash) tasks remains, but their comments
+   * were wiped (dropped to 0 or cut by more than half). This prevents accidental corruption being
+   * persisted locally, while still allowing legitimate operations that genuinely remove tasks or
+   * remove a specific note from a task.
+   */
+  async persistDatabaseWithIntegrityGuard(db: DatabaseV3): Promise<boolean> {
+    const itemsToSave = db.items || [];
+
+    // Count how many active tasks are present and their comments in the DB to save.
+    const activeToSave = itemsToSave.filter(i => i.type === ItemType.TASK && !i.trash);
+    const commentsToSave = activeToSave.reduce((sum, i) => sum + ((i as Task).comments || []).length, 0);
+
+    // Read the currently persisted state (best effort) to compare.
+    let prevComments = -1;
+    let prevActiveTasks = -1;
+    try {
+      const raw = await AsyncStorage.getItem(V3_DB_KEY);
+      if (raw) {
+        const prev = JSON.parse(raw);
+        const prevItems = prev?.items || [];
+        const prevActive = prevItems.filter((i: Item) => i.type === ItemType.TASK && !i.trash);
+        prevActiveTasks = prevActive.length;
+        prevComments = prevActive.reduce((sum: number, i: Item) => sum + ((i as Task).comments || []).length, 0);
+      }
+    } catch (e) {
+      // If we can't read the previous state, don't block the write.
+      prevComments = -1;
+      prevActiveTasks = -1;
+    }
+
+    const isFirstWrite = prevComments < 0 || prevComments === -1;
+    const sameTaskPopulation = prevActiveTasks >= 0 && prevActiveTasks === activeToSave.length;
+
+    const suspiciousLoss =
+      !isFirstWrite &&
+      sameTaskPopulation &&
+      prevComments > 0 &&
+      (commentsToSave === 0 || commentsToSave < Math.floor(prevComments / 2));
+
+    if (suspiciousLoss) {
+      console.error(
+        `[MigrationEngine] INTEGRITY GUARD: Se bloqueó el guardado para prevenir pérdida de comentarios. ` +
+        `Comentarios previos guardados: ${prevComments}, nuevos: ${commentsToSave} (mismas ${activeToSave.length} tareas activas).`
+      );
+      // Do NOT write the corrupted state. Preserve the on-disk data.
+      return false;
+    }
+
+    await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
+    return true;
   },
 
   migrateV2ToV3(v2Db: DatabaseV2): DatabaseV3 {

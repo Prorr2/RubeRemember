@@ -55,6 +55,12 @@ export interface UserSettings {
   hasLocalChanges?: boolean;
   dropboxSyncCooldownMinutes?: number;
   lastDropboxSlotIndex?: number;
+  lastDropboxCommentCount?: number;
+  lastDropboxSessionCount?: number;
+  dropboxStorageBudgetMB?: number;
+  lastDropboxSnapshotFiles?: string[];
+  lastDropboxRestoredFiles?: string[];
+  lastDropboxRestoreTimestamp?: number;
 }
 
 export const DEFAULT_VOICE_KEYWORDS: VoiceKeywords = {
@@ -99,8 +105,12 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   lastDropboxUploadStatus: 'No sincronizado aún',
   dropboxFileName: 'rube_remember_backup.json',
   hasLocalChanges: false,
-  dropboxSyncCooldownMinutes: 10,
+  dropboxSyncCooldownMinutes: 60,
   lastDropboxSlotIndex: 1,
+  lastDropboxCommentCount: 0,
+  lastDropboxSessionCount: 0,
+  dropboxStorageBudgetMB: 1500,
+  lastDropboxSnapshotFiles: [],
 };
 
 

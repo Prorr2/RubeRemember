@@ -78,6 +78,7 @@ export function DropboxAutoSyncHandler() {
         userSettings: currentStore.userSettings,
         items: currentStore.items,
         exportBackupData: currentStore.exportBackupData,
+        exportBackupDataSplit: currentStore.exportBackupDataSplit,
         updateUserSettings: currentStore.updateUserSettings,
         forceManual: false,
       });

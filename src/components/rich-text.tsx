@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { openBrowserAsync } from 'expo-web-browser';
+import { resolveImageUri } from '@/services/image-store';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -329,15 +330,18 @@ export function RichText({
 
       {images && images.length > 0 && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8, marginBottom: 8 }}>
-          {images.map((img, idx) => (
-            <Pressable
-              key={`indep-img-${idx}`}
-              onPress={() => setFullscreenImage(img)}
-              style={[{ width: 160, height: 160, borderRadius: 8, overflow: 'hidden' }, imageStyle]}
-            >
-              <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
-            </Pressable>
-          ))}
+          {images.map((img, idx) => {
+            const resolvedUri = resolveImageUri(img) || img;
+            return (
+              <Pressable
+                key={`indep-img-${idx}`}
+                onPress={() => setFullscreenImage(resolvedUri)}
+                style={[{ width: 160, height: 160, borderRadius: 8, overflow: 'hidden' }, imageStyle]}
+              >
+                <Image source={{ uri: resolvedUri }} style={{ width: '100%', height: '100%' }} />
+              </Pressable>
+            );
+          })}
         </View>
       )}
 

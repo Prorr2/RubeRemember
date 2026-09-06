@@ -1,4 +1,4 @@
-import { Item, ItemType, UserSettings } from '../models/Item';
+import { Item, ItemType, Task, UserSettings } from '../models/Item';
 
 export interface DropboxAccountInfo {
   name: string;
@@ -20,6 +20,161 @@ export const DropboxService = {
     const cleanBase = baseName.replace(/(_\d+)?\.json$/i, '');
     const validSlot = Math.max(1, Math.min(8, slotIndex));
     return `${cleanBase}_${validSlot}.json`;
+  },
+
+  /**
+   * Generates timestamp-paired filenames for the text backup and its images bundle.
+   * Example: rube_remember_backup_1712345678901.json + rube_remember_images_1712345678901.json
+   */
+  getTimestampFileNames(timestamp: number = Date.now(), baseName: string = 'rube_remember_backup.json'): {
+    text: string;
+    images: string;
+    timestamp: number;
+  } {
+    const cleanBase = baseName.replace(/(_\d+)?\.json$/i, '').replace(/_images$/i, '');
+    const ts = timestamp;
+    return {
+      text: `${cleanBase}_${ts}.json`,
+      images: `${cleanBase}_images_${ts}.json`,
+      timestamp: ts,
+    };
+  },
+
+  /**
+   * Parses the timestamp out of a timestamped backup filename. Returns 0 if not parseable.
+   */
+  getTimestampFromFileName(fileName: string): number {
+    const match = fileName.match(/(\d{10,})\.json$/);
+    return match ? parseInt(match[1], 10) : 0;
+  },
+
+  /**
+   * Returns true if the given filename belongs to this app's backup naming scheme.
+   */
+  isBackupFileName(fileName: string, baseName: string = 'rube_remember_backup.json'): boolean {
+    const cleanBase = baseName.replace(/(_\d+)?\.json$/i, '').replace(/_images$/i, '');
+    return fileName.startsWith(cleanBase) && fileName.endsWith('.json');
+  },
+
+  /**
+   * Lists files in the app folder prefix of Dropbox, returning name + size (bytes).
+   */
+  async listBackupFiles(accessToken: string, baseName: string = 'rube_remember_backup.json'): Promise<Array<{ name: string; size: number }>> {
+    const cleanAccToken = this.cleanToken(accessToken);
+    if (!cleanAccToken) {
+      throw new Error('El token de acceso a Dropbox está vacío.');
+    }
+
+    const cleanBase = baseName.replace(/(_\d+)?\.json$/i, '').replace(/_images$/i, '');
+    const path = `/${cleanBase}`;
+
+    const response = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${cleanAccToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path, recursive: false }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      let msg = `Error listando archivos de Dropbox (${response.status})`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.error_summary) {
+          msg = parsed.error_summary;
+        }
+      } catch (e) {}
+      throw new Error(msg);
+    }
+
+    const data = await response.json();
+    const entries: Array<{ name: string; size: number }> = (data.entries || [])
+      .filter((e: any) => e['.tag'] === 'file')
+      .map((e: any) => ({ name: e.name, size: e.size || 0 }))
+      .filter((e: any) => this.isBackupFileName(e.name, baseName));
+
+    return entries;
+  },
+
+  /**
+   * Deletes a single file from Dropbox (files/delete_v2). Missing file is treated as success.
+   */
+  async deleteFile(accessToken: string, fileName: string): Promise<void> {
+    const cleanAccToken = this.cleanToken(accessToken);
+    if (!cleanAccToken) {
+      throw new Error('El token de acceso a Dropbox está vacío.');
+    }
+    const path = fileName.startsWith('/') ? fileName : `/${fileName}`;
+    const response = await fetch('https://api.dropboxapi.com/2/files/delete_v2', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${cleanAccToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path }),
+    });
+    if (!response.ok && response.status !== 409) {
+      const errText = await response.text();
+      let msg = `Error borrando archivo de Dropbox (${response.status})`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.error_summary) {
+          msg = parsed.error_summary;
+        }
+      } catch (e) {}
+      throw new Error(msg);
+    }
+  },
+
+  /**
+   * Enforces the storage budget: given the remote file list, computes how many of the OLDEST
+   * paired snapshots must be deleted so the total remote size stays under the budget. Returns
+   * the list of file names to delete (oldest first).
+   */
+  computeFilesToDeleteForBudget(
+    files: Array<{ name: string; size: number }>,
+    budgetBytes: number
+  ): string[] {
+    // Group into paired snapshots by timestamp (text + images share the same timestamp).
+    const snapshots: Record<number, Array<{ name: string; size: number }>> = {};
+    for (const f of files) {
+      const ts = this.getTimestampFromFileName(f.name);
+      if (ts <= 0) {
+        continue; // legacy non-timestamped backups are excluded (they are removed by convention later)
+      }
+      if (!snapshots[ts]) {
+        snapshots[ts] = [];
+      }
+      snapshots[ts].push(f);
+    }
+
+    const snapshotEntries = Object.keys(snapshots)
+      .map((ts) => parseInt(ts, 10))
+      .sort((a, b) => a - b)
+      .map((ts) => ({
+        ts,
+        name: `ts_${ts}`,
+        size: snapshots[ts].reduce((sum, f) => sum + f.size, 0),
+      }));
+
+    // Exclude legacy 1..8 slot files from ordering; they'll be cleaned up after the budget pass.
+    let toDelete: string[] = [];
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    let currentSize = totalSize;
+
+    for (const snap of snapshotEntries) {
+      if (currentSize <= budgetBytes) {
+        break;
+      }
+      for (const f of snapshots[snap.ts]) {
+        toDelete.push(f.name);
+      }
+      currentSize -= snap.size;
+    }
+
+    return toDelete;
   },
 
   /**
@@ -236,17 +391,71 @@ export const DropboxService = {
   },
 
   /**
-   * Performs automated check & sync using a rotating 7-file scheme (rube_remember_backup_1..7.json)
+   * Counts the total number of comments across all active (non-trash) tasks.
+   * Used to detect catastrophic data loss before uploading to the cloud.
+   */
+  countActiveComments(items: Item[]): number {
+    return items.reduce((total, item) => {
+      if (item.type === ItemType.TASK && !item.trash) {
+        const task = item as Task;
+        total += (task.comments || []).length;
+      }
+      return total;
+    }, 0);
+  },
+
+  /**
+   * Detects a potential catastrophic loss of task comments before overwriting the cloud backup.
+   * Returns true if the current comment count is suspiciously lower than the last successfully
+   * uploaded count, which would indicate all Task.comments were wiped from the database.
+   */
+  hasSuspiciousCommentLoss(
+    currentCount: number,
+    lastUploadedCount: number | undefined,
+    activeTasksCount: number
+  ): boolean {
+    // No previous record of comment count uploaded: can't detect regression, allow upload.
+    if (lastUploadedCount === undefined || lastUploadedCount === null) return false;
+    // If there are no active tasks, upload is already blocked elsewhere (zero_tasks).
+    if (activeTasksCount === 0) return false;
+    // If last upload had zero comments and current also has zero, nothing to lose.
+    if (lastUploadedCount === 0 && currentCount === 0) return false;
+    // If last upload recorded comments but current has none, this is almost certainly data loss.
+    if (lastUploadedCount > 0 && currentCount === 0) return true;
+    // Guard against drastic partial loss (e.g. dropped below 50% of the previous count).
+    // Only trigger on a meaningful drop (previous had a substantial baseline).
+    if (lastUploadedCount >= 10 && currentCount < Math.floor(lastUploadedCount / 2)) {
+      return true;
+    }
+    return false;
+  },
+
+  /**
+   * Performs automated check & sync using a rotating set of timestamp-paired snapshots
+   * (rube_remember_backup_<TS>.json + rube_remember_images_<TS>.json) with budget-based cleanup.
    */
   async performAutoSync(params: {
     userSettings: UserSettings;
     items: Item[];
     exportBackupData: () => Promise<string>;
+    exportBackupDataSplit?: () => Promise<{ text: string; images: Record<string, string> }>;
     updateUserSettings: (updates: Partial<UserSettings>) => Promise<void>;
     forceManual?: boolean;
     skipTenMinCheck?: boolean;
+    skipCommentIntegrityCheck?: boolean;
+    skipBudgetCheck?: boolean;
   }): Promise<SyncResult> {
-    const { userSettings, items, exportBackupData, updateUserSettings, forceManual = false, skipTenMinCheck = false } = params;
+    const {
+      userSettings,
+      items,
+      exportBackupData,
+      exportBackupDataSplit,
+      updateUserSettings,
+      forceManual = false,
+      skipTenMinCheck = false,
+      skipCommentIntegrityCheck = false,
+      skipBudgetCheck = false,
+    } = params;
 
     if (!forceManual && userSettings.dropboxAutoUploadEnabled === false) {
       return { success: false, uploaded: false, reason: 'disabled' };
@@ -300,26 +509,67 @@ export const DropboxService = {
       };
     }
 
+    // Integrity check: detect catastrophic loss of task comments before overwriting the cloud backup.
+    // Skips the existing "zero_tasks" scenario (already handled above) and any manual forced bypass.
+    if (!forceManual && !skipCommentIntegrityCheck) {
+      const activeTasks = items.filter(i => i.type === ItemType.TASK && !i.trash);
+      const currentCommentCount = this.countActiveComments(items);
+      const lastUploadedCommentCount = userSettings.lastDropboxCommentCount;
+      const lastUpload = userSettings.lastDropboxUploadTimestamp || 0;
+
+      // Only enforce protection once we have a previous upload to compare against.
+      const hasPreviousUpload = lastUpload > 0;
+
+      if (hasPreviousUpload && this.hasSuspiciousCommentLoss(currentCommentCount, lastUploadedCommentCount, activeTasks.length)) {
+        const statusMsg = `Subida CANCELADA por integridad: se detectó pérdida de comentarios de tareas. Actual: ${currentCommentCount}, previo subido: ${lastUploadedCommentCount ?? 0} (${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })})`;
+        console.warn('[DropboxSync]', statusMsg);
+        await updateUserSettings({ lastDropboxUploadStatus: statusMsg, hasLocalChanges: userSettings.hasLocalChanges ?? true });
+        return {
+          success: false,
+          uploaded: false,
+          reason: 'comments_lost',
+          error: 'Se detectó una pérdida masiva de comentarios/notas en las tareas. La subida a la nube se canceló por seguridad para no sobreescribir la copia con datos vacíos. Revisa la base de datos local antes de forzar una subida manual.'
+        };
+      }
+    }
+
     try {
-      const localJson = await exportBackupData();
+      // Compute budget (MB) from settings; default 1500 MB, never less than 50 MB.
+      const budgetMb = Math.max(50, userSettings.dropboxStorageBudgetMB ?? 1500);
+      const budgetBytes = budgetMb * 1024 * 1024;
 
-      // Calculate next slot index in 1..8 rotating scheme
-      const currentSlot = userSettings.lastDropboxSlotIndex || 1;
-      const nextSlot = lastUpload ? ((currentSlot % 8) + 1) : currentSlot;
-      const targetFileName = this.getSlotFileName(userSettings.dropboxFileName, nextSlot);
+      const fileNames = this.getTimestampFileNames(Date.now(), userSettings.dropboxFileName);
+      const targetTextFile = fileNames.text;
+      const targetImagesFile = fileNames.images;
 
-      console.log(`[DropboxSync] Subiendo respaldo al Archivo #${nextSlot} (${targetFileName})...`);
+      let textJson = await exportBackupData();
+      let imagesJson: string | null = null;
 
-      // Try uploading JSON to Dropbox (with auto-retry on token refresh if expired)
+      if (exportBackupDataSplit) {
+        const split = await exportBackupDataSplit();
+        textJson = split.text;
+        imagesJson = JSON.stringify(split.images);
+      }
+
+      console.log(`[DropboxSync] Subiendo respaldo (${targetTextFile}) y bundle de imágenes (${targetImagesFile})...`);
+
+      // Try uploading both files to Dropbox (with auto-retry on token refresh if expired)
+      const performUpload = async () => {
+        await this.uploadBackup(token as string, textJson, targetTextFile);
+        if (imagesJson) {
+          await this.uploadBackup(token as string, imagesJson, targetImagesFile);
+        }
+      };
+
       try {
-        await this.uploadBackup(token, localJson, targetFileName);
+        await performUpload();
       } catch (uploadErr: any) {
         if (userSettings.dropboxRefreshToken) {
           console.log('[DropboxSync] Error al subir. Intentando forzar renovación del token...');
           const freshToken = await this.refreshAccessTokenIfNeeded(userSettings, updateUserSettings, true);
           if (freshToken) {
             token = freshToken;
-            await this.uploadBackup(token, localJson, targetFileName);
+            await performUpload();
           } else {
             throw uploadErr;
           }
@@ -328,19 +578,45 @@ export const DropboxService = {
         }
       }
 
+      // Enforce budget: list remote backup files and delete the oldest snapshots until under budget.
+      if (!skipBudgetCheck) {
+        try {
+          const remoteFiles = await this.listBackupFiles(token, userSettings.dropboxFileName);
+          const toDelete = this.computeFilesToDeleteForBudget(remoteFiles, budgetBytes);
+          if (toDelete.length > 0) {
+            console.log(`[DropboxSync] Presupuesto ${budgetMb}MB: liberando espacio, borrando ${toDelete.length} archivo(s) antiguo(s):`, toDelete);
+            for (const f of toDelete) {
+              try {
+                await this.deleteFile(token, f);
+              } catch (delErr: any) {
+                console.warn('[DropboxSync] No se pudo borrar', f, delErr);
+              }
+            }
+          } else {
+            console.log(`[DropboxSync] Presupuesto ${budgetMb}MB: dentro del límite, sin archivos por borrar.`);
+          }
+        } catch (listErr: any) {
+          // Listing/budget enforcement is best-effort; uploading succeeded so don't fail the sync.
+          console.warn('[DropboxSync] No se pudo verificar el presupuesto de Dropbox:', listErr);
+        }
+      }
+
       const timestamp = Date.now();
       const timeFormatted = new Date(timestamp).toLocaleDateString('es-ES') + ' ' + new Date(timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-      const statusMsg = `Éxito en Archivo #${nextSlot} (${timeFormatted})`;
+      const statusMsg = `Éxito (${timeFormatted})`;
 
-      // Update settings: mark hasLocalChanges = false and advance lastDropboxSlotIndex = nextSlot
+      // Update settings: mark hasLocalChanges = false and record upload metadata
+      const commentCount = this.countActiveComments(items);
       await updateUserSettings({
         lastDropboxUploadTimestamp: timestamp,
         lastDropboxUploadStatus: statusMsg,
         hasLocalChanges: false,
-        lastDropboxSlotIndex: nextSlot,
+        lastDropboxSlotIndex: 1,
+        lastDropboxCommentCount: commentCount,
+        lastDropboxSnapshotFiles: [targetTextFile, targetImagesFile].filter(Boolean),
       });
 
-      console.log('[DropboxSync] Subida exitosa en slot', nextSlot, '(', targetFileName, ')');
+      console.log('[DropboxSync] Subida exitosa (', targetTextFile, ',', targetImagesFile, ')');
       return { success: true, uploaded: true };
     } catch (e: any) {
       console.error('[DropboxSync] Error de auto-sincronización:', e);

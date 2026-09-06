@@ -28,6 +28,7 @@ import { Colors } from '@/constants/theme';
 import { ScoreEngine, getTaskWeightLabel } from '@/engines/ScoreEngine';
 import { RichText } from '@/components/rich-text';
 import { useRecommendationService } from '@/services/RecommendationService';
+import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { MaskableTextInput, maskTextContent } from '@/components/maskable-text-input';
 import { HabitCalendar } from '@/components/habit-calendar';
 
@@ -273,7 +274,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginVertical: 2 }}>
                         {editNotesImages.map((img, idx) => (
                           <View key={idx} style={{ position: 'relative', width: 44, height: 44, borderRadius: 6, overflow: 'hidden' }}>
-                            <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                            <Image source={{ uri: resolveImageUri(img) }} style={{ width: '100%', height: '100%' }} />
                             <Pressable
                               onPress={() => setEditNotesImages((prev) => prev.filter((_, i) => i !== idx))}
                               style={{
@@ -339,7 +340,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginVertical: 2 }}>
                         {editNextStepImages.map((img, idx) => (
                           <View key={idx} style={{ position: 'relative', width: 44, height: 44, borderRadius: 6, overflow: 'hidden' }}>
-                            <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                            <Image source={{ uri: resolveImageUri(img) }} style={{ width: '100%', height: '100%' }} />
                             <Pressable
                               onPress={() => setEditNextStepImages((prev) => prev.filter((_, i) => i !== idx))}
                               style={{
@@ -555,80 +556,7 @@ export default function TasksScreen() {
 
   const { recommendations, triggerRecalculate } = useRecommendationService();
 
-  const handleAddImage = async (onImageSelected: (base64Url: string) => void) => {
-    Alert.alert(
-      'Añadir Imagen',
-      'Elige el origen de la imagen:',
-      [
-        {
-          text: 'Cámara 📸',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permiso requerido', 'Se necesita acceso a la cámara para tomar fotos.');
-              return;
-            }
-            try {
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: false,
-                quality: 0.3,
-                base64: true,
-              });
-              if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                let base64Data = asset.base64;
-                if (!base64Data) {
-                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                    encoding: 'base64',
-                  });
-                }
-                const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
-                onImageSelected(base64Url);
-              }
-            } catch (err) {
-              console.error("Error capturing camera image:", err);
-              Alert.alert("Error", "No se pudo procesar la imagen de la cámara.");
-            }
-          }
-        },
-        {
-          text: 'Galería de Fotos 🖼️',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permiso requerido', 'Se necesita acceso a la galería para seleccionar una imagen.');
-              return;
-            }
-            try {
-              const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ['images'],
-                allowsEditing: false,
-                quality: 0.3,
-                base64: true,
-              });
-              if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                let base64Data = asset.base64;
-                if (!base64Data) {
-                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                    encoding: 'base64',
-                  });
-                }
-                const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
-                onImageSelected(base64Url);
-              }
-            } catch (err) {
-              console.error("Error picking library image:", err);
-              Alert.alert("Error", "No se pudo procesar la imagen seleccionada.");
-            }
-          }
-        },
-        { text: 'Cancelar', style: 'cancel' }
-      ]
-    );
-  };
+  const { handleAddImage } = useImageCapture();
 
   // Alarm Modal States
   const [alarmTask, setAlarmTask] = useState<Task | null>(null);
@@ -2608,7 +2536,7 @@ export default function TasksScreen() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
                     {commentImages[currentRoadmapTask.id].map((img, idx) => (
                       <View key={idx} style={{ position: 'relative', width: 44, height: 44, borderRadius: 6, overflow: 'hidden' }}>
-                        <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                        <Image source={{ uri: resolveImageUri(img) }} style={{ width: '100%', height: '100%' }} />
                         <Pressable
                           onPress={() => setCommentImages((prev) => ({
                             ...prev,

@@ -7,9 +7,10 @@ export const NotificationService = {
   initialize: () => {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
-        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         shouldPlaySound: true,
-        shouldVibrate: true,
+        shouldSetBadge: false,
       }),
     });
 
@@ -19,7 +20,7 @@ export const NotificationService = {
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 500, 250, 500],
         lightColor: '#FF9500',
-        enableVibration: true,
+        enableVibrate: true,
         bypassDnd: true,
       }).catch((e) => console.warn('Failed to set notification channel:', e));
     }
@@ -78,7 +79,10 @@ export const NotificationService = {
               default: {},
             }),
           },
-          trigger: { date: alarmDate, type: 'date' as any },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: alarmDate,
+          },
         });
         hasScheduledAtLeastOne = true;
       } catch (e) {

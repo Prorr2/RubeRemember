@@ -16,10 +16,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 
 import { useRememberStore, ItemType, Priority, ActivityCategory, getLocalDateStr, EnergyType, Memo, Plan, Task, TaskState } from '@/hooks/use-remember-store';
+import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { Colors, Spacing } from '@/constants/theme';
 import { ScoreEngine, getTaskWeightLabel } from '@/engines/ScoreEngine';
 
@@ -43,80 +42,7 @@ export default function ItemEditorScreen() {
   const [tagsInput, setTagsInput] = useState('');
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
 
-  const handleAddImage = async (onImageSelected: (base64Url: string) => void) => {
-    Alert.alert(
-      'Añadir Imagen',
-      'Elige el origen de la imagen:',
-      [
-        {
-          text: 'Cámara 📸',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permiso requerido', 'Se necesita acceso a la cámara para tomar fotos.');
-              return;
-            }
-            try {
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: false,
-                quality: 0.3,
-                base64: true,
-              });
-              if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                let base64Data = asset.base64;
-                if (!base64Data) {
-                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                    encoding: 'base64',
-                  });
-                }
-                const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
-                onImageSelected(base64Url);
-              }
-            } catch (err) {
-              console.error("Error capturing camera image:", err);
-              Alert.alert("Error", "No se pudo procesar la imagen de la cámara.");
-            }
-          }
-        },
-        {
-          text: 'Galería de Fotos 🖼️',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permiso requerido', 'Se necesita acceso a la galería para seleccionar una imagen.');
-              return;
-            }
-            try {
-              const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ['images'],
-                allowsEditing: false,
-                quality: 0.3,
-                base64: true,
-              });
-              if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                let base64Data = asset.base64;
-                if (!base64Data) {
-                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                    encoding: 'base64',
-                  });
-                }
-                const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
-                onImageSelected(base64Url);
-              }
-            } catch (err) {
-              console.error("Error picking library image:", err);
-              Alert.alert("Error", "No se pudo procesar la imagen seleccionada.");
-            }
-          }
-        },
-        { text: 'Cancelar', style: 'cancel' }
-      ]
-    );
-  };
+  const { handleAddImage } = useImageCapture();
 
   // Task Specific State
   const [priority, setPriority] = useState<Priority>(Priority.MEDIUM);
@@ -763,7 +689,7 @@ export default function ItemEditorScreen() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
               {attachedImages.map((imgUrl, idx) => (
                 <View key={idx} style={{ width: 80, height: 80, borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
-                  <Image source={{ uri: imgUrl }} style={{ width: '100%', height: '100%' }} />
+                  <Image source={{ uri: resolveImageUri(imgUrl) }} style={{ width: '100%', height: '100%' }} />
                   <Pressable
                     onPress={() => setAttachedImages((prev) => prev.filter((_, i) => i !== idx))}
                     style={{

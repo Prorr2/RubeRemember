@@ -16,11 +16,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 
 import { useRememberStore, Task } from '@/hooks/use-remember-store';
 import { useSessionService } from '@/services/SessionService';
+import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { Colors } from '@/constants/theme';
 
 export default function SessionScreen() {
@@ -59,80 +58,7 @@ export default function SessionScreen() {
   const [isTaskCompleted, setIsTaskCompleted] = useState(false);
   const [progress, setProgress] = useState('0');
 
-  const handleAddImage = async (onImageSelected: (base64Url: string) => void) => {
-    Alert.alert(
-      'Añadir Imagen',
-      'Elige el origen de la imagen:',
-      [
-        {
-          text: 'Cámara 📸',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permiso requerido', 'Se necesita acceso a la cámara para tomar fotos.');
-              return;
-            }
-            try {
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: false,
-                quality: 0.3,
-                base64: true,
-              });
-              if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                let base64Data = asset.base64;
-                if (!base64Data) {
-                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                    encoding: 'base64',
-                  });
-                }
-                const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
-                onImageSelected(base64Url);
-              }
-            } catch (err) {
-              console.error("Error capturing camera image:", err);
-              Alert.alert("Error", "No se pudo procesar la imagen de la cámara.");
-            }
-          }
-        },
-        {
-          text: 'Galería de Fotos 🖼️',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permiso requerido', 'Se necesita acceso a la galería para seleccionar una imagen.');
-              return;
-            }
-            try {
-              const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ['images'],
-                allowsEditing: false,
-                quality: 0.3,
-                base64: true,
-              });
-              if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                let base64Data = asset.base64;
-                if (!base64Data) {
-                  base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-                    encoding: 'base64',
-                  });
-                }
-                const mimeType = asset.mimeType || 'image/jpeg';
-                const base64Url = base64Data.startsWith('data:') ? base64Data : `data:${mimeType};base64,${base64Data}`;
-                onImageSelected(base64Url);
-              }
-            } catch (err) {
-              console.error("Error picking library image:", err);
-              Alert.alert("Error", "No se pudo procesar la imagen seleccionada.");
-            }
-          }
-        },
-        { text: 'Cancelar', style: 'cancel' }
-      ]
-    );
-  };
+  const { handleAddImage } = useImageCapture();
 
   // Timer Ref
   const targetTimeRef = useRef<number | null>(null);
@@ -159,6 +85,7 @@ export default function SessionScreen() {
             vibrate: [0, 500, 250, 500],
           },
           trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
             seconds,
           },
         });
@@ -413,7 +340,7 @@ export default function SessionScreen() {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                 {noteImages.map((img, idx) => (
                   <View key={idx} style={{ position: 'relative', width: 60, height: 60, borderRadius: 8, overflow: 'hidden' }}>
-                    <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} />
+                    <Image source={{ uri: resolveImageUri(img) }} style={{ width: '100%', height: '100%' }} />
                     <Pressable
                       onPress={() => setNoteImages((prev) => prev.filter((_, i) => i !== idx))}
                       style={{ position: 'absolute', top: 2, right: 2, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 10, padding: 2 }}

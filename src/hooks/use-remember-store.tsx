@@ -11,6 +11,13 @@ import { ReminderList, ListItem } from '@/models/ReminderList';
 import { Comment } from '@/models/Comment';
 import { MigrationEngine, DatabaseV2, DatabaseV3 } from '@/services/migration-engine';
 import { ActivityEngine } from '@/services/activity-engine';
+import {
+  materializeDatabaseImages,
+  writeImageBundle,
+  readImageBundle,
+  collectAllImageIds,
+  materializeDatabaseImagesForExport,
+} from '@/services/image-store';
 
 export { Comment } from '@/models/Comment';
 export { Goal, Phase } from '@/models/Goal';
@@ -151,7 +158,8 @@ interface RememberStore {
   updateComment: (taskId: string, commentId: string, text: string) => Promise<void>;
   deleteComment: (taskId: string, commentId: string) => Promise<void>;
   exportBackupData: () => Promise<string>;
-  importBackupData: (jsonString: string) => Promise<{
+  exportBackupDataSplit: () => Promise<{ text: string; images: Record<string, string> }>;
+  importBackupData: (jsonString: string, imageBundle?: Record<string, string>) => Promise<{
     success: boolean;
     errors: string[];
     importedKeys: string[];
@@ -1358,10 +1366,52 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         slotSeparationMinutes,
       },
     };
-    return JSON.stringify(db, null, 2);
+
+    // Self-contained export: resolve image IDs back to data URLs so the single
+    // JSON file remains fully portable (can be restored on any device).
+    const selfContained = await materializeDatabaseImagesForExport(db);
+    return JSON.stringify(selfContained, null, 2);
   }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
 
-  const importBackupData = useCallback(async (jsonString: string): Promise<{
+  // Dropbox export: text DB (image IDs only) + separate images bundle.
+  const exportBackupDataSplit = useCallback(async (): Promise<{
+    text: string;
+    images: Record<string, string>;
+  }> => {
+    const sanitizedUserSettings = {
+      ...userSettings,
+      dropboxAccessToken: '',
+      dropboxRefreshToken: '',
+      dropboxAppKey: '',
+      dropboxAppSecret: '',
+      dropboxTokenFetchedTimestamp: 0,
+    };
+
+    const db: DatabaseV3 = {
+      version: 3,
+      items,
+      goals,
+      lists,
+      timeSlots,
+      activityCategories,
+      hourWeights,
+      sessions,
+      recommendations,
+      userSettings: sanitizedUserSettings,
+      statistics,
+      settings: {
+        proximityDays,
+        slotSeparationMinutes,
+      },
+    };
+
+    const text = JSON.stringify(db, null, 2);
+    const ids = collectAllImageIds(db);
+    const images = await readImageBundle(ids);
+    return { text, images };
+  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
+
+  const importBackupData = useCallback(async (jsonString: string, imageBundle?: Record<string, string>): Promise<{
     success: boolean;
     errors: string[];
     importedKeys: string[];
@@ -1414,6 +1464,15 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         // V2/V3 backup
         importedDb = parsed as DatabaseV3;
       }
+
+      // Restore image files from an external bundle (Dropbox images file) if provided.
+      if (imageBundle && Object.keys(imageBundle).length > 0) {
+        await writeImageBundle(imageBundle);
+      }
+
+      // Convert any embedded base64 images (legacy backups) into files + IDs so the
+      // in-memory DB and AsyncStorage only hold lightweight image IDs.
+      importedDb = await materializeDatabaseImages(importedDb);
 
       if (importedDb.items) {
         setItems(importedDb.items);
@@ -1470,7 +1529,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           lastDropboxUploadTimestamp: userSettings.lastDropboxUploadTimestamp || importedDb.userSettings.lastDropboxUploadTimestamp || 0,
           lastDropboxUploadStatus: userSettings.lastDropboxUploadStatus || importedDb.userSettings.lastDropboxUploadStatus || '',
           lastDropboxSlotIndex: userSettings.lastDropboxSlotIndex || importedDb.userSettings.lastDropboxSlotIndex || 1,
-          dropboxSyncCooldownMinutes: userSettings.dropboxSyncCooldownMinutes ?? importedDb.userSettings.dropboxSyncCooldownMinutes ?? 10,
+          dropboxSyncCooldownMinutes: userSettings.dropboxSyncCooldownMinutes ?? importedDb.userSettings.dropboxSyncCooldownMinutes ?? 60,
+          lastDropboxCommentCount: userSettings.lastDropboxCommentCount ?? importedDb.userSettings.lastDropboxCommentCount,
+          lastDropboxSessionCount: userSettings.lastDropboxSessionCount ?? importedDb.userSettings.lastDropboxSessionCount,
         };
         setUserSettings(finalUserSettings);
         importedKeys.push('Ajustes de Usuario');
@@ -1498,7 +1559,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
           slotSeparationMinutes: importedDb.settings?.slotSeparationMinutes ?? slotSeparationMinutes,
         },
       };
-      await MigrationEngine.saveDatabase(mergedDb);
+      // Restoring a backup is an explicit user action: allow overwriting the local DB,
+      // even if the restored data has fewer comments than the current local state.
+      await MigrationEngine.saveDatabase(mergedDb, { skipIntegrityGuard: true });
 
       return {
         success: true,
@@ -2420,6 +2483,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         updateComment,
         deleteComment,
         exportBackupData,
+        exportBackupDataSplit,
         importBackupData,
         toggleReminderPinned,
         proximityDays,

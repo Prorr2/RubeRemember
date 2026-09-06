@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -38,7 +38,19 @@ export default function DropboxScreen() {
   const [refreshingToken, setRefreshingToken] = useState(false);
   const [accountInfo, setAccountInfo] = useState<DropboxAccountInfo | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [downloadingSlot, setDownloadingSlot] = useState<number | null>(null);
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [remoteSnapshots, setRemoteSnapshots] = useState<Array<{
+    key: string;
+    label: string;
+    textFile: string;
+    imagesFile?: string;
+    size: number;
+    isPair: boolean;
+    isLatest: boolean;
+    timestamp: number;
+  }>>([]);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [budgetInput, setBudgetInput] = useState('1500');
   const [currentAppState, setCurrentAppState] = useState<AppStateStatus>(AppState.currentState);
 
   const [, setTick] = useState(0);
@@ -56,11 +68,102 @@ export default function DropboxScreen() {
     };
   }, []);
 
+  // Keep the budget input in sync once settings finish loading.
+  useEffect(() => {
+    const budget = store.userSettings.dropboxStorageBudgetMB ?? 1500;
+    setBudgetInput(String(budget));
+  }, [store.userSettings.dropboxStorageBudgetMB]);
+
+  useEffect(() => {
+    if (store.userSettings.dropboxAccessToken) {
+      refreshRemoteSnapshots(true);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh the remote snapshot list.
+  const refreshRemoteSnapshots = useCallback(async (silent = false) => {
+    const baseName = store.userSettings.dropboxFileName || 'rube_remember_backup.json';
+    let tokenToUse = store.userSettings.dropboxAccessToken;
+    if (!tokenToUse) {
+      try {
+        tokenToUse = (await DropboxService.refreshAccessTokenIfNeeded(store.userSettings, store.updateUserSettings)) || '';
+      } catch (err) {}
+    }
+    if (!tokenToUse) {
+      if (!silent) setSnapshotError('No hay un token de acceso. Conéctate a Dropbox para ver los respaldos.');
+      setRemoteSnapshots([]);
+      return;
+    }
+    try {
+      const files = await DropboxService.listBackupFiles(tokenToUse, baseName);
+      // Group timestamped files into paired snapshots; legacy 1..8 files shown individually.
+      const byStamp: Record<number, { text?: string; images?: string; size: number }> = {};
+      const legacy: Array<{ name: string; size: number }> = [];
+      for (const f of files) {
+        const ts = DropboxService.getTimestampFromFileName(f.name);
+        if (ts <= 0) {
+          legacy.push(f);
+          continue;
+        }
+        if (!byStamp[ts]) {
+          byStamp[ts] = { size: 0 };
+        }
+        if (f.name.includes('_images_')) {
+          byStamp[ts].images = f.name;
+        } else {
+          byStamp[ts].text = f.name;
+        }
+        byStamp[ts].size += f.size;
+      }
+
+      const latestTs = Math.max(0, ...Object.keys(byStamp).map(Number));
+      const snapshots = Object.keys(byStamp)
+        .map((tsStr) => {
+          const ts = parseInt(tsStr, 10);
+          const g = byStamp[ts];
+          const textFile = g.text || (g.images ? g.images.replace('_images_', '_') : '');
+          const dt = new Date(ts);
+          const label = dt.toLocaleDateString('es-ES') + ' ' + dt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+          return {
+            key: `snap-${ts}`,
+            label,
+            textFile,
+            imagesFile: g.images,
+            size: g.size,
+            isPair: !!(g.text && g.images),
+            isLatest: ts === latestTs,
+            timestamp: ts,
+          };
+        })
+        .concat(
+          legacy.map((f) => {
+            const ts = DropboxService.getTimestampFromFileName(f.name);
+            return {
+              key: `legacy-${f.name}`,
+              label: f.name,
+              textFile: f.name,
+              imagesFile: undefined,
+              size: f.size,
+              isPair: false,
+              isLatest: false,
+              timestamp: ts,
+            };
+          })
+        )
+        .sort((a, b) => b.timestamp - a.timestamp || a.key.localeCompare(b.key));
+
+      setRemoteSnapshots(snapshots);
+      setSnapshotError(null);
+    } catch (e: any) {
+      if (!silent) setSnapshotError(e.message || String(e));
+      setRemoteSnapshots([]);
+    }
+  }, [store.userSettings, store.updateUserSettings]);
+
   const activeTasksCount = store.items.filter(i => i.type === 'TASK' && !i.trash).length;
 
   const cooldownMinutes = store.userSettings.dropboxSyncCooldownMinutes ?? 60;
   const lastUpload = store.userSettings.lastDropboxUploadTimestamp || 0;
-  const lastSlotIndex = store.userSettings.lastDropboxSlotIndex || 1;
   const timeSinceLastSyncMs = lastUpload > 0 ? Date.now() - lastUpload : 0;
   const timeSinceLastSyncMin = Math.floor(timeSinceLastSyncMs / 1000 / 60);
   const cooldownElapsed = lastUpload === 0 || timeSinceLastSyncMs >= cooldownMinutes * 60 * 1000;
@@ -185,6 +288,7 @@ export default function DropboxScreen() {
         userSettings: store.userSettings,
         items: store.items,
         exportBackupData: store.exportBackupData,
+        exportBackupDataSplit: store.exportBackupDataSplit,
         updateUserSettings: store.updateUserSettings,
         forceManual: true,
       });
@@ -217,7 +321,7 @@ export default function DropboxScreen() {
     }
   };
 
-  const handleRestoreSlot = async (slotNum: number, fileName: string) => {
+  const handleRestoreSnapshot = async (snapshot: { key: string; label: string; textFile: string; imagesFile?: string; isPair: boolean }) => {
     let tokenToUse = store.userSettings.dropboxAccessToken;
     if (!tokenToUse) {
       try {
@@ -230,47 +334,89 @@ export default function DropboxScreen() {
       return;
     }
 
-    setDownloadingSlot(slotNum);
+    setDownloadingKey(snapshot.key);
     try {
-      const remoteContent = await DropboxService.downloadBackup(tokenToUse, fileName);
-      setDownloadingSlot(null);
+      const remoteContent = await DropboxService.downloadBackup(tokenToUse, snapshot.textFile);
+      let imagesBundle: Record<string, string> | undefined;
+      if (snapshot.imagesFile) {
+        const imagesContent = await DropboxService.downloadBackup(tokenToUse, snapshot.imagesFile);
+        if (imagesContent) {
+          try {
+            const parsed = JSON.parse(imagesContent);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              imagesBundle = parsed;
+            }
+          } catch (e) {
+            console.warn('[Dropbox] El bundle de imágenes no es un JSON válido:', e);
+          }
+        }
+      }
+      setDownloadingKey(null);
 
       if (!remoteContent) {
         Alert.alert(
           'Archivo No Encontrado',
-          `No se encontró el archivo "${fileName}" (Archivo #${slotNum}) en tu Dropbox. Es posible que aún no se haya realizado una subida a este slot.`
+          `No se encontró el archivo "${snapshot.textFile}" en tu Dropbox.`
         );
         return;
       }
 
+      const isTimestamped = DropboxService.getTimestampFromFileName(snapshot.textFile) > 0;
       Alert.alert(
-        `Restaurar desde Archivo #${slotNum}`,
-        `¿Deseas restaurar la base de datos desde "${fileName}"?\n\nEsta acción sobrescribirá todos tus datos actuales de RubeRemember con la copia de este respaldo.`,
+        `Restaurar desde ${isTimestamped ? 'respaldos' : 'respaldo'}`,
+        `¿Deseas restaurar la base de datos desde "${snapshot.label}"?\n\nEsta acción sobrescribirá todos tus datos actuales de RubeRemember con la copia de este respaldo.`,
         [
           { text: 'Cancelar', style: 'cancel' },
           {
             text: 'Restaurar y Sobrescribir',
             style: 'destructive',
             onPress: async () => {
-              setDownloadingSlot(slotNum);
-              const resultObj = await store.importBackupData(remoteContent);
-              setDownloadingSlot(null);
+              setDownloadingKey(snapshot.key);
+              try {
+                const resultObj = await store.importBackupData(remoteContent, imagesBundle);
+                setDownloadingKey(null);
 
-              if (resultObj.success) {
-                Alert.alert('Éxito', `La base de datos se ha restaurado correctamente desde el Archivo #${slotNum}.`, [
-                  { text: 'OK', onPress: () => router.back() }
-                ]);
-              } else {
-                const errorsMsg = resultObj.errors ? resultObj.errors.join(', ') : 'Archivo remoto inválido.';
-                Alert.alert('Error al Importar', 'No se pudieron importar los datos: ' + errorsMsg);
+                if (resultObj.success) {
+                  await store.updateUserSettings({
+                    lastDropboxRestoredFiles: [snapshot.textFile, snapshot.imagesFile || ''].filter(Boolean),
+                    lastDropboxRestoreTimestamp: Date.now(),
+                  });
+                  Alert.alert('Éxito', `La base de datos se ha restaurado correctamente desde "${snapshot.label}".`, [
+                    { text: 'OK', onPress: () => router.back() }
+                  ]);
+                } else {
+                  const errorsMsg = resultObj.errors ? resultObj.errors.join(', ') : 'Archivo remoto inválido.';
+                  Alert.alert('Error al Importar', 'No se pudieron importar los datos: ' + errorsMsg);
+                }
+              } catch (e: any) {
+                setDownloadingKey(null);
+                Alert.alert('Error al Importar', e.message || String(e));
               }
             },
           },
         ]
       );
     } catch (e: any) {
-      setDownloadingSlot(null);
+      setDownloadingKey(null);
       Alert.alert('Error al Descargar', e.message || String(e));
+    }
+  };
+
+  const handleSetStorageBudget = async () => {
+    const parsed = parseInt((budgetInput || '').replace(/\D/g, ''), 10);
+    if (isNaN(parsed) || parsed < 50) {
+      Alert.alert('Valor no válido', 'El presupuesto debe ser un número mayor o igual a 50 MB.');
+      return;
+    }
+    try {
+      await store.updateUserSettings({ dropboxStorageBudgetMB: parsed });
+      Alert.alert(
+        'Presupuesto Actualizado',
+        `El presupuesto de espacio en Dropbox se ha establecido en ${parsed} MB. Los respaldos más antiguos se eliminarán automáticamente si se supera este límite.`
+      );
+      setBudgetInput(String(parsed));
+    } catch (e: any) {
+      Alert.alert('Error', `No se pudo cambiar el presupuesto: ${e.message || String(e)}`);
     }
   };
 
@@ -286,20 +432,7 @@ export default function DropboxScreen() {
       new Date(tokenFetchedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
     : 'No registrado aún';
 
-  // Build 8 slots array ordered from most recent to oldest
-  const slotsList = Array.from({ length: 8 }, (_, idx) => {
-    const slotNum = idx + 1; // 1..8
-    const cyclesAgo = (lastSlotIndex - slotNum + 8) % 8;
-    const estimatedAgeMinutes = cyclesAgo * cooldownMinutes;
-    const fileName = DropboxService.getSlotFileName(store.userSettings.dropboxFileName, slotNum);
-    return {
-      slotNum,
-      cyclesAgo,
-      estimatedAgeMinutes,
-      fileName,
-      isLatest: cyclesAgo === 0 && lastUpload > 0,
-    };
-  }).sort((a, b) => a.cyclesAgo - b.cyclesAgo);
+  const storageBudgetMB = store.userSettings.dropboxStorageBudgetMB ?? 1500;
 
   const isAutoUploadActive = store.userSettings.dropboxAutoUploadEnabled !== false;
 
@@ -550,7 +683,7 @@ export default function DropboxScreen() {
               ]}
             >
               <Ionicons
-                name={activeTasksCount > 0 ? 'shield-checkmark' : 'shield-disclaimer'}
+                name={activeTasksCount > 0 ? 'shield-checkmark' : 'shield-outline'}
                 size={22}
                 color={activeTasksCount > 0 ? '#34C759' : '#FF3B30'}
               />
@@ -575,9 +708,9 @@ export default function DropboxScreen() {
             </View>
 
             <View style={styles.infoRow}>
-              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Rotación de Archivos (1..8):</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Presupuesto de Almacenamiento:</Text>
               <Text style={{ color: '#0061FF', fontSize: 13, fontWeight: '700' }}>
-                Archivo #{lastSlotIndex} de 8
+                {storageBudgetMB} MB
               </Text>
             </View>
 
@@ -610,74 +743,144 @@ export default function DropboxScreen() {
           </View>
         </View>
 
-        {/* Section 3: RESTAURACIÓN ROTATORIA DE 8 ARCHIVOS */}
+        {/* Section 3: RESTAURACIÓN DESDE DROPBOX (SNAPSHOTS) */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>RESTAURAR DESDE DROPBOX (8 RESPALDOS)</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>RESTAURAR DESDE DROPBOX</Text>
+            <Pressable
+              onPress={() => refreshRemoteSnapshots()}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4 }}
+            >
+              <Ionicons name="refresh" size={16} color="#0061FF" />
+              <Text style={{ color: '#0061FF', fontSize: 12, fontWeight: '600' }}>Actualizar</Text>
+            </Pressable>
+          </View>
           <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
-            Selecciona cuál de los 8 archivos rotatorios deseas restaurar en tu dispositivo:
+            Lista los respaldos timestamped (texto + imágenes pareados) actualmente en tu Dropbox:
           </Text>
 
+          {snapshotError && (
+            <Text style={{ color: '#FF3B30', fontSize: 12, marginBottom: 6 }}>
+              {snapshotError}
+            </Text>
+          )}
+
           <View style={{ gap: 10 }}>
-            {slotsList.map((item) => (
-              <View
-                key={item.slotNum}
-                style={[
-                  styles.slotCard,
-                  {
-                    backgroundColor: colors.backgroundElement,
-                    borderColor: item.isLatest ? '#34C759' : colors.backgroundSelected,
-                    borderWidth: item.isLatest ? 1.5 : 1,
-                  },
-                ]}
-              >
-                {/* Header Row: Title & Badge */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-                  <Text style={[styles.slotNumText, { color: colors.text }]}>
-                    Archivo #{item.slotNum}
+            {remoteSnapshots.length === 0 && !snapshotError ? (
+              <View style={[styles.slotCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="cloud-offline-outline" size={18} color={colors.textSecondary} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                    No hay respaldos visibles. Conecta tu cuenta o pulsa "Actualizar".
                   </Text>
-                  {item.isLatest ? (
-                    <View style={[styles.ageBadge, { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderColor: '#34C759' }]}>
-                      <Ionicons name="checkmark-circle" size={12} color="#34C759" />
-                      <Text style={[styles.ageBadgeText, { color: '#34C759' }]}>Más reciente</Text>
-                    </View>
-                  ) : (
-                    <View style={[styles.ageBadge, { backgroundColor: 'rgba(255, 149, 0, 0.12)', borderColor: '#FF9500' }]}>
-                      <Ionicons name="time-outline" size={12} color="#FF9500" />
-                      <Text style={[styles.ageBadgeText, { color: '#FF9500' }]}>
-                        Hace {item.cyclesAgo} ciclo(s) (~{item.estimatedAgeMinutes} min)
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Bottom Row: Filename & Restore Action */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', flex: 1 }} numberOfLines={1}>
-                    {item.fileName}
-                  </Text>
-
-                  <Pressable
-                    onPress={() => handleRestoreSlot(item.slotNum, item.fileName)}
-                    disabled={downloadingSlot !== null}
-                    style={[
-                      styles.restoreBtn,
-                      { backgroundColor: item.isLatest ? '#0061FF' : colors.backgroundSelected },
-                    ]}
-                  >
-                    {downloadingSlot === item.slotNum ? (
-                      <ActivityIndicator size="small" color="#FFF" />
-                    ) : (
-                      <>
-                        <Ionicons name="cloud-download-outline" size={15} color={item.isLatest ? '#FFF' : colors.text} />
-                        <Text style={[styles.restoreBtnText, { color: item.isLatest ? '#FFF' : colors.text }]}>
-                          Restaurar
-                        </Text>
-                      </>
-                    )}
-                  </Pressable>
                 </View>
               </View>
-            ))}
+            ) : (
+              remoteSnapshots.map((item) => (
+                <View
+                  key={item.key}
+                  style={[
+                    styles.slotCard,
+                    {
+                      backgroundColor: colors.backgroundElement,
+                      borderColor: item.isLatest ? '#34C759' : colors.backgroundSelected,
+                      borderWidth: item.isLatest ? 1.5 : 1,
+                    },
+                  ]}
+                >
+                  {/* Header Row: Title & Badge */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                    <Text style={[styles.slotNumText, { color: colors.text }]}>
+                      {item.isPair ? `Respaldo ${new Date(item.timestamp).toLocaleDateString('es-ES')}` : `Respaldo (${item.timestamp > 0 ? new Date(item.timestamp).toLocaleDateString('es-ES') : 'legacy'})`}
+                    </Text>
+                    {item.isLatest ? (
+                      <View style={[styles.ageBadge, { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderColor: '#34C759' }]}>
+                        <Ionicons name="checkmark-circle" size={12} color="#34C759" />
+                        <Text style={[styles.ageBadgeText, { color: '#34C759' }]}>Más reciente</Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.ageBadge, { backgroundColor: 'rgba(255, 149, 0, 0.12)', borderColor: '#FF9500' }]}>
+                        <Ionicons name="time-outline" size={12} color="#FF9500" />
+                        <Text style={[styles.ageBadgeText, { color: '#FF9500' }]}>
+                          {item.label}
+                          {item.isPair ? '' : ' (legacy)'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Info: size + paired */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 10 }}>
+                      {item.isPair ? 'Texto + Imágenes' : 'Sólo texto'}
+                    </Text>
+                    {item.size > 0 && (
+                      <Text style={{ color: colors.textSecondary, fontSize: 10 }}>
+                        {(item.size / 1024 / 1024).toFixed(2)} MB
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Bottom Row: Filename & Restore Action */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', flex: 1 }} numberOfLines={1}>
+                      {item.textFile}{item.imagesFile ? ` + ${item.imagesFile}` : ''}
+                    </Text>
+
+                    <Pressable
+                      onPress={() => handleRestoreSnapshot(item)}
+                      disabled={downloadingKey !== null}
+                      style={[
+                        styles.restoreBtn,
+                        { backgroundColor: item.isLatest ? '#0061FF' : colors.backgroundSelected },
+                      ]}
+                    >
+                      {downloadingKey === item.key ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="cloud-download-outline" size={15} color={item.isLatest ? '#FFF' : colors.text} />
+                          <Text style={[styles.restoreBtnText, { color: item.isLatest ? '#FFF' : colors.text }]}>
+                            Restaurar
+                          </Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+
+          {/* Storage Budget control */}
+          <View style={[styles.card, { backgroundColor: colors.backgroundElement, marginTop: 12 }]}>
+            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Presupuesto de Almacenamiento</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+              Límite máximo de espacio usado en Dropbox. Cuando se supere, se eliminarán los respaldos más antiguos.
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <TextInput
+                value={budgetInput}
+                onChangeText={setBudgetInput}
+                keyboardType="numeric"
+                placeholder="1500"
+                style={[
+                  styles.budgetInput,
+                  {
+                    backgroundColor: colors.background,
+                    color: colors.text,
+                    borderColor: colors.backgroundSelected,
+                  },
+                ]}
+              />
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>MB</Text>
+              <Pressable
+                onPress={handleSetStorageBudget}
+                style={[styles.creditApplyBtn, { backgroundColor: '#0061FF' }]}
+              >
+                <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>Guardar</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
 
@@ -693,9 +896,9 @@ export default function DropboxScreen() {
 
             <View style={styles.debugGrid}>
               <View style={[styles.debugItem, { backgroundColor: colors.background }]}>
-                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>lastDropboxSlotIndex</Text>
+                <Text style={[styles.debugKey, { color: colors.textSecondary }]}>dropboxStorageBudgetMB</Text>
                 <Text style={[styles.debugVal, { color: '#0061FF' }]}>
-                  Archivo #{lastSlotIndex} / 8
+                  {storageBudgetMB} MB
                 </Text>
               </View>
 
@@ -802,19 +1005,19 @@ export default function DropboxScreen() {
                 </Text>
                 <View style={styles.btnRow}>
                   <Pressable
-                    onPress={() => handleSetCooldownMinutes(10)}
+                    onPress={() => handleSetCooldownMinutes(60)}
                     style={[
                       styles.smallBtn,
                       {
-                        backgroundColor: cooldownMinutes === 10 ? 'rgba(0, 97, 255, 0.2)' : colors.background,
+                        backgroundColor: cooldownMinutes === 60 ? 'rgba(0, 97, 255, 0.2)' : colors.background,
                         borderWidth: 1,
-                        borderColor: cooldownMinutes === 10 ? '#0061FF' : colors.backgroundSelected,
+                        borderColor: cooldownMinutes === 60 ? '#0061FF' : colors.backgroundSelected,
                       },
                     ]}
                   >
-                    <Ionicons name="time-outline" size={16} color={cooldownMinutes === 10 ? '#0061FF' : colors.textSecondary} />
-                    <Text style={[styles.smallBtnText, { color: cooldownMinutes === 10 ? '#0061FF' : colors.textSecondary }]}>
-                      Prod (&gt; 10 min)
+                    <Ionicons name="time-outline" size={16} color={cooldownMinutes === 60 ? '#0061FF' : colors.textSecondary} />
+                    <Text style={[styles.smallBtnText, { color: cooldownMinutes === 60 ? '#0061FF' : colors.textSecondary }]}>
+                      Prod (&gt; 1 hora)
                     </Text>
                   </Pressable>
 
@@ -847,7 +1050,7 @@ export default function DropboxScreen() {
           <View style={styles.actionsContainer}>
             <Pressable
               onPress={handleManualUpload}
-              disabled={uploading || downloadingSlot !== null}
+              disabled={uploading || downloadingKey !== null}
               style={[styles.actionBtn, { backgroundColor: '#0061FF' }]}
             >
               {uploading ? (
@@ -1051,6 +1254,22 @@ const styles = StyleSheet.create({
   restoreBtnText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  budgetInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 14,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  creditApplyBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   debugGrid: {
     gap: 8,
