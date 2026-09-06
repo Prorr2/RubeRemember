@@ -15,9 +15,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as Notifications from 'expo-notifications';
 
 import { useRememberStore, Task } from '@/hooks/use-remember-store';
+import { getNotifications } from '@/services/notification-service';
 import { useSessionService } from '@/services/SessionService';
 import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { Colors } from '@/constants/theme';
@@ -68,7 +68,10 @@ export default function SessionScreen() {
 
   const cancelSessionNotification = async () => {
     if (sessionNotificationIdRef.current) {
-      await Notifications.cancelScheduledNotificationAsync(sessionNotificationIdRef.current).catch(() => {});
+      const N = await getNotifications();
+      if (N) {
+        await N.cancelScheduledNotificationAsync(sessionNotificationIdRef.current).catch(() => {});
+      }
       sessionNotificationIdRef.current = null;
     }
   };
@@ -76,8 +79,10 @@ export default function SessionScreen() {
   const scheduleSessionNotification = async (seconds: number) => {
     await cancelSessionNotification();
     if (seconds > 0) {
+      const N = await getNotifications();
+      if (!N) return;
       try {
-        const id = await Notifications.scheduleNotificationAsync({
+        const id = await N.scheduleNotificationAsync({
           content: {
             title: '⏱️ ¡Sesión de Enfoque Terminada!',
             body: `Has completado tu sesión de enfoque en "${task?.title || 'tu tarea'}". ¡Buen trabajo!`,
@@ -85,7 +90,7 @@ export default function SessionScreen() {
             vibrate: [0, 500, 250, 500],
           },
           trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            type: N.SchedulableTriggerInputTypes.TIME_INTERVAL,
             seconds,
           },
         });

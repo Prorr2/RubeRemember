@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   Item,
   ItemType,
@@ -58,6 +59,61 @@ export interface DatabaseV3 {
 const V3_DB_KEY = 'rube_v3_database';
 let saveQueue: Promise<void> = Promise.resolve();
 const V2_DB_KEY = 'rube_v2_database';
+
+const DB_FILE_NAME = 'rube_database_v3.json';
+
+function getDbFileUri(): string | null {
+  if (!FileSystem.documentDirectory) {
+    return null;
+  }
+  return `${FileSystem.documentDirectory}${DB_FILE_NAME}`;
+}
+
+async function readDbFile(): Promise<string | null> {
+  try {
+    const uri = getDbFileUri();
+    if (!uri) {
+      return null;
+    }
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!info.exists) {
+      return null;
+    }
+    return await FileSystem.readAsStringAsync(uri);
+  } catch (e) {
+    console.warn('[MigrationEngine] readDbFile error:', e);
+    return null;
+  }
+}
+
+async function writeDbFile(content: string): Promise<void> {
+  try {
+    const uri = getDbFileUri();
+    if (!uri) {
+      throw new Error('Filesystem no disponible');
+    }
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!info.exists) {
+      const dir = FileSystem.documentDirectory!;
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+    }
+    await FileSystem.writeAsStringAsync(uri, content);
+  } catch (e) {
+    console.warn('[MigrationEngine] writeDbFile error:', e);
+    throw e;
+  }
+}
+
+export async function clearDatabaseFile(): Promise<void> {
+  try {
+    const uri = getDbFileUri();
+    if (uri) {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+    }
+  } catch (e) {
+    console.warn('[MigrationEngine] clearDatabaseFile error:', e);
+  }
+}
 
 // Old V1 keys
 const STORAGE_KEY = 'rube_remember_reminders_v1';
@@ -222,42 +278,68 @@ export function sanitizeDatabase(db: DatabaseV3): DatabaseV3 {
 }
 
 export const MigrationEngine = {
+  async clearDatabaseFile(): Promise<void> {
+    return clearDatabaseFile();
+  },
+
   async getDatabase(): Promise<DatabaseV3> {
     try {
-      // 1. Try to load V3 database
-      const v3Data = await AsyncStorage.getItem(V3_DB_KEY);
-      if (v3Data) {
-        const parsed = JSON.parse(v3Data);
+      // 0. Try to load V3 database from the filesystem (primary source).
+      const fileData = await readDbFile();
+      if (fileData) {
+        const parsed = JSON.parse(fileData);
         const sanitized = sanitizeDatabase(parsed);
         const migrated = await materializeDatabaseImages(sanitized);
         if (migrated !== parsed) {
-          await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(migrated));
+          await writeDbFile(JSON.stringify(migrated));
         }
         return migrated;
       }
 
+      // 1. Try to load V3 database (legacy AsyncStorage storage)
+      try {
+        const v3Data = await AsyncStorage.getItem(V3_DB_KEY);
+        if (v3Data) {
+          const parsed = JSON.parse(v3Data);
+          const sanitized = sanitizeDatabase(parsed);
+          const migrated = await materializeDatabaseImages(sanitized);
+          await writeDbFile(JSON.stringify(migrated));
+          return migrated;
+        }
+      } catch (e) {
+        console.warn('[MigrationEngine] No se pudo leer la DB V3 de AsyncStorage:', e);
+      }
+
       // 2. Try to load V2 database and migrate to V3
-      const v2Data = await AsyncStorage.getItem(V2_DB_KEY);
-      if (v2Data) {
-        console.log('MigrationEngine: V2 data detected. Migrating to V3...');
-        const v2Db = JSON.parse(v2Data);
-        const v3Db = this.migrateV2ToV3(v2Db);
-        const sanitized = sanitizeDatabase(v3Db);
-        const migrated = await materializeDatabaseImages(sanitized);
-        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(migrated));
-        return migrated;
+      try {
+        const v2Data = await AsyncStorage.getItem(V2_DB_KEY);
+        if (v2Data) {
+          console.log('MigrationEngine: V2 data detected. Migrating to V3...');
+          const v2Db = JSON.parse(v2Data);
+          const v3Db = this.migrateV2ToV3(v2Db);
+          const sanitized = sanitizeDatabase(v3Db);
+          const migrated = await materializeDatabaseImages(sanitized);
+          await writeDbFile(JSON.stringify(migrated));
+          return migrated;
+        }
+      } catch (e) {
+        console.warn('[MigrationEngine] No se pudo leer la DB V2 de AsyncStorage:', e);
       }
 
       // 3. Try to load V1 database, migrate to V2, then V3
-      const hasOldData = await AsyncStorage.getItem(STORAGE_KEY);
-      if (hasOldData !== null) {
-        console.log('MigrationEngine: Old V1 data detected. Starting migrations to V3...');
-        const v2Db = await this.migrateV1ToV2();
-        const v3Db = this.migrateV2ToV3(v2Db);
-        const sanitized = sanitizeDatabase(v3Db);
-        const migrated = await materializeDatabaseImages(sanitized);
-        await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(migrated));
-        return migrated;
+      try {
+        const hasOldData = await AsyncStorage.getItem(STORAGE_KEY);
+        if (hasOldData !== null) {
+          console.log('MigrationEngine: Old V1 data detected. Starting migrations to V3...');
+          const v2Db = await this.migrateV1ToV2();
+          const v3Db = this.migrateV2ToV3(v2Db);
+          const sanitized = sanitizeDatabase(v3Db);
+          const migrated = await materializeDatabaseImages(sanitized);
+          await writeDbFile(JSON.stringify(migrated));
+          return migrated;
+        }
+      } catch (e) {
+        console.warn('[MigrationEngine] No se pudieron leer los datos V1 de AsyncStorage:', e);
       }
 
       // 4. Return default empty V3 database
@@ -281,7 +363,7 @@ export const MigrationEngine = {
           slotSeparationMinutes: 30,
         },
       };
-      await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(defaultDb));
+      await writeDbFile(JSON.stringify(defaultDb));
       return defaultDb;
     } catch (e) {
       console.error('MigrationEngine error:', e);
@@ -296,7 +378,7 @@ export const MigrationEngine = {
     saveQueue = saveQueue.then(async () => {
       try {
         if (options?.skipIntegrityGuard) {
-          await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
+          await writeDbFile(JSON.stringify(db));
         } else {
           // The integrity guard blocks writes that would catastrophically wipe task comments.
           await this.persistDatabaseWithIntegrityGuard(db);
@@ -313,7 +395,7 @@ export const MigrationEngine = {
   },
 
   /**
-   * Persists the database to AsyncStorage, guarding against catastrophic loss of task comments.
+   * Persists the database to the filesystem, guarding against catastrophic loss of task comments.
    *
    * The guard compares the comment count of the DB being saved against the one already on disk.
    * It only blocks when the SAME set of active (non-trash) tasks remains, but their comments
@@ -332,7 +414,7 @@ export const MigrationEngine = {
     let prevComments = -1;
     let prevActiveTasks = -1;
     try {
-      const raw = await AsyncStorage.getItem(V3_DB_KEY);
+      const raw = await readDbFile();
       if (raw) {
         const prev = JSON.parse(raw);
         const prevItems = prev?.items || [];
@@ -364,7 +446,7 @@ export const MigrationEngine = {
       return false;
     }
 
-    await AsyncStorage.setItem(V3_DB_KEY, JSON.stringify(db));
+    await writeDbFile(JSON.stringify(db));
     return true;
   },
 

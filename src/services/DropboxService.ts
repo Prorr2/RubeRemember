@@ -10,6 +10,8 @@ export interface SyncResult {
   uploaded: boolean;
   reason?: string;
   error?: string;
+  deletedFiles?: string[];
+  failedDeletes?: string[];
 }
 
 export const DropboxService = {
@@ -65,16 +67,13 @@ export const DropboxService = {
       throw new Error('El token de acceso a Dropbox está vacío.');
     }
 
-    const cleanBase = baseName.replace(/(_\d+)?\.json$/i, '').replace(/_images$/i, '');
-    const path = `/${cleanBase}`;
-
     const response = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${cleanAccToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ path, recursive: false }),
+      body: JSON.stringify({ path: '', recursive: false }),
     });
 
     if (!response.ok) {
@@ -132,6 +131,10 @@ export const DropboxService = {
    * Enforces the storage budget: given the remote file list, computes how many of the OLDEST
    * paired snapshots must be deleted so the total remote size stays under the budget. Returns
    * the list of file names to delete (oldest first).
+   *
+   * Safety guarantee: the newest snapshot is NEVER deleted. Even if a single backup alone
+   * exceeds the budget, the latest cloud copy is always preserved so rotation can never
+   * wipe all backups.
    */
   computeFilesToDeleteForBudget(
     files: Array<{ name: string; size: number }>,
@@ -142,7 +145,7 @@ export const DropboxService = {
     for (const f of files) {
       const ts = this.getTimestampFromFileName(f.name);
       if (ts <= 0) {
-        continue; // legacy non-timestamped backups are excluded (they are removed by convention later)
+        continue; // legacy non-timestamped backups are excluded from rotation
       }
       if (!snapshots[ts]) {
         snapshots[ts] = [];
@@ -155,26 +158,56 @@ export const DropboxService = {
       .sort((a, b) => a - b)
       .map((ts) => ({
         ts,
-        name: `ts_${ts}`,
         size: snapshots[ts].reduce((sum, f) => sum + f.size, 0),
+        files: snapshots[ts].map((f) => f.name),
       }));
 
-    // Exclude legacy 1..8 slot files from ordering; they'll be cleaned up after the budget pass.
+    // Iterate oldest -> newest, but never touch the newest snapshot.
+    const deletable = snapshotEntries.slice(0, -1);
+
     let toDelete: string[] = [];
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     let currentSize = totalSize;
 
-    for (const snap of snapshotEntries) {
+    for (const snap of deletable) {
       if (currentSize <= budgetBytes) {
         break;
       }
-      for (const f of snapshots[snap.ts]) {
-        toDelete.push(f.name);
-      }
+      toDelete.push(...snap.files);
       currentSize -= snap.size;
     }
 
     return toDelete;
+  },
+
+  /**
+   * Deletes a list of files with automatic retries. Always pairs text + images together
+   * (they are whole snapshots). Returns which files were deleted and which failed.
+   */
+  async deleteFilesWithRetry(
+    accessToken: string,
+    toDelete: string[],
+    maxAttempts: number = 2
+  ): Promise<{ deleted: string[]; failed: string[] }> {
+    const deleted: string[] = [];
+    const failed: string[] = [];
+    for (const f of toDelete) {
+      let deletedOne = false;
+      for (let attempt = 1; attempt <= maxAttempts && !deletedOne; attempt++) {
+        try {
+          await this.deleteFile(accessToken, f);
+          deletedOne = true;
+        } catch (e: any) {
+          console.warn(`[DropboxSync] Fallo al borrar ${f} (intento ${attempt}/${maxAttempts}):`, e.message || String(e));
+        }
+      }
+      if (deletedOne) {
+        deleted.push(f);
+      } else {
+        failed.push(f);
+      }
+    }
+    return { deleted, failed };
   },
 
   /**
@@ -444,6 +477,7 @@ export const DropboxService = {
     skipTenMinCheck?: boolean;
     skipCommentIntegrityCheck?: boolean;
     skipBudgetCheck?: boolean;
+    onBudgetCleanup?: (toDelete: string[]) => Promise<boolean> | boolean;
   }): Promise<SyncResult> {
     const {
       userSettings,
@@ -455,6 +489,7 @@ export const DropboxService = {
       skipTenMinCheck = false,
       skipCommentIntegrityCheck = false,
       skipBudgetCheck = false,
+      onBudgetCleanup,
     } = params;
 
     if (!forceManual && userSettings.dropboxAutoUploadEnabled === false) {
@@ -579,18 +614,31 @@ export const DropboxService = {
       }
 
       // Enforce budget: list remote backup files and delete the oldest snapshots until under budget.
+      let deletedDuringSync: string[] = [];
+      let failedDeletesDuringSync: string[] = [];
       if (!skipBudgetCheck) {
         try {
           const remoteFiles = await this.listBackupFiles(token, userSettings.dropboxFileName);
           const toDelete = this.computeFilesToDeleteForBudget(remoteFiles, budgetBytes);
           if (toDelete.length > 0) {
-            console.log(`[DropboxSync] Presupuesto ${budgetMb}MB: liberando espacio, borrando ${toDelete.length} archivo(s) antiguo(s):`, toDelete);
-            for (const f of toDelete) {
+            let proceed = true;
+            if (onBudgetCleanup) {
               try {
-                await this.deleteFile(token, f);
-              } catch (delErr: any) {
-                console.warn('[DropboxSync] No se pudo borrar', f, delErr);
+                proceed = await onBudgetCleanup([...toDelete]);
+              } catch (cbErr: any) {
+                console.warn('[DropboxSync] onBudgetCleanup falló, se procede con borrado seguro:', cbErr);
               }
+            }
+            if (proceed) {
+              const outcome = await this.deleteFilesWithRetry(token, toDelete);
+              deletedDuringSync = outcome.deleted;
+              failedDeletesDuringSync = outcome.failed;
+              console.log(`[DropboxSync] Presupuesto ${budgetMb}MB: liberando espacio, borrados ${deletedDuringSync.length} archivo(s) antiguo(s):`, deletedDuringSync);
+              if (failedDeletesDuringSync.length > 0) {
+                console.warn('[DropboxSync] No se pudieron borrar estos archivos (se reintentarán en la próxima sync):', failedDeletesDuringSync);
+              }
+            } else {
+              console.log(`[DropboxSync] Presupuesto ${budgetMb}MB: el usuario canceló la rotación, no se borró ningún archivo.`);
             }
           } else {
             console.log(`[DropboxSync] Presupuesto ${budgetMb}MB: dentro del límite, sin archivos por borrar.`);
@@ -617,7 +665,7 @@ export const DropboxService = {
       });
 
       console.log('[DropboxSync] Subida exitosa (', targetTextFile, ',', targetImagesFile, ')');
-      return { success: true, uploaded: true };
+      return { success: true, uploaded: true, deletedFiles: deletedDuringSync, failedDeletes: failedDeletesDuringSync };
     } catch (e: any) {
       console.error('[DropboxSync] Error de auto-sincronización:', e);
       // CRITICAL REQUIREMENT: If cloud upload fails, never set hasLocalChanges to false. Keep hasLocalChanges: true so it retries on next cycle.

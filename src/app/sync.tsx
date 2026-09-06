@@ -496,7 +496,7 @@ export default function SyncScreen() {
           {permission?.granted ? (
             <View style={styles.cameraContainer}>
               <CameraView
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
                 barcodeScannerSettings={{
                   barcodeTypes: ['qr'],
                 }}
@@ -717,7 +717,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   overlayContainer: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.4)',

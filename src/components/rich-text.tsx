@@ -355,7 +355,7 @@ export function RichText({
           <View style={styles.modalOverlay}>
             {/* Absolute backdrop for closing on empty click */}
             <Pressable
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
               onPress={() => setFullscreenImage(null)}
             />
             <View style={styles.modalContent} pointerEvents="box-none">

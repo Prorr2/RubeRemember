@@ -123,7 +123,7 @@ export default function DropboxScreen() {
           const g = byStamp[ts];
           const textFile = g.text || (g.images ? g.images.replace('_images_', '_') : '');
           const dt = new Date(ts);
-          const label = dt.toLocaleDateString('es-ES') + ' ' + dt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+          const label = dt.toLocaleDateString('es-ES') + ' ' + dt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           return {
             key: `snap-${ts}`,
             label,
@@ -197,11 +197,12 @@ export default function DropboxScreen() {
       const cleanKey = DropboxService.cleanToken(appKeyInput);
       const cleanSec = DropboxService.cleanToken(appSecretInput);
 
-      await store.updateUserSettings({
+await store.updateUserSettings({
         dropboxAccessToken: cleanToken,
         dropboxRefreshToken: cleanRefToken,
         dropboxAppKey: cleanKey,
         dropboxAppSecret: cleanSec,
+        hasLocalChanges: true,
       });
       setTokenInput(cleanToken);
       setRefreshTokenInput(cleanRefToken);
@@ -291,11 +292,31 @@ export default function DropboxScreen() {
         exportBackupDataSplit: store.exportBackupDataSplit,
         updateUserSettings: store.updateUserSettings,
         forceManual: true,
+        onBudgetCleanup: (toDelete: string[]) => {
+          return new Promise<boolean>((resolve) => {
+            const names = toDelete.map((f) => `• ${f}`).join('\n');
+            Alert.alert(
+              'Espacio en Dropbox',
+              `El presupuesto de almacenamiento se ha alcanzado. Se eliminarán los siguientes respaldos antiguos para dejar espacio:\n\n${names}\n\n¿Deseas proceder con la rotación?`,
+              [
+                { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Eliminar', style: 'destructive', onPress: () => resolve(true) },
+              ]
+            );
+          });
+        },
       });
 
       if (result.success) {
         if (result.uploaded) {
-          Alert.alert('Subida Completada', `La base de datos se ha subido exitosamente a Dropbox.`);
+          let msg = 'La base de datos se ha subido exitosamente a Dropbox.';
+          if (result.deletedFiles && result.deletedFiles.length > 0) {
+            msg += `\n\nSe eliminaron ${result.deletedFiles.length} respaldo(s) antiguo(s):\n${result.deletedFiles.map((f) => `• ${f}`).join('\n')}`;
+          }
+          if (result.failedDeletes && result.failedDeletes.length > 0) {
+            msg += `\n\n⚠️ No se pudieron eliminar (se reintentará en la próxima sync):\n${result.failedDeletes.map((f) => `• ${f}`).join('\n')}`;
+          }
+          Alert.alert('Subida Completada', msg);
         } else if (result.reason === 'no_local_changes' || result.reason === 'no_changes') {
           Alert.alert('Sin Cambios Pendientes', 'No hay cambios locales pendientes por subir a Dropbox desde la última sincronización.');
         }
@@ -311,10 +332,10 @@ export default function DropboxScreen() {
 
   const handleSetCooldownMinutes = async (minutes: number) => {
     try {
-      await store.updateUserSettings({ dropboxSyncCooldownMinutes: minutes });
+      await store.updateUserSettings({ dropboxSyncCooldownMinutes: minutes, hasLocalChanges: true });
       Alert.alert(
-        'Condición de Cooldown Actualizada',
-        `La condición de tiempo mínimo transcurrido entre subidas automáticas se ha establecido en > ${minutes} minuto(s).`
+        'Cooldown Actualizado',
+        `La sincronización automática se realizará como máximo cada ${minutes} minuto(s).`
       );
     } catch (e: any) {
       Alert.alert('Error', `No se pudo cambiar el tiempo de cooldown: ${e.message || String(e)}`);
@@ -380,6 +401,7 @@ export default function DropboxScreen() {
                   await store.updateUserSettings({
                     lastDropboxRestoredFiles: [snapshot.textFile, snapshot.imagesFile || ''].filter(Boolean),
                     lastDropboxRestoreTimestamp: Date.now(),
+                    hasLocalChanges: true,
                   });
                   Alert.alert('Éxito', `La base de datos se ha restaurado correctamente desde "${snapshot.label}".`, [
                     { text: 'OK', onPress: () => router.back() }
@@ -409,7 +431,7 @@ export default function DropboxScreen() {
       return;
     }
     try {
-      await store.updateUserSettings({ dropboxStorageBudgetMB: parsed });
+      await store.updateUserSettings({ dropboxStorageBudgetMB: parsed, hasLocalChanges: true });
       Alert.alert(
         'Presupuesto Actualizado',
         `El presupuesto de espacio en Dropbox se ha establecido en ${parsed} MB. Los respaldos más antiguos se eliminarán automáticamente si se supera este límite.`
@@ -624,7 +646,7 @@ export default function DropboxScreen() {
             {isAutoUploadActive ? (
               <Pressable
                 onPress={async () => {
-                  await store.updateUserSettings({ dropboxAutoUploadEnabled: false });
+                  await store.updateUserSettings({ dropboxAutoUploadEnabled: false, hasLocalChanges: true });
                   Alert.alert(
                     '🛑 AUTO-SUBIDA PAUSADA (EMERGENCIA)',
                     'Se ha detenido la auto-subida a Dropbox en caso de emergencia para proteger los 8 archivos de respaldo en la nube.'
@@ -645,10 +667,10 @@ export default function DropboxScreen() {
             ) : (
               <Pressable
                 onPress={async () => {
-                  await store.updateUserSettings({ dropboxAutoUploadEnabled: true });
+                  await store.updateUserSettings({ dropboxAutoUploadEnabled: true, hasLocalChanges: true });
                   Alert.alert(
                     '▶️ AUTO-SUBIDA REANUDADA',
-                    'La sincronización automática rotatoria de 8 archivos se ha vuelto a activar.'
+                    'La sincronización automática de respaldos con rotación por presupuesto se ha vuelto a activar.'
                   );
                 }}
                 style={styles.reEnableBtn}
@@ -659,7 +681,7 @@ export default function DropboxScreen() {
                     REANUDAR AUTO-SUBIDA AUTOMÁTICA
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-                    La auto-subida está en PAUSA. Pulsa para reactivar la sincronización rotatoria.
+                    La auto-subida está en PAUSA. Pulsa para reactivar la sincronización automática de respaldos.
                   </Text>
                 </View>
               </Pressable>
@@ -791,7 +813,7 @@ export default function DropboxScreen() {
                   {/* Header Row: Title & Badge */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                     <Text style={[styles.slotNumText, { color: colors.text }]}>
-                      {item.isPair ? `Respaldo ${new Date(item.timestamp).toLocaleDateString('es-ES')}` : `Respaldo (${item.timestamp > 0 ? new Date(item.timestamp).toLocaleDateString('es-ES') : 'legacy'})`}
+                      {item.isPair ? `Respaldo del ${item.label}` : item.timestamp > 0 ? `Respaldo del ${item.label}` : `Respaldo (legacy: ${item.label})`}
                     </Text>
                     {item.isLatest ? (
                       <View style={[styles.ageBadge, { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderColor: '#34C759' }]}>
@@ -880,6 +902,42 @@ export default function DropboxScreen() {
               >
                 <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>Guardar</Text>
               </Pressable>
+            </View>
+          </View>
+
+          {/* Auto-Sync Cooldown control */}
+          <View style={[styles.card, { backgroundColor: colors.backgroundElement, marginTop: 12 }]}>
+            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Cooldown de Sincronización</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+              Tiempo mínimo que debe transcurrir desde la última subida automática a Dropbox.
+            </Text>
+            <View style={[styles.btnRow, { marginTop: 8 }]}>
+              {[
+                { minutes: 30, label: '30 min' },
+                { minutes: 60, label: '1 hora' },
+                { minutes: 90, label: '1.5 horas' },
+              ].map((opt) => {
+                const active = cooldownMinutes === opt.minutes;
+                return (
+                  <Pressable
+                    key={opt.minutes}
+                    onPress={() => handleSetCooldownMinutes(opt.minutes)}
+                    style={[
+                      styles.smallBtn,
+                      {
+                        backgroundColor: active ? 'rgba(0, 97, 255, 0.2)' : colors.background,
+                        borderWidth: 1,
+                        borderColor: active ? '#0061FF' : colors.backgroundSelected,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="time-outline" size={16} color={active ? '#0061FF' : colors.textSecondary} />
+                    <Text style={[styles.smallBtnText, { color: active ? '#0061FF' : colors.textSecondary }]}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
           </View>
         </View>
@@ -998,47 +1056,6 @@ export default function DropboxScreen() {
                   <Text style={[styles.smallBtnText, { color: '#34C759' }]}>Forzar FALSE</Text>
                 </Pressable>
               </View>
-
-              <View style={{ gap: 6 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>
-                  Modo Cooldown para pruebas de auto-sync:
-                </Text>
-                <View style={styles.btnRow}>
-                  <Pressable
-                    onPress={() => handleSetCooldownMinutes(60)}
-                    style={[
-                      styles.smallBtn,
-                      {
-                        backgroundColor: cooldownMinutes === 60 ? 'rgba(0, 97, 255, 0.2)' : colors.background,
-                        borderWidth: 1,
-                        borderColor: cooldownMinutes === 60 ? '#0061FF' : colors.backgroundSelected,
-                      },
-                    ]}
-                  >
-                    <Ionicons name="time-outline" size={16} color={cooldownMinutes === 60 ? '#0061FF' : colors.textSecondary} />
-                    <Text style={[styles.smallBtnText, { color: cooldownMinutes === 60 ? '#0061FF' : colors.textSecondary }]}>
-                      Prod (&gt; 1 hora)
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={() => handleSetCooldownMinutes(1)}
-                    style={[
-                      styles.smallBtn,
-                      {
-                        backgroundColor: cooldownMinutes === 1 ? 'rgba(88, 86, 214, 0.2)' : colors.background,
-                        borderWidth: 1,
-                        borderColor: cooldownMinutes === 1 ? '#5856D6' : colors.backgroundSelected,
-                      },
-                    ]}
-                  >
-                    <Ionicons name="flash-outline" size={16} color={cooldownMinutes === 1 ? '#5856D6' : colors.textSecondary} />
-                    <Text style={[styles.smallBtnText, { color: cooldownMinutes === 1 ? '#5856D6' : colors.textSecondary }]}>
-                      Pruebas (&gt; 1 min)
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
             </View>
           </View>
         </View>
@@ -1070,10 +1087,13 @@ export default function DropboxScreen() {
           <Ionicons name="information-circle-outline" size={22} color="#0061FF" />
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: 'bold' }}>
-              ¿Cómo funciona el Sistema Rotatorio de 7 Archivos?
+              ¿Cómo funciona el sistema de rotación por presupuesto?
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
-              Cada subida automática o manual escribe en el siguiente número de archivo rotatorio (1 ➔ 2 ➔ 3 ... ➔ 7 ➔ 1). Esto garantiza que dispongas siempre de hasta 7 respaldos independientes guardados secuencialmente en Dropbox.
+              Cada subida (automática o manual) genera una "foto" completa de tu base de datos: un archivo de texto JSON con todos tus datos y un archivo de imágenes con las fotos de tus tareas. Cada foto lleva una marca de tiempo (timestamp) en su nombre, así que los respaldos son ilimitados y siempre únicos.
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+              Para controlar el almacenamiento en Dropbox, se aplica el presupuesto que configures aquí (en MB): tras cada subida, si el total de tus respaldos supera ese tamaño, se borran automáticamente las fotos más antiguas (junto con sus imágenes) hasta que el espacio esté por debajo del límite. Así el sistema guarda para siempre cada subida mientras quepa dentro del presupuesto, y rota (borra) solo las más antiguas cuando el tamaño se excede.
             </Text>
           </View>
         </View>

@@ -509,7 +509,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     newStats = statistics,
     currentProximity = proximityDays,
     currentSeparation = slotSeparationMinutes,
-    immediate = false
+    immediate = false,
+    localChangesFlag?: boolean
   ) => {
     try {
       const itemsOrSlotsChanged =
@@ -521,7 +522,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
       const settingsToSave: UserSettings = {
         ...newSettings,
-        hasLocalChanges: true,
+        // Preserve the caller's intent: data edits mark as changed, technical
+        // updates (token refresh, sync status) can leave the flag untouched.
+        hasLocalChanges: localChangesFlag ?? true,
       };
 
       if (adjusted !== items) setItems(adjusted);
@@ -1289,6 +1292,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     setLists([]);
     await AsyncStorage.setItem(V2_DB_KEY, ''); // Empty storage key
     await AsyncStorage.setItem('rube_v3_database', '');
+    await MigrationEngine.clearDatabaseFile();
     await NotificationService.cancelAll();
   }, [saveDatabaseState]);
 
@@ -1519,6 +1523,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       if (importedDb.userSettings) {
         finalUserSettings = {
           ...importedDb.userSettings,
+          hasLocalChanges: true,
           // Preserve local dropboxAccessToken, refresh token, app credentials and local sync rotation state
           dropboxAccessToken: userSettings.dropboxAccessToken || importedDb.userSettings.dropboxAccessToken || '',
           dropboxRefreshToken: userSettings.dropboxRefreshToken || importedDb.userSettings.dropboxRefreshToken || '',
@@ -2392,7 +2397,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
   }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const updateUserSettings = useCallback(async (updates: Partial<UserSettings>) => {
-    const hasLocalChanges = updates.hasLocalChanges !== undefined ? updates.hasLocalChanges : true;
+    const hasLocalChanges = updates.hasLocalChanges !== undefined ? updates.hasLocalChanges : false;
     const nextSettings = { ...userSettings, ...updates, hasLocalChanges };
     await saveDatabaseState(
       items,
@@ -2404,7 +2409,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       nextSettings,
       statistics,
       proximityDays,
-      slotSeparationMinutes
+      slotSeparationMinutes,
+      false,
+      hasLocalChanges
     );
   }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 

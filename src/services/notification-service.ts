@@ -1,47 +1,80 @@
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 export const ALARM_CHANNEL_ID = 'rube_remember_alarms_v2';
 
-export const NotificationService = {
-  initialize: () => {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-      }),
-    });
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
-    if (Platform.OS === 'android') {
-      Notifications.setNotificationChannelAsync(ALARM_CHANNEL_ID, {
-        name: 'Recordatorios Rube Remember',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 500, 250, 500],
-        lightColor: '#FF9500',
-        enableVibrate: true,
-        bypassDnd: true,
-      }).catch((e) => console.warn('Failed to set notification channel:', e));
+type NotificationsModule = typeof import('expo-notifications');
+
+let cachedModule: NotificationsModule | null = null;
+let loadError: unknown = null;
+
+export async function getNotifications(): Promise<NotificationsModule | null> {
+  if (cachedModule) return cachedModule;
+  if (loadError) return null;
+  if (isExpoGo) {
+    console.warn('[notifications] expo-notifications no está disponible en Expo Go. Notificaciones desactivadas.');
+    loadError = new Error('expo-notifications unavailable in Expo Go');
+    return null;
+  }
+  try {
+    cachedModule = await import('expo-notifications');
+    return cachedModule;
+  } catch (e) {
+    loadError = e;
+    console.warn('[notifications] expo-notifications no disponible:', e);
+    return null;
+  }
+}
+
+export const NotificationService = {
+  initialize: async () => {
+    try {
+      const N = await getNotifications();
+      if (!N) return;
+      N.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+        }),
+      });
+
+      if (Platform.OS === 'android') {
+        N.setNotificationChannelAsync(ALARM_CHANNEL_ID, {
+          name: 'Recordatorios Rube Remember',
+          importance: N.AndroidImportance.MAX,
+          vibrationPattern: [0, 500, 250, 500],
+          lightColor: '#FF9500',
+          enableVibrate: true,
+          bypassDnd: true,
+        }).catch((e) => console.warn('Failed to set notification channel:', e));
+      }
+    } catch (e) {
+      console.warn('[notifications] initialize error:', e);
     }
   },
 
   requestPermissions: async (): Promise<boolean> => {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
+    const N = await getNotifications();
+    if (!N) return false;
+    let granted = (await N.getPermissionsAsync()).granted;
+    if (!granted) {
+      granted = (await N.requestPermissionsAsync()).granted;
     }
-    return finalStatus === 'granted';
+    return granted;
   },
 
   cancelNotification: async (reminderId: string, dates?: string[]) => {
     try {
-      await Notifications.cancelScheduledNotificationAsync(reminderId).catch(() => {});
+      const N = await getNotifications();
+      if (!N) return;
+      await N.cancelScheduledNotificationAsync(reminderId).catch(() => {});
       if (dates) {
         for (const d of dates) {
-          await Notifications.cancelScheduledNotificationAsync(`${reminderId}_${d}`).catch(() => {});
+          await N.cancelScheduledNotificationAsync(`${reminderId}_${d}`).catch(() => {});
         }
       }
     } catch (e) {
@@ -55,6 +88,8 @@ export const NotificationService = {
     dates: string[],
     time: string
   ): Promise<boolean> => {
+    const N = await getNotifications();
+    if (!N) return false;
     let hasScheduledAtLeastOne = false;
     for (const dStr of dates) {
       const [year, month, day] = dStr.split('-').map(Number);
@@ -67,7 +102,7 @@ export const NotificationService = {
 
       const notifId = dates.length === 1 ? reminderId : `${reminderId}_${dStr}`;
       try {
-        await Notifications.scheduleNotificationAsync({
+        await N.scheduleNotificationAsync({
           identifier: notifId,
           content: {
             title: '🔔 Rube Remember: Recordatorio',
@@ -80,7 +115,7 @@ export const NotificationService = {
             }),
           },
           trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            type: N.SchedulableTriggerInputTypes.DATE,
             date: alarmDate,
           },
         });
@@ -94,7 +129,9 @@ export const NotificationService = {
 
   cancelAll: async () => {
     try {
-      await Notifications.cancelAllScheduledNotificationsAsync();
+      const N = await getNotifications();
+      if (!N) return;
+      await N.cancelAllScheduledNotificationsAsync();
     } catch (e) {
       console.warn('Failed to cancel all notifications:', e);
     }

@@ -81,6 +81,10 @@ export function DropboxAutoSyncHandler() {
         exportBackupDataSplit: currentStore.exportBackupDataSplit,
         updateUserSettings: currentStore.updateUserSettings,
         forceManual: false,
+        onBudgetCleanup: (toDelete: string[]) => {
+          showToast(`Presupuesto alcanzado: se eliminará ${toDelete.length} respaldo(s) antiguo(s) de Dropbox`);
+          return true;
+        },
       });
 
       if (result.success && result.uploaded) {

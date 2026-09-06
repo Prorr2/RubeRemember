@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 
@@ -59,7 +60,7 @@ export default function BackupScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/json',
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: false,
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0) {
@@ -67,10 +68,18 @@ export default function BackupScreen() {
       }
 
       setLoading(true);
-      const fileUri = result.assets[0].uri;
-      const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: 'utf8',
-      });
+      const asset = result.assets[0];
+      let fileContent: string;
+      try {
+        // The picker grants temporary read access to a content:// URI. Copy it to an
+        // app-private location first, where we can always read it (works in Expo Go).
+        const destUri = `${FileSystem.documentDirectory}import_backup_${Date.now()}.json`;
+        await FileSystem.copyAsync({ from: asset.uri, to: destUri });
+        fileContent = await FileSystem.readAsStringAsync(destUri, { encoding: 'utf8' });
+      } catch (copyErr) {
+        // Fallback: try reading directly with the new File API.
+        fileContent = await new File(asset.uri).text();
+      }
 
       setLoading(false);
       Alert.alert(

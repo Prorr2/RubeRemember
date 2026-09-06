@@ -1,0 +1,11 @@
+Error
+
+No se pudo importar la copia de seguridad. Detalle: Call to function 'Ex ponentFileSystem.readAsStringAsync' has been rejected.
+
+→ Caused by: java.io.IOException:
+
+Location 'file:///data/user/0/host.exp .exponent/cache/DocumentPicker /fdb450e8-89a7-440b-8e26
+
+-82f3cd523873.json' isn't readable.
+
+OK
