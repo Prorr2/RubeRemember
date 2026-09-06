@@ -510,7 +510,10 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     currentProximity = proximityDays,
     currentSeparation = slotSeparationMinutes,
     immediate = false,
-    localChangesFlag?: boolean
+    localChangesFlag?: boolean,
+    newActivityCategories?: CustomCategory[],
+    newTaskCategories?: TaskCategory[],
+    newHourWeights?: HourWeight[]
   ) => {
     try {
       const itemsOrSlotsChanged =
@@ -527,6 +530,10 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         hasLocalChanges: localChangesFlag ?? true,
       };
 
+      const nextActivityCategories = newActivityCategories !== undefined ? newActivityCategories : activityCategories;
+      const nextTaskCategories = newTaskCategories !== undefined ? newTaskCategories : taskCategories;
+      const nextHourWeights = newHourWeights !== undefined ? newHourWeights : hourWeights;
+
       if (adjusted !== items) setItems(adjusted);
       if (newGoals !== goals) setGoals(newGoals);
       if (newLists !== lists) setLists(newLists);
@@ -535,6 +542,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       if (newRecs !== recommendations) setRecommendations(newRecs);
       if (settingsToSave !== userSettings) setUserSettings(settingsToSave);
       if (newStats !== statistics) setStatistics(newStats);
+      if (nextActivityCategories !== activityCategories) setActivityCategories(nextActivityCategories);
+      if (nextTaskCategories !== taskCategories) setTaskCategories(nextTaskCategories);
+      if (nextHourWeights !== hourWeights) setHourWeights(nextHourWeights);
 
       const db: DatabaseV3 = {
         version: 3,
@@ -542,6 +552,9 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         goals: newGoals,
         lists: newLists,
         timeSlots: newSlots,
+        activityCategories: nextActivityCategories,
+        taskCategories: nextTaskCategories,
+        hourWeights: nextHourWeights,
         sessions: newSessions,
         recommendations: newRecs,
         userSettings: settingsToSave,
@@ -573,7 +586,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     } catch (e) {
       console.error('Error saving database state:', e);
     }
-  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes]);
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, activityCategories, taskCategories, hourWeights]);
 
   // Persist helper for tasks/reminders/activities
   const saveItems = useCallback(async (
@@ -1360,6 +1373,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       lists,
       timeSlots,
       activityCategories,
+      taskCategories,
       hourWeights,
       sessions,
       recommendations,
@@ -1375,7 +1389,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     // JSON file remains fully portable (can be restored on any device).
     const selfContained = await materializeDatabaseImagesForExport(db);
     return JSON.stringify(selfContained, null, 2);
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
+  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, taskCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
 
   // Dropbox export: text DB (image IDs only) + separate images bundle.
   const exportBackupDataSplit = useCallback(async (): Promise<{
@@ -1398,6 +1412,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       lists,
       timeSlots,
       activityCategories,
+      taskCategories,
       hourWeights,
       sessions,
       recommendations,
@@ -1413,7 +1428,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     const ids = collectAllImageIds(db);
     const images = await readImageBundle(ids);
     return { text, images };
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
+  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, taskCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
 
   const importBackupData = useCallback(async (jsonString: string, imageBundle?: Record<string, string>): Promise<{
     success: boolean;
@@ -1506,6 +1521,10 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         setActivityCategories(importedDb.activityCategories);
         importedKeys.push('Categorías de Actividades');
       }
+      if (importedDb.taskCategories) {
+        setTaskCategories(importedDb.taskCategories);
+        importedKeys.push('Categorías de Tarea');
+      }
       if (importedDb.hourWeights) {
         setHourWeights(importedDb.hourWeights);
         importedKeys.push('Pesos de Bloques');
@@ -1554,6 +1573,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         lists: importedDb.lists || lists,
         timeSlots: importedDb.timeSlots || timeSlots,
         activityCategories: importedDb.activityCategories || activityCategories,
+        taskCategories: importedDb.taskCategories || taskCategories,
         hourWeights: importedDb.hourWeights || hourWeights,
         sessions: importedDb.sessions || sessions,
         recommendations: importedDb.recommendations || recommendations,
@@ -1580,43 +1600,44 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         importedKeys: [],
       };
     }
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
+  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories, taskCategories, hourWeights, sessions, recommendations, userSettings, statistics]);
 
   const setProximityDays = useCallback(async (days: number) => {
     setProximityDaysState(days);
-    const db: DatabaseV2 = {
-      version: 2,
+    await saveDatabaseState(
       items,
       goals,
       lists,
       timeSlots,
-      settings: {
-        proximityDays: days,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, slotSeparationMinutes]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      days,
+      slotSeparationMinutes,
+      false,
+      true
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, slotSeparationMinutes, saveDatabaseState]);
 
   // Time Slots CRUD
   const saveSlots = useCallback(async (newSlots: TimeSlot[]) => {
     setTimeSlots(newSlots);
-    const adjusted = recalculateTaskSlotTimes(items, newSlots, slotSeparationMinutes);
-    setItems(adjusted);
-
-    const db: DatabaseV2 = {
-      version: 2,
-      items: adjusted,
+    await saveDatabaseState(
+      items,
       goals,
       lists,
-      timeSlots: newSlots,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, proximityDays, slotSeparationMinutes]);
+      newSlots,
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true
+    );
+  }, [items, goals, lists, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const addTimeSlot = useCallback(async (name: string, startTime: string, endTime: string) => {
     const newSlot: TimeSlot = {
@@ -1642,58 +1663,57 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       return i;
     });
 
-    setTimeSlots(updatedSlots);
-    setItems(updatedItems);
-
-    const db: DatabaseV2 = {
-      version: 2,
-      items: updatedItems,
+    await saveDatabaseState(
+      updatedItems,
       goals,
       lists,
-      timeSlots: updatedSlots,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes]);
+      updatedSlots,
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const setSlotSeparationMinutes = useCallback(async (minutes: number) => {
     setSlotSeparationMinutesState(minutes);
-    const adjusted = recalculateTaskSlotTimes(items, timeSlots, minutes);
-    setItems(adjusted);
-
-    const db: DatabaseV2 = {
-      version: 2,
-      items: adjusted,
+    await saveDatabaseState(
+      items,
       goals,
       lists,
       timeSlots,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes: minutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, timeSlots, goals, lists, proximityDays]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      minutes,
+      false,
+      true
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, saveDatabaseState]);
 
   // Goals CRUD
   const saveGoals = useCallback(async (newGoals: Goal[]) => {
-    setGoals(newGoals);
-    const db: DatabaseV2 = {
-      version: 2,
+    await saveDatabaseState(
       items,
-      goals: newGoals,
+      newGoals,
       lists,
       timeSlots,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, lists, timeSlots, proximityDays, slotSeparationMinutes]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true
+    );
+  }, [items, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const addGoal = useCallback(async (title: string, description: string, startDate: string, endDate: string, emoji?: string) => {
     const newGoal: Goal = {
@@ -1737,22 +1757,21 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       return i;
     });
 
-    setGoals(updatedGoals);
-    setItems(updatedItems);
-
-    const db: DatabaseV2 = {
-      version: 2,
-      items: updatedItems,
-      goals: updatedGoals,
+    await saveDatabaseState(
+      updatedItems,
+      updatedGoals,
       lists,
       timeSlots,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const toggleGoalCompleted = useCallback(async (id: string) => {
     const updated = goals.map((g) => {
@@ -1824,22 +1843,21 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       return i;
     });
 
-    setGoals(updatedGoals);
-    setItems(updatedItems);
-
-    const db: DatabaseV2 = {
-      version: 2,
-      items: updatedItems,
-      goals: updatedGoals,
+    await saveDatabaseState(
+      updatedItems,
+      updatedGoals,
       lists,
       timeSlots,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const reorderPhases = useCallback(async (goalId: string, orderedPhases: Phase[]) => {
     const updated = goals.map((g) => {
@@ -1854,20 +1872,21 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   // Lists CRUD
   const saveLists = useCallback(async (newLists: ReminderList[]) => {
-    setLists(newLists);
-    const db: DatabaseV2 = {
-      version: 2,
+    await saveDatabaseState(
       items,
       goals,
-      lists: newLists,
+      newLists,
       timeSlots,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, timeSlots, proximityDays, slotSeparationMinutes]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true
+    );
+  }, [items, goals, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const addList = useCallback(async (name: string, parentId?: string) => {
     const newId = `list-${Math.random().toString(36).substring(7)}`;
@@ -2061,21 +2080,22 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
 
   // Activity Categories CRUD
   const saveActivityCategories = useCallback(async (newCategories: CustomCategory[]) => {
-    setActivityCategories(newCategories);
-    const db: DatabaseV2 = {
-      version: 2,
+    await saveDatabaseState(
       items,
       goals,
       lists,
       timeSlots,
-      activityCategories: newCategories,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true,
+      newCategories
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const addActivityCategory = useCallback(async (name: string) => {
     const id = `cat-${Math.random().toString(36).substring(7)}`;
@@ -2102,47 +2122,42 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       return i;
     });
 
-    setItems(updatedItems);
-    setActivityCategories(updatedCategories);
-
-    const db: DatabaseV2 = {
-      version: 2,
-      items: updatedItems,
+    await saveDatabaseState(
+      updatedItems,
       goals,
       lists,
       timeSlots,
-      activityCategories: updatedCategories,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, proximityDays, slotSeparationMinutes, activityCategories]);
-
-  // Task Categories CRUD
-  const saveTaskCategories = useCallback(async (newCategories: TaskCategory[]) => {
-    setTaskCategories(newCategories);
-    const db: DatabaseV3 = {
-      version: 3,
-      items,
-      goals,
-      lists,
-      timeSlots,
-      activityCategories,
-      taskCategories: newCategories,
-      hourWeights,
       sessions,
       recommendations,
       userSettings,
       statistics,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, activityCategories, hourWeights, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes]);
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true,
+      updatedCategories
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, activityCategories, saveDatabaseState]);
+
+  // Task Categories CRUD
+  const saveTaskCategories = useCallback(async (newCategories: TaskCategory[]) => {
+    await saveDatabaseState(
+      items,
+      goals,
+      lists,
+      timeSlots,
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true,
+      undefined,
+      newCategories
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const addTaskCategory = useCallback(async (name: string, emoji: string) => {
     const id = `tcat-${Math.random().toString(36).substring(7)}`;
@@ -2168,48 +2183,44 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       return i;
     });
 
-    setItems(updatedItems);
-    setTaskCategories(updatedCategories);
-
-    const db: DatabaseV3 = {
-      version: 3,
-      items: updatedItems,
+    await saveDatabaseState(
+      updatedItems,
       goals,
       lists,
       timeSlots,
-      activityCategories,
-      taskCategories: updatedCategories,
-      hourWeights,
       sessions,
       recommendations,
       userSettings,
       statistics,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, activityCategories, taskCategories, hourWeights, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes]);
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true,
+      undefined,
+      updatedCategories
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, taskCategories, saveDatabaseState]);
 
   // Hour Weights CRUD
   const saveHourWeights = useCallback(async (newWeights: HourWeight[]) => {
-    setHourWeights(newWeights);
-    const db: DatabaseV2 = {
-      version: 2,
+    await saveDatabaseState(
       items,
       goals,
       lists,
       timeSlots,
-      activityCategories,
-      hourWeights: newWeights,
-      settings: {
-        proximityDays,
-        slotSeparationMinutes,
-      },
-    };
-    await MigrationEngine.saveDatabase(db);
-  }, [items, goals, lists, timeSlots, activityCategories, proximityDays, slotSeparationMinutes]);
+      sessions,
+      recommendations,
+      userSettings,
+      statistics,
+      proximityDays,
+      slotSeparationMinutes,
+      false,
+      true,
+      undefined,
+      undefined,
+      newWeights
+    );
+  }, [items, goals, lists, timeSlots, sessions, recommendations, userSettings, statistics, proximityDays, slotSeparationMinutes, saveDatabaseState]);
 
   const addHourWeight = useCallback(async (name: string, minHours: number) => {
     const id = `weight-${Math.random().toString(36).substring(7)}`;
