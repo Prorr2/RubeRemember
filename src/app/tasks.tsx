@@ -16,8 +16,9 @@ import {
   Platform,
   Image,
   KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -33,6 +34,42 @@ import { useRecommendationService } from '@/services/RecommendationService';
 import { useImageCapture, resolveImageUri } from '@/hooks/use-image-capture';
 import { MaskableTextInput, maskTextContent } from '@/components/maskable-text-input';
 import { HabitCalendar } from '@/components/habit-calendar';
+
+const threadTasks = (tasksToThread: Task[], visibleParents?: ReadonlySet<string> | null): any[] => {
+  const parentList: Task[] = [];
+  const subtaskMap = new Map<string, Task[]>();
+  const presentIds = new Set(tasksToThread.map((t) => t.id));
+
+  tasksToThread.forEach((t) => {
+    if (t.parentTaskId && presentIds.has(t.parentTaskId)) {
+      const arr = subtaskMap.get(t.parentTaskId) || [];
+      arr.push(t);
+      subtaskMap.set(t.parentTaskId, arr);
+    } else {
+      parentList.push(t);
+    }
+  });
+
+  const out: any[] = [];
+  parentList.forEach((parent) => {
+    const children = subtaskMap.get(parent.id) || [];
+    const show = !visibleParents || visibleParents.has(parent.id);
+    out.push({ ...parent, isSubtask: false, isThreadParent: show && children.length > 0 });
+    if (show && children.length > 0) {
+      children.forEach((st, idx) => {
+        out.push({
+          ...st,
+          isSubtask: true,
+          isLastSubtask: idx === children.length - 1,
+          subtaskIndex: idx,
+          totalSubtasks: children.length,
+        });
+      });
+    }
+  });
+
+  return out;
+};
 
 const speak = (text: string) => {
   try {
@@ -130,6 +167,7 @@ interface TaskRoadmapProps {
 }
 
 const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAddImage, isMasked = false }) => {
+  const router = useRouter();
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editNotes, setEditNotes] = useState('');
@@ -139,13 +177,143 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
   const [editProgress, setEditProgress] = useState('');
 
   const currentTask = store.items.find((item: any) => item.id === task.id) || task;
-  
+
+  const subtasks: Task[] = (store.items || []).filter(
+    (i: any) => i.type === ItemType.TASK && !i.trash && i.parentTaskId === currentTask.id
+  );
+
   const taskSessions = store.sessions
     .filter((s: any) => String(s.taskId) === String(currentTask.id))
     .sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
   return (
     <View style={{ width: '100%' }}>
+      {/* Subtasks Section - Displayed at the very top with violet styling */}
+      {subtasks.length > 0 && (
+        <View style={{ marginBottom: 16, gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="flash" size={14} color="#BF5AF2" />
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#BF5AF2', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Subtareas ({subtasks.filter((st) => st.completed).length}/{subtasks.length})
+              </Text>
+            </View>
+            <Text style={{ fontSize: 10, color: colors.textSecondary }}>
+              Arriba de notas
+            </Text>
+          </View>
+
+          <View style={{ gap: 8 }}>
+            {subtasks.map((st) => {
+              const priorityColor =
+                st.priority === Priority.URGENT ? '#C20000' : st.priority === Priority.HIGH ? '#FF3B30' : st.priority === Priority.MEDIUM ? '#FF9500' : '#34C759';
+              const priorityLabel =
+                st.priority === Priority.URGENT ? 'URGENTE' : st.priority === Priority.HIGH ? 'ALTA' : st.priority === Priority.MEDIUM ? 'MEDIA' : 'BAJA';
+
+              return (
+                <View
+                  key={st.id}
+                  style={{
+                    backgroundColor: 'rgba(191, 90, 242, 0.12)',
+                    borderColor: 'rgba(191, 90, 242, 0.35)',
+                    borderWidth: 1.5,
+                    borderRadius: 12,
+                    padding: 12,
+                    gap: 8,
+                  }}
+                >
+                  {/* Top row: badge + priority + actions */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <View style={{ backgroundColor: '#BF5AF2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>⚡ SUBTAREA</Text>
+                      </View>
+                      <View style={{ backgroundColor: colors.backgroundSelected, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: priorityColor }}>
+                          {priorityLabel}
+                        </Text>
+                      </View>
+                      {st.estimatedHours ? (
+                        <View style={{ backgroundColor: colors.backgroundSelected, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 9, fontWeight: '600' }}>
+                            ⌛ {st.estimatedHours}h
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Pressable
+                        onPress={() => router.push({ pathname: '/editor', params: { id: st.id } })}
+                        style={{ padding: 4 }}
+                      >
+                        <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => {
+                          Alert.alert(
+                            'Eliminar subtarea',
+                            '¿Estás seguro de que deseas eliminar esta subtarea?',
+                            [
+                              { text: 'Cancelar', style: 'cancel' },
+                              {
+                                text: 'Eliminar',
+                                style: 'destructive',
+                                onPress: async () => {
+                                  await store.deleteItem(st.id);
+                                }
+                              }
+                            ]
+                          );
+                        }}
+                        style={{ padding: 4 }}
+                      >
+                        <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {/* Title and Checkbox */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Pressable
+                      onPress={async () => await store.toggleItemCompleted(st.id)}
+                      style={{ padding: 2 }}
+                    >
+                      <Ionicons
+                        name={st.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={22}
+                        color={st.completed ? '#BF5AF2' : colors.textSecondary}
+                      />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => router.push({ pathname: '/editor', params: { id: st.id } })}
+                      style={{ flex: 1 }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: '700',
+                          color: colors.text,
+                          textDecorationLine: st.completed ? 'line-through' : 'none',
+                          opacity: st.completed ? 0.6 : 1,
+                        }}
+                      >
+                        {isMasked ? maskTextContent(st.title) : st.title}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {st.description ? (
+                    <Text style={{ fontSize: 12, color: colors.textSecondary, marginLeft: 30 }} numberOfLines={2}>
+                      {isMasked ? maskTextContent(st.description) : st.description}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
       {taskSessions.length === 0 ? (
         <View style={{ paddingVertical: 24, alignItems: 'center', justifyContent: 'center' }}>
           <Ionicons name="trail-sign-outline" size={36} color={colors.textSecondary} style={{ opacity: 0.5, marginBottom: 8 }} />
@@ -550,6 +718,7 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
 export default function TasksScreen() {
   const store = useRememberStore();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
@@ -638,6 +807,7 @@ export default function TasksScreen() {
   const [sortBy, setSortBy] = useState<'score' | 'goals'>('goals');
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
   const [openFilterDropdown, setOpenFilterDropdown] = useState<'sort' | 'date' | 'goal' | 'priority' | 'weight' | null>(null);
+  const [expandedSubtaskParents, setExpandedSubtaskParents] = useState<Set<string>>(() => new Set());
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -664,17 +834,96 @@ export default function TasksScreen() {
   const [commentTitles, setCommentTitles] = useState<Record<string, string>>({});
   const [isNotesMasked, setIsNotesMasked] = useState(false);
 
+  // Subtask creation state in notes modal
+  const [bottomNoteTab, setBottomNoteTab] = useState<'note' | 'subtask'>('note');
+  const [subtaskTitle, setSubtaskTitle] = useState('');
+  const [subtaskDesc, setSubtaskDesc] = useState('');
+  const [subtaskPriority, setSubtaskPriority] = useState<Priority>(Priority.MEDIUM);
+  const [subtaskHours, setSubtaskHours] = useState('');
+  const [subtaskEnergy, setSubtaskEnergy] = useState<EnergyType>(EnergyType.CREATIVE);
+
+  const handleCreateSubtask = async (parentTask: Task) => {
+    const cleanTitle = subtaskTitle.trim();
+    if (!cleanTitle) {
+      Alert.alert('Título requerido', 'Por favor ingresa un título para la subtarea.');
+      return;
+    }
+    const hoursNum = subtaskHours.trim() ? parseFloat(subtaskHours.replace(',', '.')) : undefined;
+    await store.createTask(
+      cleanTitle,
+      subtaskDesc.trim() || undefined,
+      undefined,
+      undefined,
+      hoursNum,
+      subtaskPriority,
+      parentTask.goalId || undefined,
+      parentTask.phaseId || undefined,
+      undefined,
+      subtaskEnergy,
+      [],
+      undefined,
+      parentTask.id
+    );
+    setSubtaskTitle('');
+    setSubtaskDesc('');
+    setSubtaskHours('');
+    setSubtaskPriority(Priority.MEDIUM);
+    setSubtaskEnergy(EnergyType.CREATIVE);
+  };
+
   const activeTasks = useMemo(() => {
-    return store.items.filter(
+    return (store.items.filter(
       (i) => i.type === ItemType.TASK && !i.completed && !i.archived && !i.trash && (i as Task).active
-    ) as Task[];
+    ) as Task[]).sort(
+      (a, b) =>
+        (a.activeOrder ?? Infinity) - (b.activeOrder ?? Infinity) ||
+        new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+    );
   }, [store.items]);
+
+  const activeParentIds = useMemo(() => {
+    return new Set(activeTasks.map((t) => t.id));
+  }, [activeTasks]);
+
+  const activeThreaded = useMemo(() => {
+    const focus = (store.items.filter(
+      (i) =>
+        i.type === ItemType.TASK &&
+        !i.completed && !i.archived && !i.trash &&
+        ((i as Task).active || ((i as Task).parentTaskId && activeParentIds.has((i as Task).parentTaskId!)))
+    ) as Task[]).sort(
+      (a, b) =>
+        (a.activeOrder ?? Infinity) - (b.activeOrder ?? Infinity) ||
+        new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+    );
+    return threadTasks(focus, expandedSubtaskParents);
+  }, [store.items, activeParentIds, expandedSubtaskParents]);
+
+  const subtaskCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    (store.items.filter((i) => i.type === ItemType.TASK) as Task[]).forEach((t) => {
+      if (t.parentTaskId) m.set(t.parentTaskId, (m.get(t.parentTaskId) || 0) + 1);
+    });
+    return m;
+  }, [store.items]);
+
+  const toggleSubtaskExpand = (taskId: string) => {
+    setExpandedSubtaskParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
 
   const tasksList = useMemo(() => {
     let list = store.items.filter((i) => i.type === ItemType.TASK && !i.trash) as Task[];
 
     if (taskStatusFilter === 'PENDING') {
-      list = list.filter((t) => !t.completed && !t.archived && !t.active);
+      list = list.filter((t) => !t.completed && !t.archived && !t.active && !(t.parentTaskId && activeParentIds.has(t.parentTaskId)));
     } else if (taskStatusFilter === 'COMPLETED') {
       list = list.filter((t) => t.completed && !t.archived);
     } else if (taskStatusFilter === 'HABITS') {
@@ -806,7 +1055,7 @@ export default function TasksScreen() {
           title: group.title,
           id: `header-group-${group.key}`,
         });
-        result.push(...group.tasks);
+        result.push(...threadTasks(group.tasks, expandedSubtaskParents));
       });
 
       return result;
@@ -854,14 +1103,14 @@ export default function TasksScreen() {
 
     const result: any[] = [];
     if (currentTasks.length > 0) {
-      result.push(...currentTasks);
+      result.push(...threadTasks(currentTasks, expandedSubtaskParents));
     }
     if (futureTasks.length > 0) {
       result.push({ isHeader: true, title: 'Tareas para un futuro', id: 'header-future' });
-      result.push(...futureTasks);
+      result.push(...threadTasks(futureTasks, expandedSubtaskParents));
     }
     return result;
-  }, [store.items, store.goals, store.taskCategories, store.hourWeights, store.userSettings, filterPriorities, filterGoalId, filterWeightIds, filterDateRange, taskStatusFilter, searchQuery, sortBy]);
+  }, [store.items, store.goals, store.taskCategories, store.hourWeights, store.userSettings, filterPriorities, filterGoalId, filterWeightIds, filterDateRange, taskStatusFilter, searchQuery, sortBy, expandedSubtaskParents]);
 
   const handleBulkDelete = () => {
     Alert.alert(
@@ -942,7 +1191,28 @@ export default function TasksScreen() {
 
   const handleToggleActive = async (task: Task) => {
     const isActive = !!task.active;
-    await store.updateItem(task.id, { active: !isActive });
+    if (!isActive) {
+      const orders = activeTasks
+        .filter(t => t.activeOrder !== undefined)
+        .map(t => t.activeOrder as number);
+      const min = orders.length > 0 ? Math.min(...orders) : 1;
+      await store.updateItem(task.id, { active: true, activeOrder: min - 1 });
+    } else {
+      await store.updateItem(task.id, { active: false });
+    }
+  };
+
+  const handleMoveActive = (id: string, dir: -1 | 1) => {
+    const ordered = activeTasks.slice();
+    const i = ordered.findIndex(t => t.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ordered.length) return;
+    const tmp = ordered[i];
+    ordered[i] = ordered[j];
+    ordered[j] = tmp;
+    void store.updateItemsWithPatches(
+      ordered.map((t, index) => ({ id: t.id, updates: { activeOrder: index } }))
+    );
   };
 
   const handleOpenHabitTime = (task: Task) => {
@@ -1074,6 +1344,7 @@ export default function TasksScreen() {
     const goal = store.goals.find((g) => g.id === latestItem.goalId);
     const phase = goal?.phases.find((p) => p.id === latestItem.phaseId);
     const isCalendarExpanded = expandedHabitCalendarId === latestItem.id;
+    const parentTask = latestItem.parentTaskId ? (store.items.find((i) => i.id === latestItem.parentTaskId) as Task | undefined) : undefined;
 
     const priorityColor =
       latestItem.priority === Priority.URGENT ? '#C20000' : latestItem.priority === Priority.HIGH ? '#FF3B30' : latestItem.priority === Priority.MEDIUM ? '#FF9500' : '#34C759';
@@ -1090,12 +1361,21 @@ export default function TasksScreen() {
       await store.updateItem(latestItem.id, { completedDates: updated });
     };
 
-    return (
+    const isSubtask = !!item.isSubtask;
+
+    const cardContent = (
       <View
         style={[
           styles.taskCard,
           { backgroundColor: colors.backgroundElement, flexDirection: 'column' },
           isSelected && { borderColor: '#FF9500', borderWidth: 1.5 },
+          isSubtask
+            ? {
+                borderLeftWidth: 3,
+                borderLeftColor: '#BF5AF2',
+                borderRadius: 12,
+              }
+            : (latestItem.parentTaskId ? { borderLeftWidth: 3.5, borderLeftColor: '#BF5AF2' } : null),
         ]}
       >
         <Pressable
@@ -1109,45 +1389,116 @@ export default function TasksScreen() {
               setSelectedTaskOptions(latestItem);
             }
           }}
-          style={styles.cardMain}
+          style={[styles.cardMain, isSubtask && { paddingVertical: 10, paddingHorizontal: 10 }]}
         >
           {selectedIds.length > 0 ? (
             <View style={styles.checkboxContainer}>
               <Ionicons
                 name={isSelected ? 'checkbox' : 'square-outline'}
-                size={24}
+                size={isSubtask ? 20 : 24}
                 color={isSelected ? '#FF9500' : colors.textSecondary}
               />
             </View>
           ) : (
-            <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 4 }}>
-              <Pressable
-                onPress={() => handleOpenAlarmDialog(latestItem)}
-                style={{ padding: 4 }}
-              >
-                <Ionicons name="alarm-outline" size={20} color={colors.textSecondary} />
-              </Pressable>
+            <View style={[styles.leftRail, isSubtask && { justifyContent: 'center' }]}>
+              <View style={{ alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                <Pressable
+                  onPress={() => handleOpenAlarmDialog(latestItem)}
+                  style={{ padding: 3 }}
+                >
+                  <Ionicons name="alarm-outline" size={isSubtask ? 17 : 20} color={colors.textSecondary} />
+                </Pressable>
 
-              <Pressable
-                onPress={async () => await store.toggleItemCompleted(latestItem.id)}
-                style={styles.checkboxContainer}
-              >
-                <Ionicons
-                  name={latestItem.completed ? 'checkmark-circle' : 'ellipse-outline'}
-                  size={24}
-                  color={latestItem.completed ? '#FF9500' : colors.textSecondary}
-                />
-              </Pressable>
+                <Pressable
+                  onPress={async () => await store.toggleItemCompleted(latestItem.id)}
+                  style={styles.checkboxContainer}
+                >
+                  <Ionicons
+                    name={latestItem.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={isSubtask ? 21 : 24}
+                    color={latestItem.completed ? '#FF9500' : colors.textSecondary}
+                  />
+                </Pressable>
+              </View>
+
+              {latestItem.active && (
+                <View style={styles.activeArrows}>
+                  <Pressable
+                    hitSlop={6}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleMoveActive(latestItem.id, -1);
+                    }}
+                    style={styles.activeArrowBtn}
+                  >
+                    <Ionicons name="chevron-up" size={14} color="#34C759" />
+                  </Pressable>
+                  <Pressable
+                    hitSlop={6}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleMoveActive(latestItem.id, 1);
+                    }}
+                    style={styles.activeArrowBtn}
+                  >
+                    <Ionicons name="chevron-down" size={14} color="#34C759" />
+                  </Pressable>
+                </View>
+              )}
+
+              {!isSubtask && (subtaskCounts.get(latestItem.id) || 0) > 0 && (
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    toggleSubtaskExpand(latestItem.id);
+                  }}
+                  style={[
+                    styles.subtaskToggleBtn,
+                    expandedSubtaskParents.has(latestItem.id) && { backgroundColor: '#BF5AF2' },
+                  ]}
+                  hitSlop={6}
+                >
+                  <Ionicons
+                    name={expandedSubtaskParents.has(latestItem.id) ? 'chevron-up' : 'chevron-down'}
+                    size={12}
+                    color={expandedSubtaskParents.has(latestItem.id) ? '#fff' : '#BF5AF2'}
+                  />
+                  <Text
+                    style={{
+                      color: expandedSubtaskParents.has(latestItem.id) ? '#fff' : '#BF5AF2',
+                      fontSize: 11,
+                      fontWeight: '800',
+                    }}
+                  >
+                    {subtaskCounts.get(latestItem.id)}
+                  </Text>
+                </Pressable>
+              )}
             </View>
           )}
 
-          <View style={{ flex: 1, marginHorizontal: 8 }}>
+          <View style={{ flex: 1, marginHorizontal: isSubtask ? 6 : 8 }}>
+            {latestItem.parentTaskId ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
+                <View style={{ backgroundColor: 'rgba(191, 90, 242, 0.2)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5 }}>
+                  <Text style={{ fontSize: isSubtask ? 8.5 : 9, fontWeight: '800', color: '#BF5AF2' }}>
+                    ⚡ SUBTAREA
+                  </Text>
+                </View>
+                {!isSubtask && parentTask ? (
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textSecondary }} numberOfLines={1}>
+                    ↳ {parentTask.title}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
             {/* Roadmap or Category indicator ABOVE title */}
             {goal ? (
-              <Text style={{ fontSize: 11, fontWeight: '700', color: '#FF2D55', marginBottom: 2 }}>
+              <Text style={{ fontSize: isSubtask ? 10 : 11, fontWeight: '700', color: '#FF2D55', marginBottom: 2 }}>
                 {goal.emoji || '🎯'} {goal.title}
               </Text>
-            ) : latestItem.categoryId ? (
+            ) : (!latestItem.parentTaskId && latestItem.categoryId) ? (
               (() => {
                 const cat = store.taskCategories.find((c: any) => c.id === latestItem.categoryId);
                 return cat ? (
@@ -1162,6 +1513,7 @@ export default function TasksScreen() {
               style={[
                 styles.taskTitle,
                 { color: colors.text },
+                isSubtask && { fontSize: 13.5, marginBottom: 2 },
                 latestItem.completed && { textDecorationLine: 'line-through', opacity: 0.6 },
               ]}
             >
@@ -1169,9 +1521,17 @@ export default function TasksScreen() {
             </Text>
             
             <View style={styles.tagRow}>
+              {latestItem.parentTaskId && (
+                <View style={[styles.metaBadge, { backgroundColor: 'rgba(191, 90, 242, 0.15)' }]}>
+                  <Text style={{ color: '#BF5AF2', fontSize: isSubtask ? 9 : 10, fontWeight: '700' }}>
+                    ⚡ Subtarea
+                  </Text>
+                </View>
+              )}
+
               {/* Score */}
               <View style={[styles.metaBadge, { backgroundColor: 'rgba(255, 215, 0, 0.15)' }]}>
-                <Text style={{ color: scheme === 'dark' ? '#FFD700' : '#D4AF37', fontSize: 10, fontWeight: '800' }}>
+                <Text style={{ color: scheme === 'dark' ? '#FFD700' : '#D4AF37', fontSize: isSubtask ? 9 : 10, fontWeight: '800' }}>
                   ⭐ Score: {ScoreEngine.calculateScore(latestItem, store.hourWeights, store.userSettings?.scoreFormula)}
                 </Text>
               </View>
@@ -1183,7 +1543,7 @@ export default function TasksScreen() {
               {latestItem.estimatedHours ? (
                 <>
                   <View style={[styles.metaBadge, { backgroundColor: colors.backgroundSelected }]}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: isSubtask ? 9 : 10, fontWeight: '600' }}>
                       ⌛ {latestItem.estimatedHours}h
                     </Text>
                   </View>
@@ -1194,7 +1554,7 @@ export default function TasksScreen() {
                     if (!label) return null;
                     return (
                       <View style={[styles.metaBadge, { backgroundColor: 'rgba(0, 122, 255, 0.1)' }]}>
-                        <Text style={{ color: Accent, fontSize: 10, fontWeight: '700' }}>
+                        <Text style={{ color: Accent, fontSize: isSubtask ? 9 : 10, fontWeight: '700' }}>
                           {label}
                         </Text>
                       </View>
@@ -1224,28 +1584,28 @@ export default function TasksScreen() {
                   onPress={() => router.push({ pathname: '/editor', params: { id: latestItem.id } })}
                   style={styles.actionBtn}
                 >
-                  <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
+                  <Ionicons name="create-outline" size={isSubtask ? 17 : 20} color={colors.textSecondary} />
                 </Pressable>
 
                 <Pressable
                   onPress={() => setShowProgressRoadmap(latestItem)}
                   style={styles.actionBtn}
                 >
-                  <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                  <Ionicons name="chevron-down" size={isSubtask ? 17 : 20} color={colors.textSecondary} />
                 </Pressable>
 
                 <Pressable
                   onPress={async () => await handleToggleHabit(latestItem)}
                   style={styles.actionBtn}
                 >
-                  <Ionicons name={latestItem.habit ? 'pin' : 'pin-outline'} size={20} color={latestItem.habit ? '#FF9500' : colors.textSecondary} />
+                  <Ionicons name={latestItem.habit ? 'pin' : 'pin-outline'} size={isSubtask ? 17 : 20} color={latestItem.habit ? '#FF9500' : colors.textSecondary} />
                 </Pressable>
 
                 <Pressable
                   onPress={async () => await handleToggleActive(latestItem)}
                   style={styles.actionBtn}
                 >
-                  <Ionicons name={latestItem.active ? 'flash' : 'flash-outline'} size={20} color={latestItem.active ? '#34C759' : colors.textSecondary} />
+                  <Ionicons name={latestItem.active ? 'flash' : 'flash-outline'} size={isSubtask ? 17 : 20} color={latestItem.active ? '#34C759' : colors.textSecondary} />
                 </Pressable>
               </>
             )}
@@ -1261,6 +1621,66 @@ export default function TasksScreen() {
         )}
       </View>
     );
+
+    if (isSubtask) {
+      return (
+        <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
+          {/* Thread Connector (Forum/Reddit Tree Style) */}
+          <View style={{ width: 28, position: 'relative' }}>
+            {/* Vertical Line */}
+            <View
+              style={{
+                position: 'absolute',
+                left: 10,
+                top: -12,
+                width: 2,
+                height: item.isLastSubtask ? 36 : '100%',
+                backgroundColor: 'rgba(191, 90, 242, 0.45)',
+              }}
+            />
+            {/* Elbow Curve */}
+            <View
+              style={{
+                position: 'absolute',
+                left: 10,
+                top: -12,
+                width: 17,
+                height: 36,
+                borderLeftWidth: 2,
+                borderBottomWidth: 2,
+                borderBottomLeftRadius: 8,
+                borderColor: 'rgba(191, 90, 242, 0.45)',
+              }}
+            />
+          </View>
+
+          {/* Subtask Card */}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            {cardContent}
+          </View>
+        </View>
+      );
+    }
+
+    if (item.isThreadParent) {
+      return (
+        <View style={{ position: 'relative' }}>
+          {cardContent}
+          <View
+            style={{
+              position: 'absolute',
+              left: 10,
+              bottom: -14,
+              width: 2,
+              height: 14,
+              backgroundColor: 'rgba(191, 90, 242, 0.5)',
+            }}
+          />
+        </View>
+      );
+    }
+
+    return cardContent;
   };
 
   const renderHabitItem = ({ item }: { item: any }) => {
@@ -1864,7 +2284,7 @@ export default function TasksScreen() {
                   </Text>
                   <View style={{ flex: 1, height: 1, backgroundColor: colors.backgroundSelected, opacity: 0.5 }} />
                 </View>
-                {activeTasks.map((task) => (
+                {activeThreaded.map((task) => (
                   <View key={task.id} style={{ marginBottom: 8 }}>
                     {renderTaskItem({ item: task })}
                   </View>
@@ -2268,6 +2688,7 @@ export default function TasksScreen() {
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? insets.bottom + 25 : (insets.bottom > 0 ? insets.bottom + 35 : 45)}
             style={{ flex: 1 }}
           >
             {/* Header section (closeable at all times) */}
@@ -2325,6 +2746,7 @@ export default function TasksScreen() {
                 contentContainerStyle={{ padding: 16, gap: 16 }}
                 showsVerticalScrollIndicator={true}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
               >
                 {/* Description & metadata if present */}
                 {currentRoadmapTask.description ? (
@@ -2449,112 +2871,304 @@ export default function TasksScreen() {
                 borderTopWidth: 1,
                 borderTopColor: colors.backgroundSelected,
                 padding: 12,
-                gap: 6
+                gap: 8
               }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textSecondary }}>
-                  Nueva Nota de Tarea
-                </Text>
-
-                <MaskableTextInput
-                  isMasked={isNotesMasked}
-                  placeholder="Título de la nota (opcional)..."
-                  placeholderTextColor={colors.textSecondary + '70'}
-                  value={commentTitles[currentRoadmapTask.id] || ''}
-                  onChangeText={(text) => setCommentTitles((prev) => ({ ...prev, [currentRoadmapTask.id]: text }))}
-                  style={{
-                    color: colors.text,
-                    fontWeight: '700',
-                    fontSize: 14,
-                    paddingVertical: 4,
-                    paddingHorizontal: 8,
-                    backgroundColor: colors.backgroundSelected,
-                    borderRadius: 8
-                  }}
-                />
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <MaskableTextInput
-                    isMasked={isNotesMasked}
-                    placeholder="Escribe una nota sobre esta tarea..."
-                    placeholderTextColor={colors.textSecondary + '80'}
-                    value={commentInputs[currentRoadmapTask.id] || ''}
-                    onChangeText={(text) => setCommentInputs((prev) => ({ ...prev, [currentRoadmapTask.id]: text }))}
-                    multiline
+                {/* Tabs: Nueva Nota / Nueva Subtarea */}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable
+                    onPress={() => setBottomNoteTab('note')}
                     style={{
                       flex: 1,
-                      color: colors.text,
-                      fontSize: 13,
-                      maxHeight: 80,
                       paddingVertical: 6,
-                      paddingHorizontal: 8,
-                      backgroundColor: colors.backgroundSelected,
                       borderRadius: 8,
-                      textAlignVertical: 'top'
-                    }}
-                  />
-
-                  <Pressable
-                    onPress={() => handleAddImage((img) => {
-                      setCommentImages((prev) => ({
-                        ...prev,
-                        [currentRoadmapTask.id]: [...(prev[currentRoadmapTask.id] || []), img]
-                      }));
-                    })}
-                    style={{
-                      backgroundColor: colors.backgroundSelected,
-                      padding: 8,
-                      borderRadius: 8,
-                      height: 38,
-                      width: 38,
+                      backgroundColor: bottomNoteTab === 'note' ? colors.backgroundSelected : 'transparent',
+                      borderWidth: 1,
+                      borderColor: bottomNoteTab === 'note' ? colors.textSecondary : 'transparent',
+                      alignItems: 'center',
+                      flexDirection: 'row',
                       justifyContent: 'center',
-                      alignItems: 'center'
+                      gap: 6
                     }}
                   >
-                    <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: bottomNoteTab === 'note' ? colors.text : colors.textSecondary }}>
+                      📝 Nueva Nota
+                    </Text>
                   </Pressable>
 
                   <Pressable
-                    onPress={() => handleAddComment(currentRoadmapTask.id)}
+                    onPress={() => setBottomNoteTab('subtask')}
                     style={{
-                      backgroundColor: '#FF9500',
-                      padding: 8,
+                      flex: 1,
+                      paddingVertical: 6,
                       borderRadius: 8,
-                      height: 38,
-                      width: 38,
+                      backgroundColor: bottomNoteTab === 'subtask' ? 'rgba(191, 90, 242, 0.15)' : 'transparent',
+                      borderWidth: 1,
+                      borderColor: bottomNoteTab === 'subtask' ? '#BF5AF2' : 'transparent',
+                      alignItems: 'center',
+                      flexDirection: 'row',
                       justifyContent: 'center',
-                      alignItems: 'center'
+                      gap: 6
                     }}
                   >
-                    <Ionicons name="send" size={18} color="#fff" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: bottomNoteTab === 'subtask' ? '#BF5AF2' : colors.textSecondary }}>
+                      ⚡ Nueva Subtarea
+                    </Text>
                   </Pressable>
                 </View>
 
-                {commentImages[currentRoadmapTask.id] && commentImages[currentRoadmapTask.id].length > 0 && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                    {commentImages[currentRoadmapTask.id].map((img, idx) => (
-                      <View key={idx} style={{ position: 'relative', width: 44, height: 44, borderRadius: 6, overflow: 'hidden' }}>
-                        <Image source={{ uri: resolveImageUri(img) }} style={{ width: '100%', height: '100%' }} />
-                        <Pressable
-                          onPress={() => setCommentImages((prev) => ({
+                {bottomNoteTab === 'note' ? (
+                  <>
+                    <MaskableTextInput
+                      isMasked={isNotesMasked}
+                      placeholder="Título de la nota (opcional)..."
+                      placeholderTextColor={colors.textSecondary + '70'}
+                      value={commentTitles[currentRoadmapTask.id] || ''}
+                      onChangeText={(text) => setCommentTitles((prev) => ({ ...prev, [currentRoadmapTask.id]: text }))}
+                      style={{
+                        color: colors.text,
+                        fontWeight: '700',
+                        fontSize: 14,
+                        paddingVertical: 4,
+                        paddingHorizontal: 8,
+                        backgroundColor: colors.backgroundSelected,
+                        borderRadius: 8
+                      }}
+                    />
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <MaskableTextInput
+                        isMasked={isNotesMasked}
+                        placeholder="Escribe una nota sobre esta tarea..."
+                        placeholderTextColor={colors.textSecondary + '80'}
+                        value={commentInputs[currentRoadmapTask.id] || ''}
+                        onChangeText={(text) => setCommentInputs((prev) => ({ ...prev, [currentRoadmapTask.id]: text }))}
+                        multiline
+                        style={{
+                          flex: 1,
+                          color: colors.text,
+                          fontSize: 13,
+                          maxHeight: 80,
+                          paddingVertical: 6,
+                          paddingHorizontal: 8,
+                          backgroundColor: colors.backgroundSelected,
+                          borderRadius: 8,
+                          textAlignVertical: 'top'
+                        }}
+                      />
+
+                      <Pressable
+                        onPress={() => handleAddImage((img) => {
+                          setCommentImages((prev) => ({
                             ...prev,
-                            [currentRoadmapTask.id]: (prev[currentRoadmapTask.id] || []).filter((_, i) => i !== idx)
-                          }))}
-                          style={{
-                            position: 'absolute',
-                            top: 1,
-                            right: 1,
-                            backgroundColor: 'rgba(0,0,0,0.6)',
-                            borderRadius: 8,
-                            width: 14,
-                            height: 14,
-                            justifyContent: 'center',
-                            alignItems: 'center'
-                          }}
-                        >
-                          <Ionicons name="close" size={8} color="#fff" />
-                        </Pressable>
+                            [currentRoadmapTask.id]: [...(prev[currentRoadmapTask.id] || []), img]
+                          }));
+                        })}
+                        style={{
+                          backgroundColor: colors.backgroundSelected,
+                          padding: 8,
+                          borderRadius: 8,
+                          height: 38,
+                          width: 38,
+                          justifyContent: 'center',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => handleAddComment(currentRoadmapTask.id)}
+                        style={{
+                          backgroundColor: '#FF9500',
+                          padding: 8,
+                          borderRadius: 8,
+                          height: 38,
+                          width: 38,
+                          justifyContent: 'center',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <Ionicons name="send" size={18} color="#fff" />
+                      </Pressable>
+                    </View>
+
+                    {commentImages[currentRoadmapTask.id] && commentImages[currentRoadmapTask.id].length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                        {commentImages[currentRoadmapTask.id].map((img, idx) => (
+                          <View key={idx} style={{ position: 'relative', width: 44, height: 44, borderRadius: 6, overflow: 'hidden' }}>
+                            <Image source={{ uri: resolveImageUri(img) }} style={{ width: '100%', height: '100%' }} />
+                            <Pressable
+                              onPress={() => setCommentImages((prev) => ({
+                                ...prev,
+                                [currentRoadmapTask.id]: (prev[currentRoadmapTask.id] || []).filter((_, i) => i !== idx)
+                              }))}
+                              style={{
+                                position: 'absolute',
+                                top: 1,
+                                right: 1,
+                                backgroundColor: 'rgba(0,0,0,0.6)',
+                                borderRadius: 8,
+                                width: 14,
+                                height: 14,
+                                justifyContent: 'center',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <Ionicons name="close" size={8} color="#fff" />
+                            </Pressable>
+                          </View>
+                        ))}
                       </View>
-                    ))}
+                    )}
+                  </>
+                ) : (
+                  <View style={{ gap: 8 }}>
+                    <MaskableTextInput
+                      isMasked={isNotesMasked}
+                      placeholder="Título de la subtarea (requerido)..."
+                      placeholderTextColor={colors.textSecondary + '70'}
+                      value={subtaskTitle}
+                      onChangeText={setSubtaskTitle}
+                      style={{
+                        color: colors.text,
+                        fontWeight: '700',
+                        fontSize: 14,
+                        paddingVertical: 6,
+                        paddingHorizontal: 8,
+                        backgroundColor: colors.backgroundSelected,
+                        borderRadius: 8
+                      }}
+                    />
+
+                    <MaskableTextInput
+                      isMasked={isNotesMasked}
+                      placeholder="Descripción o notas (opcional)..."
+                      placeholderTextColor={colors.textSecondary + '70'}
+                      value={subtaskDesc}
+                      onChangeText={setSubtaskDesc}
+                      multiline
+                      style={{
+                        color: colors.text,
+                        fontSize: 12,
+                        maxHeight: 60,
+                        paddingVertical: 6,
+                        paddingHorizontal: 8,
+                        backgroundColor: colors.backgroundSelected,
+                        borderRadius: 8
+                      }}
+                    />
+
+                    {/* Priority chips */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSecondary, marginRight: 2 }}>
+                        Prioridad:
+                      </Text>
+                      {[
+                        { key: Priority.LOW, label: 'Baja', color: '#34C759' },
+                        { key: Priority.MEDIUM, label: 'Media', color: '#FF9500' },
+                        { key: Priority.HIGH, label: 'Alta', color: '#FF3B30' },
+                        { key: Priority.URGENT, label: 'Urgente', color: '#C20000' },
+                      ].map((p) => {
+                        const isSelected = subtaskPriority === p.key;
+                        return (
+                          <Pressable
+                            key={p.key}
+                            onPress={() => setSubtaskPriority(p.key)}
+                            style={{
+                              paddingVertical: 4,
+                              paddingHorizontal: 8,
+                              borderRadius: 6,
+                              backgroundColor: isSelected ? p.color : colors.backgroundSelected,
+                            }}
+                          >
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: isSelected ? '#fff' : colors.textSecondary }}>
+                              {p.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
+                    {/* Hours & Energy */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.backgroundSelected, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 11, color: colors.textSecondary }}>⌛</Text>
+                        <TextInput
+                          placeholder="Horas"
+                          placeholderTextColor={colors.textSecondary + '70'}
+                          value={subtaskHours}
+                          onChangeText={setSubtaskHours}
+                          keyboardType="numeric"
+                          style={{ color: colors.text, fontSize: 11, width: 45, paddingVertical: 2 }}
+                        />
+                      </View>
+
+                      {/* Energy chips */}
+                      <View style={{ flexDirection: 'row', gap: 4, flex: 1, justifyContent: 'flex-end' }}>
+                        {[
+                          { key: EnergyType.CREATIVE, emoji: '🎨' },
+                          { key: EnergyType.ANALYTICAL, emoji: '🧠' },
+                          { key: EnergyType.PHYSICAL, emoji: '⚡' },
+                          { key: EnergyType.LEARNING, emoji: '📚' },
+                        ].map((e) => {
+                          const isSel = subtaskEnergy === e.key;
+                          return (
+                            <Pressable
+                              key={e.key}
+                              onPress={() => setSubtaskEnergy(e.key)}
+                              style={{
+                                paddingVertical: 3,
+                                paddingHorizontal: 6,
+                                borderRadius: 6,
+                                backgroundColor: isSel ? '#BF5AF2' : colors.backgroundSelected,
+                              }}
+                            >
+                              <Text style={{ fontSize: 11 }}>{e.emoji}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    {/* Actions: Create Subtask button + Full editor link */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                      <Pressable
+                        onPress={() => handleCreateSubtask(currentRoadmapTask)}
+                        style={{
+                          flex: 1,
+                          backgroundColor: '#BF5AF2',
+                          paddingVertical: 9,
+                          borderRadius: 8,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexDirection: 'row',
+                          gap: 6
+                        }}
+                      >
+                        <Ionicons name="flash" size={14} color="#fff" />
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>
+                          Crear Subtarea
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => {
+                          const pId = currentRoadmapTask.id;
+                          setShowProgressRoadmap(null);
+                          router.push({ pathname: '/editor', params: { parentTaskId: pId } });
+                        }}
+                        style={{
+                          paddingVertical: 9,
+                          paddingHorizontal: 10,
+                          borderRadius: 8,
+                          backgroundColor: colors.backgroundSelected,
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                      </Pressable>
+                    </View>
                   </View>
                 )}
               </View>
@@ -2631,6 +3245,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 14,
   },
+  leftRail: {
+    alignSelf: 'stretch',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginRight: 4,
+    paddingVertical: 1,
+    gap: 6,
+  },
+  activeArrows: {
+    flexDirection: 'column',
+    gap: 4,
+    alignItems: 'center',
+    marginTop: 'auto',
+    marginBottom: 'auto',
+  },
+  activeArrowBtn: {
+    width: 24,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(52,199,89,0.35)',
+    backgroundColor: 'rgba(52,199,89,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   checkboxContainer: {
     padding: 4,
   },
@@ -2657,6 +3297,19 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'column',
     alignItems: 'center',
+  },
+  subtaskToggleBtn: {
+    minWidth: 30,
+    height: 28,
+    paddingHorizontal: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(191, 90, 242, 0.15)',
+    borderWidth: 1,
+    borderColor: '#BF5AF2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 2,
   },
   actionBtn: {
     padding: 8,

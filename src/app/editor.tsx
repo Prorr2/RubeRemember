@@ -27,7 +27,7 @@ import { PressableScale } from '@/components/ui/pressable-scale';
 export default function ItemEditorScreen() {
   const store = useRememberStore();
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string; type?: string; goalId?: string; phaseId?: string }>();
+  const params = useLocalSearchParams<{ id?: string; type?: string; goalId?: string; phaseId?: string; parentTaskId?: string }>();
   
   const colorScheme = useColorScheme();
   const scheme = colorScheme === 'unspecified' || !colorScheme ? 'dark' : colorScheme;
@@ -38,6 +38,7 @@ export default function ItemEditorScreen() {
 
   // Form State
   const [itemType, setItemType] = useState<ItemType>(ItemType.TASK);
+  const [parentTaskId, setParentTaskId] = useState<string>('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [favourite, setFavourite] = useState(false);
@@ -85,6 +86,11 @@ export default function ItemEditorScreen() {
   // Privacy Mode State
   const [isPrivate, setIsPrivate] = useState(false);
 
+  const parentTask = useMemo(() => {
+    if (!parentTaskId) return undefined;
+    return store.items.find((i) => i.id === parentTaskId) as Task | undefined;
+  }, [parentTaskId, store.items]);
+
   // Real-time score calculator for the task being created/edited
   const currentTaskScore = useMemo(() => {
     if (itemType !== ItemType.TASK) return 0;
@@ -110,8 +116,9 @@ export default function ItemEditorScreen() {
       trash: editingTask?.trash || false,
       focusLocked: editingTask?.focusLocked || false,
       taskState: editingTask?.taskState || TaskState.THINKING,
-      goalId: selectedGoalId || undefined,
-      phaseId: selectedPhaseId || undefined,
+      goalId: selectedGoalId || parentTask?.goalId || undefined,
+      phaseId: selectedPhaseId || parentTask?.phaseId || undefined,
+      parentTaskId: parentTaskId || undefined,
       createdAt: editingTask?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       comments: editingTask?.comments || [],
@@ -120,7 +127,7 @@ export default function ItemEditorScreen() {
     };
 
     return ScoreEngine.calculateScore(tempTask, store.hourWeights, store.userSettings?.scoreFormula);
-  }, [itemType, title, description, priority, estimatedHours, taskDueDate, taskStartDate, energyType, selectedGoalId, selectedPhaseId, editingItem, store.hourWeights, store.userSettings?.scoreFormula]);
+  }, [itemType, title, description, priority, estimatedHours, taskDueDate, taskStartDate, energyType, selectedGoalId, selectedPhaseId, parentTaskId, parentTask, editingItem, store.hourWeights, store.userSettings?.scoreFormula]);
 
   // Retrieve the task in the database that has the highest score
   const highestScoreTaskInfo = useMemo(() => {
@@ -206,6 +213,7 @@ export default function ItemEditorScreen() {
         setTaskStartDate(task.startDate || '');
         setTaskDueDate(task.dueDate || '');
         setEnergyType(task.energyType || EnergyType.CREATIVE);
+        setParentTaskId(task.parentTaskId || '');
       } else if (editingItem.type === ItemType.REMINDER) {
         const rem = editingItem as any;
         setAutoArchive(rem.autoArchive !== false);
@@ -258,6 +266,15 @@ export default function ItemEditorScreen() {
       if (params.type) {
         setItemType(params.type as ItemType);
       }
+      if (params.parentTaskId) {
+        setParentTaskId(params.parentTaskId);
+        setItemType(ItemType.TASK);
+        const pTask = store.items.find((i) => i.id === params.parentTaskId) as Task | undefined;
+        if (pTask) {
+          if (pTask.goalId) setSelectedGoalId(pTask.goalId);
+          if (pTask.phaseId) setSelectedPhaseId(pTask.phaseId);
+        }
+      }
       if (params.goalId) {
         setSelectedGoalId(params.goalId);
         setItemType(ItemType.TASK);
@@ -278,7 +295,7 @@ export default function ItemEditorScreen() {
       setPlanEndMonth(today.getMonth() + 1);
       setPlanEndYear(today.getFullYear());
     }
-  }, [editingItem, params.id, params.type, params.goalId, params.phaseId]);
+  }, [editingItem, params.id, params.type, params.goalId, params.phaseId, params.parentTaskId]);
 
   // Load phases when goal changes
   const goalPhases = useMemo(() => {
@@ -395,7 +412,7 @@ export default function ItemEditorScreen() {
         };
 
         if (itemType === ItemType.TASK) {
-          if (!selectedGoalId && !selectedCategoryId) {
+          if (!parentTaskId && !selectedGoalId && !selectedCategoryId) {
             Alert.alert('Asignación Requerida', 'Debes asignar obligatoriamente o bien un Roadmap / Objetivo o una Categoría de Tarea.');
             return;
           }
@@ -405,11 +422,12 @@ export default function ItemEditorScreen() {
             dueDate: taskDueDate || taskStartDate || undefined,
             estimatedHours: hoursNum,
             priority,
-            goalId: selectedGoalId || undefined,
-            phaseId: selectedPhaseId || undefined,
-            categoryId: selectedCategoryId || undefined,
+            goalId: (parentTask?.goalId || selectedGoalId) || undefined,
+            phaseId: (parentTask?.phaseId || selectedPhaseId) || undefined,
+            categoryId: parentTaskId ? undefined : (selectedCategoryId || undefined),
             timeSlotId: selectedSlotId || undefined,
             energyType,
+            parentTaskId: parentTaskId || undefined,
           } as any);
         } else if (itemType === ItemType.REMINDER) {
           const formattedHour = chosenHour.toString().padStart(2, '0');
@@ -455,7 +473,7 @@ export default function ItemEditorScreen() {
       } else {
         // Create new item
         if (itemType === ItemType.TASK) {
-          if (!selectedGoalId && !selectedCategoryId) {
+          if (!parentTaskId && !selectedGoalId && !selectedCategoryId) {
             Alert.alert('Asignación Requerida', 'Debes asignar obligatoriamente o bien un Roadmap / Objetivo o una Categoría de Tarea.');
             return;
           }
@@ -466,12 +484,13 @@ export default function ItemEditorScreen() {
             taskDueDate || taskStartDate || undefined,
             hoursNum,
             priority,
-            selectedGoalId || undefined,
-            selectedPhaseId || undefined,
+            (parentTask?.goalId || selectedGoalId) || undefined,
+            (parentTask?.phaseId || selectedPhaseId) || undefined,
             selectedSlotId || undefined,
             energyType,
             attachedImages,
-            selectedCategoryId || undefined
+            parentTaskId ? undefined : (selectedCategoryId || undefined),
+            parentTaskId || undefined
           );
         } else if (itemType === ItemType.REMINDER) {
           const formattedHour = chosenHour.toString().padStart(2, '0');
@@ -561,7 +580,7 @@ export default function ItemEditorScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScreenHeader
-        title={`${isEditing ? 'Editar' : 'Nuevo'} ${itemType === ItemType.TASK ? 'Tarea' : itemType === ItemType.REMINDER ? 'Alarma' : itemType === ItemType.MEMO ? 'Recordatorio' : itemType === ItemType.PLAN ? 'Plan' : 'Actividad'}`}
+        title={`${isEditing ? 'Editar' : 'Nueva'} ${parentTaskId ? 'Subtarea' : itemType === ItemType.TASK ? 'Tarea' : itemType === ItemType.REMINDER ? 'Alarma' : itemType === ItemType.MEMO ? 'Recordatorio' : itemType === ItemType.PLAN ? 'Plan' : 'Actividad'}`}
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
             {isEditing && (
@@ -582,8 +601,19 @@ export default function ItemEditorScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
       >
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {parentTaskId && (
+            <View style={{ backgroundColor: 'rgba(191, 90, 242, 0.12)', borderColor: 'rgba(191, 90, 242, 0.4)', borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 16 }}>
+              <Text style={{ color: '#BF5AF2', fontWeight: '800', fontSize: 12, textTransform: 'uppercase', marginBottom: 2 }}>
+                ⚡ Subtarea de: {parentTask?.title || 'Tarea Principal'}
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                El Objetivo y la Fase del Roadmap se heredan automáticamente de la tarea principal.
+              </Text>
+            </View>
+          )}
+
           {/* Type Selector (only on create) */}
-          {!isEditing && (
+          {!isEditing && !parentTaskId && (
             <View style={styles.typeContainer}>
               <Pressable
                 onPress={() => setItemType(ItemType.TASK)}
@@ -846,80 +876,95 @@ export default function ItemEditorScreen() {
 
               <View style={[styles.separator, { backgroundColor: colors.backgroundSelected }]} />
 
-              {/* Goal & Phase Pickers */}
-              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Asociar a un Objetivo (Roadmap)</Text>
-              <View style={{ flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                {store.goals.length === 0 ? (
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontStyle: 'italic' }}>
-                    No hay Objetivos creados.
+              {parentTaskId ? (
+                <View style={{ backgroundColor: 'rgba(191, 90, 242, 0.1)', borderColor: 'rgba(191, 90, 242, 0.3)', borderWidth: 1, borderRadius: 10, padding: 12, marginVertical: 6 }}>
+                  <Text style={{ color: '#BF5AF2', fontWeight: '700', fontSize: 13 }}>
+                    🎯 Objetivo heredado: {parentTask?.goalId ? (store.goals.find((g: any) => g.id === parentTask.goalId)?.title || 'Objetivo asignado') : 'Sin objetivo asignado'}
                   </Text>
-                ) : (
-                  <>
-                    {store.goals.filter((g) => g.isMain).map((g) => (
-                      <Pressable
-                        key={g.id}
-                        onPress={() => {
-                          setSelectedGoalId(g.id);
-                          setSelectedPhaseId('');
-                          setSelectedCategoryId('');
-                        }}
-                        style={[
-                          styles.chip,
-                          { backgroundColor: colors.backgroundSelected },
-                          selectedGoalId === g.id && { backgroundColor: themeColor },
-                        ]}
-                      >
-                        <Text style={[styles.chipText, { color: selectedGoalId === g.id ? '#fff' : colors.text }]}>
-                          {g.emoji ? `${g.emoji} ` : '🎯 '}{g.title}
-                        </Text>
-                      </Pressable>
-                    ))}
-                    {store.goals.some((g) => g.isMain) && store.goals.some((g) => !g.isMain) && (
-                      <View style={{ height: 8 }} />
-                    )}
-                    {store.goals.filter((g) => !g.isMain).map((g) => (
-                      <Pressable
-                        key={g.id}
-                        onPress={() => {
-                          setSelectedGoalId(g.id);
-                          setSelectedPhaseId('');
-                          setSelectedCategoryId('');
-                        }}
-                        style={[
-                          styles.chip,
-                          { backgroundColor: colors.backgroundSelected },
-                          selectedGoalId === g.id && { backgroundColor: themeColor },
-                        ]}
-                      >
-                        <Text style={[styles.chipText, { color: selectedGoalId === g.id ? '#fff' : colors.text }]}>
-                          {g.emoji ? `${g.emoji} ` : '🎯 '}{g.title}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </>
-                )}
-              </View>
-
-              {selectedGoalId !== '' && goalPhases.length > 0 && (
+                  {parentTask?.phaseId && (
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
+                      Fase: {store.goals.find((g: any) => g.id === parentTask.goalId)?.phases.find((p: any) => p.id === parentTask.phaseId)?.name || 'Fase asignada'}
+                    </Text>
+                  )}
+                </View>
+              ) : (
                 <>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]}>Fase del Roadmap</Text>
+                  {/* Goal & Phase Pickers */}
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Asociar a un Objetivo (Roadmap)</Text>
                   <View style={{ flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                    {goalPhases.map((p) => (
-                      <Pressable
-                        key={p.id}
-                        onPress={() => setSelectedPhaseId(p.id)}
-                        style={[
-                          styles.chip,
-                          { backgroundColor: colors.backgroundSelected },
-                          selectedPhaseId === p.id && { backgroundColor: themeColor },
-                        ]}
-                      >
-                        <Text style={[styles.chipText, { color: selectedPhaseId === p.id ? '#fff' : colors.text }]}>
-                          Fase {p.order + 1}: {p.name}
-                        </Text>
-                      </Pressable>
-                    ))}
+                    {store.goals.length === 0 ? (
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, fontStyle: 'italic' }}>
+                        No hay Objetivos creados.
+                      </Text>
+                    ) : (
+                      <>
+                        {store.goals.filter((g) => g.isMain).map((g) => (
+                          <Pressable
+                            key={g.id}
+                            onPress={() => {
+                              setSelectedGoalId(g.id);
+                              setSelectedPhaseId('');
+                              setSelectedCategoryId('');
+                            }}
+                            style={[
+                              styles.chip,
+                              { backgroundColor: colors.backgroundSelected },
+                              selectedGoalId === g.id && { backgroundColor: themeColor },
+                            ]}
+                          >
+                            <Text style={[styles.chipText, { color: selectedGoalId === g.id ? '#fff' : colors.text }]}>
+                              {g.emoji ? `${g.emoji} ` : '🎯 '}{g.title}
+                            </Text>
+                          </Pressable>
+                        ))}
+                        {store.goals.some((g) => g.isMain) && store.goals.some((g) => !g.isMain) && (
+                          <View style={{ height: 8 }} />
+                        )}
+                        {store.goals.filter((g) => !g.isMain).map((g) => (
+                          <Pressable
+                            key={g.id}
+                            onPress={() => {
+                              setSelectedGoalId(g.id);
+                              setSelectedPhaseId('');
+                              setSelectedCategoryId('');
+                            }}
+                            style={[
+                              styles.chip,
+                              { backgroundColor: colors.backgroundSelected },
+                              selectedGoalId === g.id && { backgroundColor: themeColor },
+                            ]}
+                          >
+                            <Text style={[styles.chipText, { color: selectedGoalId === g.id ? '#fff' : colors.text }]}>
+                              {g.emoji ? `${g.emoji} ` : '🎯 '}{g.title}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </>
+                    )}
                   </View>
+
+                  {selectedGoalId !== '' && goalPhases.length > 0 && (
+                    <>
+                      <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]}>Fase del Roadmap</Text>
+                      <View style={{ flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                        {goalPhases.map((p) => (
+                          <Pressable
+                            key={p.id}
+                            onPress={() => setSelectedPhaseId(p.id)}
+                            style={[
+                              styles.chip,
+                              { backgroundColor: colors.backgroundSelected },
+                              selectedPhaseId === p.id && { backgroundColor: themeColor },
+                            ]}
+                          >
+                            <Text style={[styles.chipText, { color: selectedPhaseId === p.id ? '#fff' : colors.text }]}>
+                              Fase {p.order + 1}: {p.name}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </>
+                  )}
                 </>
               )}
 

@@ -43,6 +43,7 @@ export interface Task extends BaseItem {
   priority: Priority;
   goalId?: string;
   phaseId?: string;
+  parentTaskId?: string;
   categoryId?: string;
   timeSlotId?: string;
   time?: string; // HH:MM (calculated from slot or custom)
@@ -51,6 +52,7 @@ export interface Task extends BaseItem {
   habitTime?: string; // HH:MM configurable time shown for the habit
   completedDates?: string[]; // YYYY-MM-DD dates array when habit/task was completed
   active?: boolean; // true when the task is marked as Active ("Trabajando en este momento")
+  activeOrder?: number; // orden de preferencia en la sección "Trabajando en este momento" (menor = más arriba)
 
   // Cognitive Engine fields
   executionStrategy?: ExecutionStrategy;

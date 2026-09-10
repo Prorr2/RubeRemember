@@ -87,7 +87,8 @@ interface RememberStore {
     timeSlotId?: string,
     energyType?: EnergyType,
     images?: string[],
-    categoryId?: string
+    categoryId?: string,
+    parentTaskId?: string
   ) => Promise<string>;
   createReminder: (
     title: string,
@@ -122,6 +123,7 @@ interface RememberStore {
   ) => Promise<string>;
   updateItem: (id: string, updates: Partial<Item>) => Promise<void>;
   updateItems: (ids: string[], updates: Partial<Item>) => Promise<void>;
+  updateItemsWithPatches: (patches: Array<{ id: string; updates: Partial<Item> }>) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   restoreItem: (id: string) => Promise<void>;
   archiveItem: (id: string) => Promise<void>;
@@ -789,7 +791,8 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     timeSlotId?: string,
     energyType?: EnergyType,
     images?: string[],
-    categoryId?: string
+    categoryId?: string,
+    parentTaskId?: string
   ) => {
     const cleanTitle = title.trim();
     if (!cleanTitle) return '';
@@ -812,6 +815,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
       priority,
       goalId,
       phaseId,
+      parentTaskId,
       categoryId,
       timeSlotId,
       energyType: energyType || EnergyType.CREATIVE,
@@ -996,6 +1000,29 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
     // If any updated item is a reminder, reschedule alerts
     for (const id of ids) {
       const found = updated.find((i) => i.id === id);
+      if (found && (found.type === ItemType.REMINDER || found.type === ItemType.MEMO)) {
+        await syncCalendarAndAlarms(found);
+      }
+    }
+  }, [items, saveItems, syncCalendarAndAlarms]);
+
+  const updateItemsWithPatches = useCallback(async (patches: Array<{ id: string; updates: Partial<Item> }>) => {
+    const updated = items.map((i) => {
+      const patch = patches.find((p) => p.id === i.id);
+      if (patch) {
+        return {
+          ...i,
+          ...patch.updates,
+          updatedAt: new Date().toISOString(),
+        } as Item;
+      }
+      return i;
+    });
+
+    await saveItems(updated);
+
+    for (const patch of patches) {
+      const found = updated.find((i) => i.id === patch.id);
       if (found && (found.type === ItemType.REMINDER || found.type === ItemType.MEMO)) {
         await syncCalendarAndAlarms(found);
       }
@@ -2550,6 +2577,7 @@ export function RememberStoreProvider({ children }: { children: React.ReactNode 
         createPlan,
         updateItem,
         updateItems,
+        updateItemsWithPatches,
         deleteItem,
         restoreItem,
         archiveItem,

@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import {
   Item,
+  Task,
+  Activity,
   ItemType,
   Priority,
   TaskState,
@@ -8,6 +10,7 @@ import {
   UserSettings,
   HourWeight,
   CustomCategory,
+  TaskCategory,
   Statistics,
   TimeSlot,
   Goal,
@@ -18,9 +21,13 @@ import {
   DEFAULT_USER_SETTINGS,
   DEFAULT_HOUR_WEIGHTS,
   DEFAULT_ACTIVITY_CATEGORIES,
+  DEFAULT_TASK_CATEGORIES,
   DEFAULT_STATISTICS,
   DEFAULT_TIME_SLOTS
 } from './types';
+import { MergeEngine, type MergeResult } from './services/MergeEngine';
+import { ImageStore, isImageId, generateImageId } from './services/ImageStore';
+import { ActivityEngine } from './engines';
 
 export interface DatabaseState {
   version: number;
@@ -32,6 +39,7 @@ export interface DatabaseState {
   userSettings: UserSettings;
   statistics: Statistics;
   activityCategories: CustomCategory[];
+  taskCategories?: TaskCategory[];
   hourWeights: HourWeight[];
   settings?: {
     proximityDays?: number;
@@ -61,11 +69,14 @@ const seedData: DatabaseState = {
       completed: false,
       archived: false,
       trash: false,
+      favourite: false,
+      tags: [],
       taskState: TaskState.IN_PROGRESS,
       priority: Priority.URGENT,
       energyType: EnergyType.CREATIVE,
       estimatedHours: 2,
       focusLocked: true,
+      comments: [],
       createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
       updatedAt: new Date().toISOString()
     },
@@ -77,11 +88,14 @@ const seedData: DatabaseState = {
       completed: false,
       archived: false,
       trash: false,
-      taskState: TaskState.NOT_STARTED,
+      favourite: false,
+      tags: [],
+      taskState: TaskState.THINKING,
       priority: Priority.HIGH,
       energyType: EnergyType.ANALYTICAL,
       estimatedHours: 6,
       focusLocked: true,
+      comments: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     },
@@ -93,11 +107,14 @@ const seedData: DatabaseState = {
       completed: true,
       archived: false,
       trash: false,
+      favourite: false,
+      tags: [],
       taskState: TaskState.COMPLETED,
       priority: Priority.LOW,
       energyType: EnergyType.LEARNING,
       estimatedHours: 0.5,
       focusLocked: false,
+      comments: [],
       createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
       updatedAt: new Date(Date.now() - 3600000 * 23).toISOString()
     },
@@ -112,7 +129,10 @@ const seedData: DatabaseState = {
       completed: false,
       archived: false,
       trash: false,
-      createdAt: new Date().toISOString()
+      favourite: false,
+      tags: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     },
     {
       id: 'rem-1',
@@ -122,12 +142,16 @@ const seedData: DatabaseState = {
       completed: false,
       archived: false,
       trash: false,
-      pinned: true,
+      favourite: false,
+      tags: [],
+      autoArchive: false,
       remindAt: {
+        type: 'DATE_TIME' as any,
         dates: [getLocalDateStr()],
         time: '18:00'
       },
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     },
     {
       id: 'memo-1',
@@ -137,7 +161,11 @@ const seedData: DatabaseState = {
       completed: false,
       archived: false,
       trash: false,
-      createdAt: new Date().toISOString()
+      favourite: false,
+      tags: [],
+      hasAlarm: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     },
     {
       id: 'plan-1',
@@ -151,7 +179,10 @@ const seedData: DatabaseState = {
       completed: false,
       archived: false,
       trash: false,
-      createdAt: new Date().toISOString()
+      favourite: false,
+      tags: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }
   ],
   goals: [],
@@ -161,18 +192,21 @@ const seedData: DatabaseState = {
     {
       id: 'session-prev-1',
       taskId: 'task-1',
+      startTime: new Date(Date.now() - 3600000 * 2).toISOString(),
       plannedDuration: 30,
       realDuration: 30,
       completed: true,
       notes: 'Estructura inicial React creada.',
       nextStep: 'Añadir Componentes y lógica TS.',
       progress: 50,
-      endTime: new Date(Date.now() - 3600000 * 2).toISOString()
+      endTime: new Date(Date.now() - 3600000 * 2).toISOString(),
+      createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
     }
   ],
   userSettings: DEFAULT_USER_SETTINGS,
   statistics: DEFAULT_STATISTICS,
   activityCategories: DEFAULT_ACTIVITY_CATEGORIES,
+  taskCategories: DEFAULT_TASK_CATEGORIES,
   hourWeights: DEFAULT_HOUR_WEIGHTS,
   settings: {
     proximityDays: 20,
@@ -399,6 +433,8 @@ export const rememberStore = {
     taskState?: TaskState;
     goalId?: string;
     phaseId?: string;
+    parentTaskId?: string;
+    categoryId?: string;
     timeSlotId?: string;
     favourite?: boolean;
     tags?: string[];
@@ -420,6 +456,8 @@ export const rememberStore = {
       updatedAt: new Date().toISOString(),
       goalId: data.goalId || undefined,
       phaseId: data.phaseId || undefined,
+      parentTaskId: data.parentTaskId || undefined,
+      categoryId: data.categoryId || undefined,
       timeSlotId: data.timeSlotId || undefined,
       favourite: data.favourite || false,
       tags: data.tags || [],
@@ -444,9 +482,10 @@ export const rememberStore = {
       completed: false,
       archived: false,
       trash: false,
-      createdAt: new Date().toISOString(),
       favourite: data.favourite || false,
-      tags: data.tags || []
+      tags: data.tags || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
     saveState({
       ...storeState,
@@ -464,14 +503,16 @@ export const rememberStore = {
       completed: false,
       archived: false,
       trash: false,
-      pinned: false,
+      favourite: data.favourite || false,
+      tags: data.tags || [],
+      autoArchive: false,
       remindAt: {
+        type: 'DATE_TIME' as any,
         dates: [data.date || getLocalDateStr()],
         time: data.time || '12:00'
       },
       createdAt: new Date().toISOString(),
-      favourite: data.favourite || false,
-      tags: data.tags || []
+      updatedAt: new Date().toISOString()
     };
     saveState({
       ...storeState,
@@ -489,11 +530,13 @@ export const rememberStore = {
       completed: false,
       archived: false,
       trash: false,
+      favourite: data.favourite || false,
+      tags: data.tags || [],
+      hasAlarm: false,
       startDate: data.startDate || getLocalDateStr(),
       endDate: data.endDate || getLocalDateStr(),
       createdAt: new Date().toISOString(),
-      favourite: data.favourite || false,
-      tags: data.tags || []
+      updatedAt: new Date().toISOString()
     };
     saveState({
       ...storeState,
@@ -515,9 +558,10 @@ export const rememberStore = {
       completed: false,
       archived: false,
       trash: false,
-      createdAt: new Date().toISOString(),
       favourite: data.favourite || false,
-      tags: data.tags || []
+      tags: data.tags || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
     saveState({
       ...storeState,
@@ -583,6 +627,107 @@ export const rememberStore = {
     this.updateItem(id, { trash: false });
   },
 
+  deleteCompleted() {
+    const now = new Date().toISOString();
+    saveState({
+      ...storeState,
+      items: storeState.items.map(item => {
+        if (item.completed && !item.trash) {
+          return { ...item, trash: true, updatedAt: now };
+        }
+        return item;
+      })
+    });
+  },
+
+  updateItems(ids: string[], updates: Partial<Item>) {
+    const idSet = new Set(ids);
+    const now = new Date().toISOString();
+    saveState({
+      ...storeState,
+      items: storeState.items.map(item => {
+        if (idSet.has(item.id)) {
+          return { ...item, ...updates, updatedAt: now } as Item;
+        }
+        return item;
+      })
+    });
+  },
+
+  convertItem(id: string, targetType: ItemType) {
+    const found = storeState.items.find(i => i.id === id);
+    if (!found || found.type === targetType) return;
+
+    const common = {
+      id: found.id,
+      title: found.title,
+      description: found.description || '',
+      createdAt: found.createdAt,
+      updatedAt: new Date().toISOString(),
+      archived: found.archived || false,
+      favourite: found.favourite || false,
+      tags: found.tags || [],
+      trash: found.trash || false,
+    };
+
+    let converted: Item;
+    if (targetType === ItemType.TASK) {
+      converted = {
+        ...common,
+        type: ItemType.TASK,
+        completed: false,
+        priority: Priority.MEDIUM,
+        taskState: TaskState.NOT_STARTED,
+        energyType: EnergyType.ANALYTICAL,
+        estimatedHours: 1,
+        focusLocked: false,
+        comments: []
+      };
+    } else if (targetType === ItemType.MEMO) {
+      converted = {
+        ...common,
+        type: ItemType.MEMO,
+        completed: false,
+        hasAlarm: false,
+        startDate: getLocalDateStr(),
+        endDate: getLocalDateStr(),
+      };
+    } else if (targetType === ItemType.REMINDER) {
+      converted = {
+        ...common,
+        type: ItemType.REMINDER,
+        completed: false,
+        pinned: false,
+        remindAt: {
+          dates: [getLocalDateStr()],
+          time: '09:00'
+        }
+      };
+    } else if (targetType === ItemType.PLAN) {
+      const now = new Date();
+      converted = {
+        ...common,
+        type: ItemType.PLAN,
+        completed: false,
+        startMonth: now.getMonth() + 1,
+        startYear: now.getFullYear(),
+        endMonth: now.getMonth() + 1,
+        endYear: now.getFullYear(),
+      };
+    } else {
+      converted = {
+        ...common,
+        type: ItemType.ACTIVITY,
+        category: 'OTHER',
+        suggestedCount: 1,
+        doneCount: 0,
+      };
+    }
+
+    const updated = storeState.items.map(i => (i.id === id ? converted : i));
+    saveState({ ...storeState, items: updated });
+  },
+
   archiveItem(id: string) {
     this.updateItem(id, { archived: true });
   },
@@ -622,6 +767,13 @@ export const rememberStore = {
         return item;
       })
     });
+  },
+
+  getSuggestedActivities(currentDate: Date = new Date()): Activity[] {
+    const activities = (storeState.items.filter(
+      i => i.type === ItemType.ACTIVITY && !i.trash && !i.archived
+    ) as Activity[]);
+    return ActivityEngine.suggestActivities(activities, undefined, currentDate);
   },
 
   deleteItemPermanently(id: string) {
@@ -739,11 +891,14 @@ export const rememberStore = {
     }
 
     // Recalculate Streak
-    const nextStats = {
+    const nextStats: Statistics = {
       ...storeState.statistics,
       totalWorkedTime: (storeState.statistics.totalWorkedTime || 0) + realDuration,
       totalSessions: (storeState.statistics.totalSessions || 0) + 1,
-      completedSessions: completed ? (storeState.statistics.completedSessions || 0) + 1 : (storeState.statistics.completedSessions || 0)
+      completedTasks: completed ? (storeState.statistics.completedTasks || 0) + 1 : (storeState.statistics.completedTasks || 0),
+      focusTasksCompleted: completed ? (storeState.statistics.focusTasksCompleted || 0) + 1 : (storeState.statistics.focusTasksCompleted || 0),
+      averageSessionTime: 0,
+      averageDailyWork: 0
     };
 
     const dailyMinutes: Record<string, number> = {};
@@ -905,6 +1060,13 @@ export const rememberStore = {
     });
   },
 
+  toggleGoalMain(id: string) {
+    saveState({
+      ...storeState,
+      goals: (storeState.goals || []).map(g => (g.id === id ? { ...g, isMain: !g.isMain, updatedAt: new Date().toISOString() } : g))
+    });
+  },
+
   addPhase(goalId: string, name: string, description = '') {
     const newPhase: Phase = {
       id: 'phase-' + Math.random().toString(36).substring(2, 9),
@@ -1023,10 +1185,10 @@ export const rememberStore = {
       if (l.id === listId) {
         const newItem = {
           id: newItemId,
-          text: text.trim(),
+          text: (text || '').trim(),
           title: title?.trim() || undefined,
           imageUri,
-          images,
+          images: images || [],
         };
         return { ...l, items: [...(l.items || []), newItem] };
       }
@@ -1044,7 +1206,7 @@ export const rememberStore = {
       if (l.id === listId) {
         const updatedItems = (l.items || []).map((it: any) => {
           if (it.id === itemId) {
-            return { ...it, text: text.trim(), title: title?.trim() || undefined, imageUri, images };
+            return { ...it, text: (text || '').trim(), title: title?.trim() || undefined, imageUri, images: images || it.images };
           }
           return it;
         });
@@ -1125,14 +1287,253 @@ export const rememberStore = {
     });
   },
 
-  // --- BACKUP ---
+  setProximityDays(n: number) {
+    saveState({
+      ...storeState,
+      settings: { ...storeState.settings, proximityDays: n }
+    });
+  },
 
-  importBackupData(jsonString: string): { success: boolean; errors: string[] } {
+  // --- CATEGORIES & WEIGHTS ---
+
+  addActivityCategory(cat: CustomCategory) {
+    if ((storeState.activityCategories || []).some(c => c.id === cat.id)) return;
+    saveState({
+      ...storeState,
+      activityCategories: [...(storeState.activityCategories || []), cat]
+    });
+  },
+
+  updateActivityCategory(id: string, data: Partial<CustomCategory>) {
+    saveState({
+      ...storeState,
+      activityCategories: (storeState.activityCategories || []).map(c => c.id === id ? { ...c, ...data } : c)
+    });
+  },
+
+  deleteActivityCategory(id: string) {
+    saveState({
+      ...storeState,
+      activityCategories: (storeState.activityCategories || []).filter(c => c.id !== id)
+    });
+  },
+
+  addTaskCategory(cat: TaskCategory) {
+    const current = storeState.taskCategories || DEFAULT_TASK_CATEGORIES;
+    if (current.some(c => c.id === cat.id)) return;
+    saveState({
+      ...storeState,
+      taskCategories: [...current, cat]
+    });
+  },
+
+  updateTaskCategory(id: string, data: Partial<TaskCategory>) {
+    const current = storeState.taskCategories || DEFAULT_TASK_CATEGORIES;
+    saveState({
+      ...storeState,
+      taskCategories: current.map(c => c.id === id ? { ...c, ...data } : c)
+    });
+  },
+
+  deleteTaskCategory(id: string) {
+    const current = storeState.taskCategories || DEFAULT_TASK_CATEGORIES;
+    saveState({
+      ...storeState,
+      taskCategories: current.filter(c => c.id !== id)
+    });
+  },
+
+  addHourWeight(hw: HourWeight) {
+    if ((storeState.hourWeights || []).some(h => h.id === hw.id)) return;
+    saveState({
+      ...storeState,
+      hourWeights: [...(storeState.hourWeights || []), hw]
+    });
+  },
+
+  updateHourWeight(id: string, data: Partial<HourWeight>) {
+    saveState({
+      ...storeState,
+      hourWeights: (storeState.hourWeights || []).map(h => h.id === id ? { ...h, ...data } : h)
+    });
+  },
+
+  deleteHourWeight(id: string) {
+    saveState({
+      ...storeState,
+      hourWeights: (storeState.hourWeights || []).filter(h => h.id !== id)
+    });
+  },
+
+  // --- STATS & RECOMMENDATIONS ---
+
+  updateStatistics(partial: Partial<Statistics>) {
+    saveState({
+      ...storeState,
+      statistics: { ...storeState.statistics, ...partial }
+    });
+  },
+
+  saveRecommendations(recs: Recommendation[]) {
+    saveState({
+      ...storeState,
+      recommendations: recs
+    });
+  },
+
+  flushPendingSave() {
+    // localStorage escribe de forma síncrona; se mantiene por compatibilidad
+  },
+
+  // --- BACKUP & SYNC ---
+
+  exportBackupData(): string {
+    const current = storeState;
+    const sanitizedUserSettings = {
+      ...current.userSettings,
+      dropboxAccessToken: '',
+      dropboxRefreshToken: '',
+      dropboxAppKey: '',
+      dropboxAppSecret: '',
+      dropboxTokenFetchedTimestamp: 0,
+    };
+    const exportDb = {
+      ...current,
+      userSettings: sanitizedUserSettings
+    };
+    return JSON.stringify(exportDb, null, 2);
+  },
+
+  async exportBackupDataSplit(): Promise<{ text: string; images: Record<string, string> }> {
+    const images: Record<string, string> = {};
+
+    const processImageRef = async (ref: string): Promise<string> => {
+      if (!ref) return ref;
+      if (ref.startsWith('data:image/')) {
+        const id = generateImageId();
+        images[id] = ref;
+        await ImageStore.saveImage(ref, id);
+        return id;
+      }
+      if (isImageId(ref)) {
+        const stored = await ImageStore.getImage(ref);
+        if (stored) {
+          images[ref] = stored;
+        }
+        return ref;
+      }
+      return ref;
+    };
+
+    const splitItems: Item[] = [];
+    for (const item of storeState.items) {
+      if (item.type === ItemType.TASK) {
+        const task = { ...(item as Task) };
+        if (task.images && task.images.length > 0) {
+          const newImgs: string[] = [];
+          for (const img of task.images) {
+            newImgs.push(await processImageRef(img));
+          }
+          task.images = newImgs;
+        }
+        if (task.comments && task.comments.length > 0) {
+          const newCmts: Comment[] = [];
+          for (const c of task.comments) {
+            const commentCopy = { ...c };
+            if (commentCopy.images && commentCopy.images.length > 0) {
+              const cImgs: string[] = [];
+              for (const ci of commentCopy.images) {
+                cImgs.push(await processImageRef(ci));
+              }
+              commentCopy.images = cImgs;
+            }
+            newCmts.push(commentCopy);
+          }
+          task.comments = newCmts;
+        }
+        splitItems.push(task);
+      } else {
+        splitItems.push({ ...item });
+      }
+    }
+
+    const splitLists: any[] = [];
+    for (const list of (storeState.lists || [])) {
+      const listCopy = { ...list };
+      if (listCopy.items && listCopy.items.length > 0) {
+        const newItems: any[] = [];
+        for (const it of listCopy.items) {
+          const itCopy = { ...it };
+          if (itCopy.images && itCopy.images.length > 0) {
+            const lImgs: string[] = [];
+            for (const li of itCopy.images) {
+              lImgs.push(await processImageRef(li));
+            }
+            itCopy.images = lImgs;
+          }
+          if (itCopy.imageUri) {
+            itCopy.imageUri = await processImageRef(itCopy.imageUri);
+          }
+          newItems.push(itCopy);
+        }
+        listCopy.items = newItems;
+      }
+      splitLists.push(listCopy);
+    }
+
+    const splitSessions: Session[] = [];
+    for (const sess of (storeState.sessions || [])) {
+      const sessCopy = { ...sess };
+      if (sessCopy.notesImages && sessCopy.notesImages.length > 0) {
+        const nImgs: string[] = [];
+        for (const ni of sessCopy.notesImages) {
+          nImgs.push(await processImageRef(ni));
+        }
+        sessCopy.notesImages = nImgs;
+      }
+      if (sessCopy.nextStepImages && sessCopy.nextStepImages.length > 0) {
+        const sImgs: string[] = [];
+        for (const si of sessCopy.nextStepImages) {
+          sImgs.push(await processImageRef(si));
+        }
+        sessCopy.nextStepImages = sImgs;
+      }
+      splitSessions.push(sessCopy);
+    }
+
+    const sanitizedUserSettings = {
+      ...storeState.userSettings,
+      dropboxAccessToken: '',
+      dropboxRefreshToken: '',
+      dropboxAppKey: '',
+      dropboxAppSecret: '',
+      dropboxTokenFetchedTimestamp: 0,
+    };
+
+    const textDb: DatabaseState = {
+      ...storeState,
+      items: splitItems,
+      lists: splitLists,
+      sessions: splitSessions,
+      userSettings: sanitizedUserSettings
+    };
+
+    return {
+      text: JSON.stringify(textDb, null, 2),
+      images
+    };
+  },
+
+  importBackupData(jsonString: string, imageBundle?: Record<string, string>): { success: boolean; errors: string[] } {
     try {
+      if (imageBundle && Object.keys(imageBundle).length > 0) {
+        ImageStore.saveImageBundle(imageBundle);
+      }
+
       const parsed = JSON.parse(jsonString);
       if (parsed && typeof parsed === 'object') {
         if (parsed.version && parsed.items && Array.isArray(parsed.items)) {
-          const merged = {
+          const merged: DatabaseState = {
             version: parsed.version,
             items: parsed.items || [],
             goals: parsed.goals || [],
@@ -1142,6 +1543,7 @@ export const rememberStore = {
             userSettings: parsed.userSettings || DEFAULT_USER_SETTINGS,
             statistics: parsed.statistics || DEFAULT_STATISTICS,
             activityCategories: parsed.activityCategories || DEFAULT_ACTIVITY_CATEGORIES,
+            taskCategories: parsed.taskCategories || DEFAULT_TASK_CATEGORIES,
             hourWeights: parsed.hourWeights || DEFAULT_HOUR_WEIGHTS,
             settings: parsed.settings || { proximityDays: 20, slotSeparationMinutes: 30 },
             recommendations: parsed.recommendations || []
@@ -1155,6 +1557,23 @@ export const rememberStore = {
     } catch (e: any) {
       return { success: false, errors: ['Error al analizar el JSON: ' + e.message] };
     }
+  },
+
+  mergeWithRemote(remoteDb: DatabaseState, options?: { force?: boolean }): MergeResult {
+    const res = MergeEngine.mergeDatabases(storeState, remoteDb, options);
+    if (res.success && res.merged) {
+      saveState(res.merged);
+    }
+    return res;
+  },
+
+  restorePreMergeBackup(): boolean {
+    const restored = MergeEngine.restorePreMergeBackup();
+    if (restored) {
+      saveState(restored);
+      return true;
+    }
+    return false;
   },
 
   setFullDatabase(newState: any) {

@@ -1,9 +1,10 @@
 import type { Plugin } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'http';
 import os from 'os';
-// @ts-ignore
-import qrcode from 'qrcode-terminal';
+import { createRequire } from 'module';
 
+const require = createRequire(import.meta.url);
+let currentPort = 3005;
 
 interface SyncPayload {
   data: any;
@@ -14,6 +15,7 @@ let receivedData: SyncPayload | null = null;
 let outgoingData: SyncPayload | null = null;
 let lastSeenMobile = 0;
 let pendingRequest = false;
+let lastMergeStatus: any = null;
 
 const MOBILE_TTL_MS = 15 * 1000; // 15 seconds visibility window
 
@@ -53,7 +55,10 @@ function isMobileApiRequest(url: string, method: string): boolean {
     (url === '/api/disconnect' && method === 'POST') ||
     (url === '/api/request' && method === 'GET') ||
     (url === '/api/backup' && method === 'POST') ||
-    (url === '/api/outgoing' && method === 'GET')
+    (url === '/api/outgoing' && method === 'GET') ||
+    (url === '/api/merge' && method === 'POST') ||
+    (url === '/api/merge/status' && method === 'GET') ||
+    (url === '/api/health' && method === 'GET')
   );
 }
 
@@ -77,12 +82,28 @@ function apiMiddleware(req: IncomingMessage, res: ServerResponse): Promise<void>
   // Health check: returns if mobile is active, if data is pending, etc.
   if (url === '/api/health' && method === 'GET') {
     const mobileConnected = Date.now() - lastSeenMobile < MOBILE_TTL_MS;
+    const hostHeader = req.headers.host || '';
+    const portFromHeader = hostHeader.includes(':') ? parseInt(hostHeader.split(':')[1], 10) : currentPort;
+    const port = portFromHeader || currentPort || 3005;
+
+    const detectedIps = getNetworkIps();
+    const networkIps = detectedIps.length > 0 ? detectedIps : ['127.0.0.1'];
+    const qrCodes = networkIps.map((ip) => {
+      const qrUrl = `http://${ip}:${port}`;
+      return {
+        ip,
+        url: qrUrl,
+        svg: generateQrSvg(qrUrl),
+      };
+    });
+
     return Promise.resolve(
       sendJson(res, 200, {
         ok: true,
         received: !!receivedData,
         outgoing: !!outgoingData,
         mobileConnected,
+        qrCodes,
       })
     );
   }
@@ -146,6 +167,32 @@ function apiMiddleware(req: IncomingMessage, res: ServerResponse): Promise<void>
       .catch(() => sendJson(res, 500, { ok: false, error: 'Error al leer el cuerpo' }));
   }
 
+  // Mobile or Web submits data for intelligent merge
+  if (url === '/api/merge' && method === 'POST') {
+    touchMobile();
+    return readBody(req)
+      .then((body) => {
+        try {
+          const remoteData = JSON.parse(body);
+          receivedData = { data: remoteData, at: new Date().toISOString() };
+          lastMergeStatus = {
+            at: new Date().toISOString(),
+            status: 'received_for_merge',
+            itemCount: remoteData.items ? remoteData.items.length : 0
+          };
+          return sendJson(res, 200, { ok: true, message: 'Datos recibidos para fusión inteligente (merge)', timestamp: Date.now() });
+        } catch (e: any) {
+          return sendJson(res, 400, { ok: false, error: 'JSON no válido: ' + e.message });
+        }
+      })
+      .catch(() => sendJson(res, 500, { ok: false, error: 'Error al leer el cuerpo' }));
+  }
+
+  // Query status of last merge operation
+  if (url === '/api/merge/status' && method === 'GET') {
+    return Promise.resolve(sendJson(res, 200, { ok: true, status: lastMergeStatus }));
+  }
+
   // Web pulls mobile database
   if (url === '/api/backup/latest' && method === 'GET') {
     const payload = receivedData;
@@ -160,9 +207,19 @@ function apiMiddleware(req: IncomingMessage, res: ServerResponse): Promise<void>
     return readBody(req)
       .then((body) => {
         try {
-          outgoingData = { data: JSON.parse(body), at: new Date().toISOString() };
-        } catch (e) {
-          return sendJson(res, 400, { ok: false, error: 'JSON no válido' });
+          const parsed = JSON.parse(body);
+          // Zero-task safety protection: prevent sending an empty database to mobile
+          const tasks = (parsed.items || []).filter((i: any) => i.type === 'TASK' && !i.trash);
+          if (tasks.length === 0 && (!parsed.items || parsed.items.length === 0)) {
+            console.warn('⚠️ [Sincronización - ZERO-TASK SAFETY]: Se bloqueó el envío de una base de datos vacía o con 0 tareas hacia el móvil para evitar pérdidas de datos.');
+            return sendJson(res, 400, {
+              ok: false,
+              error: 'Zero-task safety: No se permite enviar una base de datos vacía o sin tareas activas al móvil para protegerlo contra pérdidas accidentales.'
+            });
+          }
+          outgoingData = { data: parsed, at: new Date().toISOString() };
+        } catch (e: any) {
+          return sendJson(res, 400, { ok: false, error: 'JSON no válido: ' + e.message });
         }
         return sendJson(res, 200, { ok: true });
       })
@@ -182,11 +239,7 @@ function apiMiddleware(req: IncomingMessage, res: ServerResponse): Promise<void>
   return undefined;
 }
 
-function printQrCodes(server: any) {
-  const address = server.httpServer?.address();
-  if (!address || typeof address !== 'object') return;
-  const port = address.port;
-
+function getNetworkIps(): string[] {
   const interfaces = os.networkInterfaces();
   const networkIps: string[] = [];
   for (const name of Object.keys(interfaces)) {
@@ -196,14 +249,56 @@ function printQrCodes(server: any) {
       }
     }
   }
+  return networkIps;
+}
 
-  if (networkIps.length === 0) return;
+function generateQrSvg(text: string): string {
+  try {
+    const QRCode = require('qrcode-terminal/vendor/QRCode');
+    const QRErrorCorrectLevel = require('qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel');
+    const qr = new QRCode(-1, QRErrorCorrectLevel.L);
+    qr.addData(text);
+    qr.make();
+    const count = qr.getModuleCount();
+    let rects = '';
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (qr.isDark(r, c)) {
+          rects += `<rect x="${c}" y="${r}" width="1" height="1" fill="#000000" />`;
+        }
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 ${count + 4} ${count + 4}" width="160" height="160" style="background: #ffffff; border-radius: 8px; padding: 6px; display: block;">${rects}</svg>`;
+  } catch (e) {
+    return '';
+  }
+}
+
+function printQrCodes(server: any) {
+  const address = server.httpServer?.address();
+  let port = currentPort;
+  if (address && typeof address === 'object' && address.port) {
+    port = address.port;
+    currentPort = port;
+  }
+
+  const detectedIps = getNetworkIps();
+  const networkIps = detectedIps.length > 0 ? detectedIps : ['127.0.0.1'];
+
+  let qrcode: any = null;
+  try {
+    qrcode = require('qrcode-terminal');
+  } catch (e) {
+    console.error('⚠️ [Sync QR] Error al cargar qrcode-terminal:', e);
+  }
 
   console.log('\n  ➜  Escanea el código QR para conectar el móvil (Sincronización Local):');
   for (const ip of networkIps) {
     const url = `http://${ip}:${port}`;
     console.log(`\n     Red: ${url}`);
-    qrcode.generate(url, { small: true });
+    if (qrcode && typeof qrcode.generate === 'function') {
+      qrcode.generate(url, { small: true });
+    }
   }
   console.log('');
 }

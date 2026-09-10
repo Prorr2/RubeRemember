@@ -1,4 +1,4 @@
-import { Task, EnergyType, UserSettings, HourWeight, Item, ItemType, Priority, TaskState, TimeSlot, Session, Recommendation } from './types';
+import { Task, Activity, EnergyType, UserSettings, HourWeight, Item, ItemType, Priority, TaskState, TimeSlot, Session, Recommendation } from './types';
 
 export function getTaskWeightLabel(estimatedHours: number | undefined, hourWeights: HourWeight[]): string {
   if (estimatedHours === undefined || estimatedHours === null || estimatedHours <= 0) {
@@ -566,4 +566,66 @@ export const CognitiveEngine = {
 
     return { recommendation: rec, updatedFocusTasks };
   }
+};
+
+export interface ActivityEngineSettings {
+  recentDaysLimit?: number;
+}
+
+export const ActivityEngine = {
+  suggestActivities(
+    activities: Activity[],
+    settings?: ActivityEngineSettings,
+    currentDate: Date = new Date()
+  ): Activity[] {
+    const recentDaysLimit = settings?.recentDaysLimit ?? 3;
+    const nowMs = currentDate.getTime();
+
+    // 1. Discard archived and trash activities
+    const activeActivities = activities.filter((a) => !a.archived && !a.trash);
+
+    // 2. Discard recently done activities (within recentDaysLimit)
+    const filtered = activeActivities.filter((activity) => {
+      if (!activity.lastDoneAt) return true;
+      const lastDoneMs = new Date(activity.lastDoneAt).getTime();
+      const daysSinceLastDone = (nowMs - lastDoneMs) / (1000 * 60 * 60 * 24);
+      return daysSinceLastDone > recentDaysLimit;
+    });
+
+    // 3. Score activities
+    const scored = filtered.map((activity) => {
+      let score = 0;
+
+      // Favor favorites
+      if (activity.favourite) {
+        score += 10;
+      }
+
+      // Favor never done
+      if (!activity.lastDoneAt || activity.doneCount === 0) {
+        score += 20;
+      } else {
+        // Favor months without doing it
+        const lastDoneMs = new Date(activity.lastDoneAt).getTime();
+        const daysSinceLastDone = (nowMs - lastDoneMs) / (1000 * 60 * 60 * 24);
+        if (daysSinceLastDone > 30) {
+          // Increase score based on time elapsed, capped
+          score += Math.min(15, Math.floor(daysSinceLastDone / 30) * 5);
+        }
+      }
+
+      // Add slight randomization
+      const randomFactor = Math.random() * 10 - 5;
+      score += randomFactor;
+
+      return { activity, score };
+    });
+
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+
+    // Return between 5 and 8 items (or all available if fewer)
+    const count = Math.min(8, Math.max(5, scored.length));
+    return scored.slice(0, count).map((s) => s.activity);
+  },
 };
