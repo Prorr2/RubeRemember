@@ -2248,7 +2248,11 @@ export default function DecisionCenterScreen() {
                 {(() => {
                   const taskSessions = store.sessions
                     .filter(s => String(s.taskId) === String(showProgressRoadmap.id))
-                    .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+                    .sort((a, b) => {
+                      const ta = new Date(a.endTime || a.startTime || a.createdAt || 0).getTime();
+                      const tb = new Date(b.endTime || b.startTime || b.createdAt || 0).getTime();
+                      return tb - ta;
+                    });
 
                   if (taskSessions.length === 0) {
                     return (

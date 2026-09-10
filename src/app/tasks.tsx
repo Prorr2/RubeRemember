@@ -184,7 +184,11 @@ const TaskRoadmap: React.FC<TaskRoadmapProps> = ({ task, colors, store, handleAd
 
   const taskSessions = store.sessions
     .filter((s: any) => String(s.taskId) === String(currentTask.id))
-    .sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+    .sort((a: any, b: any) => {
+      const ta = new Date(a.endTime || a.startTime || a.createdAt || 0).getTime();
+      const tb = new Date(b.endTime || b.startTime || b.createdAt || 0).getTime();
+      return tb - ta;
+    });
 
   return (
     <View style={{ width: '100%' }}>

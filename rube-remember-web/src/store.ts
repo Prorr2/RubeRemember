@@ -800,6 +800,8 @@ export const rememberStore = {
     const newSession: Session = {
       id: 'session-' + Math.random().toString(36).substring(2, 9),
       taskId,
+      startTime: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       plannedDuration,
       realDuration: 0,
       completed: false,
